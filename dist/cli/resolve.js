@@ -901,6 +901,12 @@ function renderItem(label, item, extra = []) {
   if (item.collapsed_duplicates && item.collapsed_duplicates > 0) {
     metaParts.push(`+${item.collapsed_duplicates} corroborating`);
   }
+  if (item.verification) {
+    const v = item.verification;
+    metaParts.push(
+      `verified: ${v.verdict} (${v.observed_at.slice(0, 10)}${v.count > 1 ? `, ${v.count} checks` : ""})`
+    );
+  }
   if (item.component_name) metaParts.push(`component: ${item.component_name}`);
   lines.push(`## ${label}: ${item.title} (${metaParts.join(", ")})`);
   lines.push(`# source: ${formatCitation(item)}`);
@@ -949,9 +955,10 @@ function bundleSummary(r) {
 function renderItemXml(tagName, item, attributes = {}) {
   const attrs = Object.entries(attributes).map(([k, v]) => ` ${k}="${v}"`).join("");
   const corroborating = item.collapsed_duplicates && item.collapsed_duplicates > 0 ? ` corroborating="${item.collapsed_duplicates}"` : "";
+  const verified = item.verification ? ` verified="${item.verification.verdict}" verified_at="${item.verification.observed_at}"` : "";
   const lines = [];
   lines.push(
-    `<${tagName}${attrs} title="${item.title}" similarity="${item.similarity.toFixed(2)}"${corroborating}>`
+    `<${tagName}${attrs} title="${item.title}" similarity="${item.similarity.toFixed(2)}"${corroborating}${verified}>`
   );
   lines.push(
     `  <citation path="${item.citation.path ?? "(no path)"}" version="v${item.citation.version_number}" updated="${item.citation.updated_at}" />`
