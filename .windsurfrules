@@ -1,0 +1,28 @@
+# Memlin
+
+This workspace is connected to a Memlin workspace. The `memlin` MCP server
+exposes the team's shared memory, skills, approved goals, and schemas through
+tools such as `memlin_resolve_task`, `memlin_search`, `memlin_read_memory`, and
+`memlin_get_document`.
+
+Before non-trivial work, call `memlin_resolve_task` with a short description of
+the task. Use the returned bundle as authoritative project context: apply the
+primary skill first, treat memory facts as project ground truth, honor approved
+goals as constraints, and validate against schemas.
+
+At session start, check for assigned handoffs with `memlin_list_handoffs`
+(target_agent_kind `windsurf`). If a handoff exists, read its
+`packet_markdown`, call `memlin_update_handoff` with action `accept`, and use
+the packet as the task brief. Mark it `complete` when finished.
+
+If the user asks to sync, sign in, query the workspace, or check Memlin status,
+use the `memlin` CLI in the terminal:
+
+- `memlin login` — OAuth device-flow sign-in
+- `memlin status` — auth, bound account + project, sync state
+- `memlin sync` — bidirectional memory/skill sync
+- `memlin ask "<question>"` — natural-language query with citations
+- `memlin scribe` — extract decisions/memories from the session
+- `memlin inbox` — review scribe proposals
+
+Cite Memlin sources by path and version when using resolved context.

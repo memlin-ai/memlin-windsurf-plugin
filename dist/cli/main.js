@@ -1,0 +1,63 @@
+#!/usr/bin/env node
+const RUN = {
+  login: () => import("./login.js"),
+  init: () => import("./init.js"),
+  status: () => import("./status.js"),
+  doctor: () => import("./doctor.js"),
+  sync: () => import("./sync.js"),
+  pull: () => import("./pull.js"),
+  push: () => import("./push.js"),
+  "pull-plans": () => import("./pull-plans.js"),
+  "push-plan": () => import("./push-plan.js"),
+  "bind-plans": () => import("./bind-plans.js"),
+  resolve: () => import("./resolve.js"),
+  ask: () => import("./ask.js"),
+  scribe: () => import("./scribe.js"),
+  inbox: () => import("./inbox.js"),
+  handoffs: () => import("./handoffs.js"),
+  link: () => import("./link.js"),
+  revert: () => import("./revert.js"),
+  pin: () => import("./pin.js"),
+  "add-project": () => import("./add-project.js"),
+  "audit-replay": () => import("./audit-replay.js"),
+  "audit-explain": () => import("./audit-explain.js"),
+  "actions-list": () => import("./actions-list.js"),
+  "actions-execute": () => import("./actions-execute.js"),
+  "prompt-ci": () => import("./prompt-ci.js"),
+  scan: () => import("./scan.js")
+};
+async function main() {
+  let sub = process.argv[2];
+  if (sub === "audit") {
+    const action = process.argv[3];
+    if (action === "explain" || action === "replay") {
+      sub = `audit-${action}`;
+      process.argv.splice(3, 1);
+    }
+  }
+  if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
+    process.stdout.write(
+      `memlin \u2014 Memlin CLI
+
+Usage: memlin <command> [args]
+
+Commands:
+  ${Object.keys(RUN).join(", ")}
+`
+    );
+    process.exit(sub ? 0 : 1);
+  }
+  const run = RUN[sub];
+  if (!run) {
+    process.stderr.write(`memlin: unknown command '${sub}'. Run 'memlin --help' for the list.
+`);
+    process.exit(1);
+  }
+  process.argv.splice(2, 1);
+  await run();
+}
+main().catch((err) => {
+  process.stderr.write(`memlin: ${err instanceof Error ? err.message : String(err)}
+`);
+  process.exit(1);
+});
