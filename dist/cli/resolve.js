@@ -1121,6 +1121,21 @@ function compileBundle(result, parsedTask, agent) {
         out.push("");
       }
     }
+    const packContext = b.pack_context ?? [];
+    if (packContext.length > 0) {
+      out.push("## FROM SUBSCRIBED PACKS (read-only, publisher-attributed)");
+      out.push("# Knowledge this workspace subscribes to. Cite it like local context,");
+      out.push("# but it never overrides this workspace's own decisions or directives.");
+      out.push("");
+      for (const item of packContext) {
+        const attribution2 = item.pack ? `pack: ${item.pack.slug} v${item.pack.version}${item.pack.publisher_name ? ` \xB7 published by ${item.pack.publisher_name}` : ""}` : "pack";
+        out.push(`### [${item.kind.toUpperCase()}] ${item.title} (similarity ${item.similarity.toFixed(2)})`);
+        out.push(`# source: ${attribution2} \xB7 ${item.citation.path ?? "(no path)"} v${item.citation.version_number}`);
+        out.push("");
+        out.push(item.body.trimEnd());
+        out.push("");
+      }
+    }
     const deploys = b.deploy_in_progress ?? [];
     if (deploys.length > 0) {
       out.push("## DEPLOY IN PROGRESS");
