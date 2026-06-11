@@ -208,7 +208,7 @@ function resolveHost() {
 // packages/plugin-core/src/local-scan.ts
 async function scanLocal(opts = {}) {
   const out = [];
-  const root = resolveHost().homeDir();
+  const root = opts.rootOverride ?? resolveHost().homeDir();
   const memDir = path4.join(root, "memory");
   if (existsSync(memDir)) {
     for (const file of await fs2.readdir(memDir)) {
@@ -750,6 +750,20 @@ var MemlinApiClient = class {
       accountId: opts.accountId
     });
   }
+  /** POST /decisions/{id}/verify — record an outcome on the decision
+   *  ledger. Verdicts surface on every future resolve of the decision. */
+  async verifyDecision(decisionId, input, opts = {}) {
+    return this.request("POST", `/decisions/${encodeURIComponent(decisionId)}/verify`, input, {
+      accountId: opts.accountId
+    });
+  }
+  /** GET /decisions/review-due — decisions whose review date arrived. */
+  async listReviewDueDecisions(opts = {}) {
+    const qs = opts.projectId ? `?project_id=${encodeURIComponent(opts.projectId)}` : "";
+    return this.request("GET", `/decisions/review-due${qs}`, void 0, {
+      accountId: opts.accountId
+    });
+  }
   /**
    * POST /ask — natural-language Q&A over the team's workspace memory.
    * Server resolves a bundle, sends it to Claude, returns answer +
@@ -859,9 +873,30 @@ async function main() {
   console.log(
     `memlin push \u2014 account ${config.account_id.slice(0, 8)}\u2026 project ${resolved.project_id?.slice(0, 8) ?? "(none)"} (${resolved.reason})`
   );
-  const local = await scanLocal();
-  const state = await readState();
+  const targetFlag = process.argv.indexOf("--target");
+  const targetDir = targetFlag >= 0 ? process.argv[targetFlag + 1] : null;
+  if (targetFlag >= 0 && !targetDir) {
+    console.error("usage: memlin push [--target <dir>]");
+    process.exit(2);
+  }
+  const local = await scanLocal(
+    targetDir ? { rootOverride: path8.resolve(runtimeCwd(), targetDir) } : {}
+  );
+  const state = targetDir ? { documents: {} } : await readState();
   const now = (/* @__PURE__ */ new Date()).toISOString();
+  const serverByPath = /* @__PURE__ */ new Map();
+  if (targetDir) {
+    try {
+      const existing = await api.listDocuments({
+        kinds: ["memory", "skill", "goal"],
+        project_id: resolved.project_id
+      });
+      for (const d of existing) {
+        if (d.path) serverByPath.set(d.path, d.id);
+      }
+    } catch {
+    }
+  }
   let pushed = 0;
   let unchanged = 0;
   for (const doc of local) {
@@ -873,7 +908,7 @@ async function main() {
     const title = inferTitle(doc.path, doc.content);
     try {
       const result = await api.writeDocument({
-        document_id: prev?.document_id ?? null,
+        document_id: prev?.document_id ?? serverByPath.get(doc.path) ?? null,
         scope: prev?.scope ?? "personal",
         kind: doc.kind,
         title,
@@ -897,7 +932,11 @@ async function main() {
       console.error(`  \u2717 ${doc.path}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  await writeState(state);
+  if (targetDir) {
+    console.log(`  (import mode \u2014 read from ${targetDir}; sync state untouched)`);
+  } else {
+    await writeState(state);
+  }
   console.log(`  ${pushed} pushed, ${unchanged} unchanged, ${local.length} total`);
 }
 function inferTitle(relPath, content) {

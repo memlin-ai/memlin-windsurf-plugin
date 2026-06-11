@@ -12,6 +12,7 @@ const RUN = {
   "bind-plans": () => import("./bind-plans.js"),
   resolve: () => import("./resolve.js"),
   ask: () => import("./ask.js"),
+  verify: () => import("./verify.js"),
   scribe: () => import("./scribe.js"),
   inbox: () => import("./inbox.js"),
   handoffs: () => import("./handoffs.js"),

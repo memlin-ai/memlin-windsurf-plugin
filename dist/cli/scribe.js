@@ -5,6 +5,7 @@ import { createRequire as __cr } from 'node:module'; const require = __cr(import
 import { promises as fs4 } from "node:fs";
 import path6 from "node:path";
 import os5 from "node:os";
+import { createHash } from "node:crypto";
 
 // packages/plugin-core/src/client.ts
 import { promises as fs3 } from "node:fs";
@@ -571,6 +572,20 @@ var MemlinApiClient = class {
       accountId: opts.accountId
     });
   }
+  /** POST /decisions/{id}/verify — record an outcome on the decision
+   *  ledger. Verdicts surface on every future resolve of the decision. */
+  async verifyDecision(decisionId, input, opts = {}) {
+    return this.request("POST", `/decisions/${encodeURIComponent(decisionId)}/verify`, input, {
+      accountId: opts.accountId
+    });
+  }
+  /** GET /decisions/review-due — decisions whose review date arrived. */
+  async listReviewDueDecisions(opts = {}) {
+    const qs = opts.projectId ? `?project_id=${encodeURIComponent(opts.projectId)}` : "";
+    return this.request("GET", `/decisions/review-due${qs}`, void 0, {
+      accountId: opts.accountId
+    });
+  }
   /**
    * POST /ask — natural-language Q&A over the team's workspace memory.
    * Server resolves a bundle, sends it to Claude, returns answer +
@@ -790,17 +805,38 @@ async function main() {
     process.stderr.write("not signed in \u2014 run /memlin-login first\n");
     process.exit(1);
   }
+  const fileFlagIndex = process.argv.indexOf("--file");
+  const explicitFile = fileFlagIndex >= 0 ? process.argv[fileFlagIndex + 1] : null;
+  if (fileFlagIndex >= 0 && !explicitFile) {
+    process.stderr.write("usage: memlin scribe [--file <transcript path>]\n");
+    process.exit(2);
+  }
   const cwd = runtimeCwd();
-  const found = await findLatestTranscript(cwd);
+  let found;
+  if (explicitFile) {
+    const abs = path6.resolve(cwd, explicitFile);
+    const h = createHash("sha256").update(abs).digest("hex");
+    found = {
+      path: abs,
+      sessionId: `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`
+    };
+  } else {
+    found = await findLatestTranscript(cwd);
+  }
   if (!found) {
     process.stderr.write(
-      "no transcript found. Claude Code writes them to ~/.claude/projects/<cwd>/<session>.jsonl\n"
+      "no transcript found. Claude Code writes them to ~/.claude/projects/<cwd>/<session>.jsonl\nOr pass one explicitly: memlin scribe --file <path>\n"
     );
     process.exit(2);
   }
   let transcript;
   try {
     transcript = await loadTranscript(found.path);
+    if (explicitFile && transcript.length === 0) {
+      const raw = await fs4.readFile(found.path, "utf8");
+      transcript = `### user
+${raw}`;
+    }
   } catch (err) {
     process.stderr.write(
       `failed to read transcript at ${found.path}: ${err instanceof Error ? err.message : String(err)}
