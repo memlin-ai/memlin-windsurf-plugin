@@ -8550,7 +8550,7 @@ var DOCUMENT_KINDS = [
 ];
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];
-var MEMORY_TYPES = ["correction", "preference", "fact", "reference"];
+var MEMORY_TYPES = ["correction", "preference", "fact", "reference", "episodic"];
 var AGENT_KINDS = [
   "claude-code",
   "claude-ai",

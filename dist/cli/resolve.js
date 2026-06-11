@@ -1103,6 +1103,24 @@ function compileBundle(result, parsedTask, agent) {
     if (b.pinned && b.pinned.length > 0) {
       out.push(renderPinned(b.pinned));
     }
+    const openThreads = b.open_threads ?? [];
+    if (openThreads.length > 0) {
+      out.push("## OPEN THREADS (entity-matched follow-ups \u2014 resolve or update these)");
+      out.push("# Pulled by entity + status, not similarity: prior episodes that left an");
+      out.push("# open prediction or promise touching this task. Close one by writing a");
+      out.push("# new episodic memory whose custom.resolves points at it.");
+      out.push("");
+      for (const t of openThreads) {
+        const meta = [];
+        if (t.thread?.occurred_at) meta.push(t.thread.occurred_at.slice(0, 10));
+        if (t.thread?.entities?.length) meta.push(t.thread.entities.join(", "));
+        out.push(`### ${t.title}${meta.length ? ` (${meta.join(" \xB7 ")})` : ""}`);
+        out.push(`# source: ${formatCitation(t)} \xB7 thread: open`);
+        out.push("");
+        out.push(t.body.trimEnd());
+        out.push("");
+      }
+    }
     const deploys = b.deploy_in_progress ?? [];
     if (deploys.length > 0) {
       out.push("## DEPLOY IN PROGRESS");
