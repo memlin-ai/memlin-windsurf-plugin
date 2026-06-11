@@ -19,6 +19,7 @@ const RUN = {
   revert: () => import("./revert.js"),
   pin: () => import("./pin.js"),
   "add-project": () => import("./add-project.js"),
+  "attach-path": () => import("./attach-path.js"),
   "audit-replay": () => import("./audit-replay.js"),
   "audit-explain": () => import("./audit-explain.js"),
   "actions-list": () => import("./actions-list.js"),

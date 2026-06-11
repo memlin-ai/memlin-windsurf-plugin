@@ -2,8 +2,9 @@
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
 
 // packages/plugin-core/src/cli/add-project.ts
-import { execSync as execSync2 } from "node:child_process";
-import path7 from "node:path";
+import { execSync as execSync3 } from "node:child_process";
+import path8 from "node:path";
+import readline from "node:readline";
 
 // packages/plugin-core/src/client.ts
 import { promises as fs3 } from "node:fs";
@@ -594,6 +595,17 @@ var MemlinApiClient = class {
     return this.request("POST", "/projects", input, { accountId: opts.accountId });
   }
   /**
+   * PATCH /projects/{id} — attach/detach local paths, set/clear the git
+   * remote, or rename. Owner/admin only; 409 when a path or remote is
+   * already attached to another project in the account. Backs
+   * `memlin attach-path` and add-project's attach-instead-of-fork offer.
+   */
+  async patchProject(projectId, input, opts = {}) {
+    return this.request("PATCH", `/projects/${encodeURIComponent(projectId)}`, input, {
+      accountId: opts.accountId
+    });
+  }
+  /**
    * POST /ask — natural-language Q&A over the team's workspace memory.
    * Server resolves a bundle, sends it to Claude, returns answer +
    * citations + audit_id. Used by `memlin ask` CLI and the web /ask
@@ -727,20 +739,82 @@ function runtimeCwd(fallback = process.cwd()) {
   return path5.resolve(fallback);
 }
 
+// packages/plugin-core/src/sibling-detect.ts
+import { readdirSync, existsSync } from "node:fs";
+import { execSync as execSync2 } from "node:child_process";
+import path6 from "node:path";
+var MAX_CHILD_DIRS = 32;
+var MAX_REMOTE_PROBES = 5;
+function childGitRemotes(cwd, deps = {}) {
+  const listDirs = deps.listDirs ?? ((p) => {
+    try {
+      return readdirSync(p, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules").map((e) => e.name);
+    } catch {
+      return [];
+    }
+  });
+  const readRemote = deps.readRemote ?? ((repoPath) => {
+    try {
+      if (!existsSync(path6.join(repoPath, ".git"))) return null;
+      const url = execSync2("git remote get-url origin", {
+        cwd: repoPath,
+        stdio: ["ignore", "pipe", "ignore"],
+        encoding: "utf8"
+      }).trim();
+      return normalizeGitRemote(url);
+    } catch {
+      return null;
+    }
+  });
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const dir of listDirs(cwd).slice(0, MAX_CHILD_DIRS)) {
+    const remote = readRemote(path6.join(cwd, dir));
+    if (!remote || seen.has(remote)) continue;
+    seen.add(remote);
+    out.push({ dir, remote });
+    if (out.length >= MAX_REMOTE_PROBES) break;
+  }
+  return out;
+}
+async function detectSiblingProject(cwd, resolveProject, deps = {}) {
+  for (const { dir, remote } of childGitRemotes(cwd, deps)) {
+    try {
+      const resolved = await resolveProject({ git_remote: remote });
+      if (resolved.project_id && resolved.account_id) {
+        return {
+          project_id: resolved.project_id,
+          account_id: resolved.account_id,
+          name: resolved.name ?? null,
+          via: dir
+        };
+      }
+    } catch {
+    }
+  }
+  return null;
+}
+function decideAddProjectAction(input) {
+  if (input.attachFlag) return { kind: "attach", projectId: input.attachFlag };
+  if (input.createNewFlag) return { kind: "create" };
+  if (!input.sibling) return { kind: "create" };
+  return input.isTTY ? { kind: "prompt" } : { kind: "error-need-flag" };
+}
+
 // packages/plugin-core/src/plugin-install.ts
 import { promises as fs4 } from "node:fs";
-import { existsSync } from "node:fs";
-import path6 from "node:path";
+import { existsSync as existsSync2 } from "node:fs";
+import path7 from "node:path";
 import os5 from "node:os";
 var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
 var MEMLIN_MARKETPLACE_KEY = "memlin-ai";
 function defaultUserSettingsPaths() {
-  const claudeDir = path6.join(os5.homedir(), ".claude");
-  return { claudeDir, settingsFile: path6.join(claudeDir, "settings.json") };
+  const claudeDir = path7.join(os5.homedir(), ".claude");
+  return { claudeDir, settingsFile: path7.join(claudeDir, "settings.json") };
 }
 async function readClaudeUserSettings(paths) {
   const p = paths ?? defaultUserSettingsPaths();
-  if (!existsSync(p.settingsFile)) return null;
+  if (!existsSync2(p.settingsFile)) return null;
   let raw;
   try {
     raw = await fs4.readFile(p.settingsFile, "utf8");
@@ -776,6 +850,11 @@ function parseArgs(argv) {
       const v = argv[++i];
       if (v !== "code" && v !== "general") return { error: "--kind must be 'code' or 'general'" };
       out.kind = v;
+    } else if (a === "--attach") {
+      out.attach = argv[++i];
+      if (!out.attach) return { error: "--attach requires a project id" };
+    } else if (a === "--create-new") {
+      out.createNew = true;
     } else if (a === "--help" || a === "-h") {
       return { error: "help" };
     } else if (a?.startsWith("--")) {
@@ -796,6 +875,9 @@ function printHelp() {
       "  --org <name|uuid>     Pin to a specific org (default: auto-resolve)",
       "  --name <string>       Project name (default: derived from repo)",
       "  --kind code|general   Project kind (default: code)",
+      "  --attach <project-id> Attach this dir to an existing project instead",
+      "  --create-new          Always create, even when a child repo already",
+      "                        belongs to a project (skips the attach offer)",
       "",
       "After this command, every Claude Code session in this directory",
       "auto-binds to the new project. No further setup."
@@ -804,7 +886,7 @@ function printHelp() {
 }
 function readGitRemote(cwd) {
   try {
-    const url = execSync2("git remote get-url origin", {
+    const url = execSync3("git remote get-url origin", {
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8"
@@ -864,6 +946,61 @@ async function main() {
     console.log(`  wrote ${pin2}`);
     return;
   }
+  const sibling = await detectSiblingProject(cwd, (input) => api.resolveProject(input));
+  const action = decideAddProjectAction({
+    attachFlag: parsed.attach ?? null,
+    createNewFlag: parsed.createNew === true,
+    sibling,
+    isTTY: process.stdout.isTTY === true && process.stdin.isTTY === true
+  });
+  let attachTargetId = null;
+  if (action.kind === "attach") {
+    attachTargetId = action.projectId;
+  } else if (action.kind === "error-need-flag") {
+    console.error(
+      `memlin add-project: this folder's child repo ${sibling.via}/ already belongs to project "${sibling.name ?? sibling.project_id}".`
+    );
+    console.error("Refusing to silently create a second project. Choose explicitly:");
+    console.error(`  memlin add-project --attach ${sibling.project_id}   # attach this root to it`);
+    console.error("  memlin add-project --create-new                      # really create a new project");
+    process.exit(2);
+  } else if (action.kind === "prompt") {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise(
+      (resolve) => rl.question(
+        `Child repo ${sibling.via}/ already belongs to project "${sibling.name ?? sibling.project_id}".
+Attach this folder to it instead of creating a new project? [Y/n] `,
+        resolve
+      )
+    );
+    rl.close();
+    if (answer.trim() === "" || /^y(es)?$/i.test(answer.trim())) {
+      attachTargetId = sibling.project_id;
+    }
+  }
+  if (attachTargetId) {
+    const attachAccountId = sibling?.account_id ?? config.account_id;
+    try {
+      const updated = await api.patchProject(
+        attachTargetId,
+        { add_local_paths: [cwd] },
+        { accountId: attachAccountId }
+      );
+      const pin2 = await writeWorkspaceBinding(cwd, {
+        account_id: attachAccountId,
+        project_id: attachTargetId
+      });
+      console.log(`Attached ${cwd} \u2192 project "${updated.name}"`);
+      console.log(`  local_paths: ${JSON.stringify(updated.local_paths)}`);
+      console.log(`  wrote ${pin2}`);
+      return;
+    } catch (err) {
+      console.error(
+        `memlin add-project: attach failed: ${err instanceof Error ? err.message : err}`
+      );
+      process.exit(1);
+    }
+  }
   const me = await api.me();
   const accounts = me.accounts.map((a) => ({
     id: a.id,
@@ -883,7 +1020,7 @@ async function main() {
     }
     process.exit(1);
   }
-  const projectName = parsed.name?.trim() || path7.basename(cwd).trim() || "untitled";
+  const projectName = parsed.name?.trim() || path8.basename(cwd).trim() || "untitled";
   let project;
   try {
     project = await api.createProject(

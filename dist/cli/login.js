@@ -544,6 +544,17 @@ var MemlinApiClient = class {
     return this.request("POST", "/projects", input, { accountId: opts.accountId });
   }
   /**
+   * PATCH /projects/{id} — attach/detach local paths, set/clear the git
+   * remote, or rename. Owner/admin only; 409 when a path or remote is
+   * already attached to another project in the account. Backs
+   * `memlin attach-path` and add-project's attach-instead-of-fork offer.
+   */
+  async patchProject(projectId, input, opts = {}) {
+    return this.request("PATCH", `/projects/${encodeURIComponent(projectId)}`, input, {
+      accountId: opts.accountId
+    });
+  }
+  /**
    * POST /ask — natural-language Q&A over the team's workspace memory.
    * Server resolves a bundle, sends it to Claude, returns answer +
    * citations + audit_id. Used by `memlin ask` CLI and the web /ask
