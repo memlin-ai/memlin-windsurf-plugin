@@ -754,17 +754,8 @@ async function getApi(opts = {}) {
     return null;
   }
   const cwd = opts.cwd ?? process.cwd();
-  let workspaceBound = false;
-  let workspaceRoot = null;
   const overlay = await findWorkspaceBinding(cwd);
-  if (overlay && overlay.binding.account_id !== config.account_id) {
-    config.account_id = overlay.binding.account_id;
-    if (overlay.binding.project_id !== void 0) {
-      config.project_id = overlay.binding.project_id;
-    }
-    workspaceBound = true;
-    workspaceRoot = overlay.workspaceRoot;
-  }
+  const { workspaceBound, workspaceRoot } = applyWorkspaceOverlay(config, overlay);
   const apiUrl = process.env.MEMLIN_API_URL?.trim() || config.api_url || resolveApiUrl();
   const api = new MemlinApiClient({
     baseUrl: apiUrl,
@@ -772,6 +763,14 @@ async function getApi(opts = {}) {
     accountId: config.account_id
   });
   return { api, config, workspaceBound, workspaceRoot };
+}
+function applyWorkspaceOverlay(config, overlay) {
+  if (!overlay) return { workspaceBound: false, workspaceRoot: null };
+  config.account_id = overlay.binding.account_id;
+  if (overlay.binding.project_id !== void 0) {
+    config.project_id = overlay.binding.project_id;
+  }
+  return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
 // packages/plugin-core/src/apply.ts
