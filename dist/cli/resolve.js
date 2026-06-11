@@ -917,8 +917,9 @@ function renderItem(label, item, extra = []) {
   }
   if (item.verification) {
     const v = item.verification;
+    const modelLabel = verificationModelLabel(v.model_attribution);
     metaParts.push(
-      `verified: ${v.verdict} (${v.observed_at.slice(0, 10)}${v.count > 1 ? `, ${v.count} checks` : ""})`
+      `verified: ${v.verdict} (${v.observed_at.slice(0, 10)}${v.count > 1 ? `, ${v.count} checks` : ""}${modelLabel ? `, ${modelLabel}` : ""})`
     );
   }
   if (item.component_name) metaParts.push(`component: ${item.component_name}`);
@@ -928,6 +929,16 @@ function renderItem(label, item, extra = []) {
   lines.push(item.body.trimEnd());
   lines.push("");
   return lines.join("\n");
+}
+function verificationModelLabel(value) {
+  if (!value || typeof value !== "object") return null;
+  const attr = value;
+  const provider = typeof attr.provider === "string" && attr.provider ? attr.provider : null;
+  const model = typeof attr.model === "string" && attr.model ? attr.model : null;
+  const agent = typeof attr.agent === "string" && attr.agent ? attr.agent : null;
+  const agentKind = typeof attr.agent_kind === "string" && attr.agent_kind ? attr.agent_kind : null;
+  const modelPart = [provider, model].filter(Boolean).join(":");
+  return [agent ?? agentKind, modelPart || null].filter(Boolean).join(" \xB7 ") || null;
 }
 function renderPinned(items) {
   const lines = [];
@@ -970,9 +981,11 @@ function renderItemXml(tagName, item, attributes = {}) {
   const attrs = Object.entries(attributes).map(([k, v]) => ` ${k}="${v}"`).join("");
   const corroborating = item.collapsed_duplicates && item.collapsed_duplicates > 0 ? ` corroborating="${item.collapsed_duplicates}"` : "";
   const verified = item.verification ? ` verified="${item.verification.verdict}" verified_at="${item.verification.observed_at}"` : "";
+  const verifiedModel = item.verification ? verificationModelLabel(item.verification.model_attribution) : null;
+  const verifiedModelAttr = verifiedModel ? ` verified_model="${verifiedModel}"` : "";
   const lines = [];
   lines.push(
-    `<${tagName}${attrs} title="${item.title}" similarity="${item.similarity.toFixed(2)}"${corroborating}${verified}>`
+    `<${tagName}${attrs} title="${item.title}" similarity="${item.similarity.toFixed(2)}"${corroborating}${verified}${verifiedModelAttr}>`
   );
   lines.push(
     `  <citation path="${item.citation.path ?? "(no path)"}" version="v${item.citation.version_number}" updated="${item.citation.updated_at}" />`
