@@ -326,11 +326,12 @@ var MemlinApiClient = class {
   }
   /** POST /usage/event — write a usage_events row from the client.
    *  Server-side enforces an allowlist of event_types (today:
-   *  tool.guardrail, action.invoke) and re-derives account_id and
-   *  user_id from the auth context so callers can't forge rows for
-   *  other workspaces. */
-  async writeUsageEvent(input) {
-    return this.request("POST", "/usage/event", input);
+   *  tool.guardrail, action.invoke, resolve.outcome, edit.activity) and
+   *  re-derives account_id and user_id from the auth context so callers
+   *  can't forge rows for other workspaces. `opts.accountId` routes the
+   *  write to a non-default account (multi-account workspaces). */
+  async writeUsageEvent(input, opts = {}) {
+    return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
   /** GET /documents — list, filtered. */
   async listDocuments(opts = {}) {
@@ -958,6 +959,13 @@ function truncateTask(task) {
 function xmlAttr(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 }
+function attribution(e) {
+  if (e.same_user) return "your other session \xB7 ";
+  const bits = [];
+  if (e.session_short) bits.push(`agent ${e.session_short}`);
+  if (e.agent_kind) bits.push(e.agent_kind);
+  return bits.length > 0 ? `${bits.join(" \xB7 ")} \xB7 ` : "";
+}
 function compileBundle(result, parsedTask, agent) {
   const b = result.bundle;
   const out = [];
@@ -1102,7 +1110,7 @@ function compileBundle(result, parsedTask, agent) {
         out.push(`# ${where}`);
         out.push(`# ${warning.guidance}`);
         for (const e of warning.entries) {
-          out.push(`  - ${e.minutes_ago}m ago \xB7 task: ${e.task}`);
+          out.push(`  - ${attribution(e)}${e.minutes_ago}m ago \xB7 task: ${e.task}`);
         }
         out.push("");
       }
@@ -1112,12 +1120,25 @@ function compileBundle(result, parsedTask, agent) {
       out.push("## CONCURRENT WORK");
       out.push("");
       out.push(
-        `# ${concurrent.length} other agent(s) resolved on this project in the last 20 min \u2014`
+        `# ${concurrent.length} other session(s) resolved on this project in the last 20 min \u2014`
       );
-      out.push("# avoid editing the same files; coordinate or pick non-overlapping work.");
+      out.push("# co-activity, not contention: check the task before assuming overlap.");
       for (const e of concurrent) {
         const where = e.component ? `component "${e.component}"` : "project-wide";
-        out.push(`  - ${where} \xB7 ${e.minutes_ago}m ago \xB7 task: ${e.task}`);
+        out.push(`  - ${where} \xB7 ${attribution(e)}${e.minutes_ago}m ago \xB7 task: ${e.task}`);
+      }
+      out.push("");
+    }
+    const fileEdits = b.recent_file_edits ?? [];
+    if (fileEdits.length > 0) {
+      out.push("## RECENTLY EDITED BY OTHERS");
+      out.push("");
+      out.push(
+        `# ${fileEdits.length} file(s) other sessions edited on this project in the last 15 min \u2014`
+      );
+      out.push("# the file-level heads-up. Re-read these before you edit them.");
+      for (const f of fileEdits) {
+        out.push(`  - ${f.path} \xB7 ${attribution(f)}${f.minutes_ago}m ago`);
       }
       out.push("");
     }

@@ -292,11 +292,12 @@ var MemlinApiClient = class {
   }
   /** POST /usage/event — write a usage_events row from the client.
    *  Server-side enforces an allowlist of event_types (today:
-   *  tool.guardrail, action.invoke) and re-derives account_id and
-   *  user_id from the auth context so callers can't forge rows for
-   *  other workspaces. */
-  async writeUsageEvent(input) {
-    return this.request("POST", "/usage/event", input);
+   *  tool.guardrail, action.invoke, resolve.outcome, edit.activity) and
+   *  re-derives account_id and user_id from the auth context so callers
+   *  can't forge rows for other workspaces. `opts.accountId` routes the
+   *  write to a non-default account (multi-account workspaces). */
+  async writeUsageEvent(input, opts = {}) {
+    return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
   /** GET /documents — list, filtered. */
   async listDocuments(opts = {}) {
