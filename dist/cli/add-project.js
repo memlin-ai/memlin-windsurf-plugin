@@ -118,6 +118,9 @@ var AGENT_EXPECTED_CAPABILITIES = {
   cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
   codex: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
   windsurf: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
+  // VS Code (apps/vscode-extension): MCP + CLI + copilot-instructions; plain
+  // VS Code has no lifecycle-hook or slash-command surface.
+  vscode: ["mcp", "cli", "rules", "resolve"],
   gemini: ["mcp", "rules", "resolve"],
   grok: ["mcp", "rules", "resolve"],
   hermes: ["mcp", "resolve"],

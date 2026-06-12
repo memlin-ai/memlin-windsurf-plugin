@@ -3635,6 +3635,9 @@ var AGENT_EXPECTED_CAPABILITIES = {
   cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
   codex: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
   windsurf: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
+  // VS Code (apps/vscode-extension): MCP + CLI + copilot-instructions; plain
+  // VS Code has no lifecycle-hook or slash-command surface.
+  vscode: ["mcp", "cli", "rules", "resolve"],
   gemini: ["mcp", "rules", "resolve"],
   grok: ["mcp", "rules", "resolve"],
   hermes: ["mcp", "resolve"],
@@ -8404,6 +8407,13 @@ var AGENT_KINDS = [
   "codex",
   "cursor",
   "windsurf",
+  // Microsoft VS Code + GitHub Copilot agent mode (apps/vscode-extension).
+  // Registers the Memlin MCP server via the stable
+  // `lm.registerMcpServerDefinitionProvider` API (VS Code ≥ 1.101) plus
+  // sign-in/sync commands and a copilot-instructions directive. Plain VS Code
+  // has no lifecycle-hook or slash-command surface, so this kind is MCP + CLI
+  // + rules (no hooks/commands) — see AGENT_EXPECTED_CAPABILITIES.
+  "vscode",
   "gemini",
   "grok",
   // Nous Research Hermes Agent — autonomous, self-hosted, 24/7 (Feb 2026).
