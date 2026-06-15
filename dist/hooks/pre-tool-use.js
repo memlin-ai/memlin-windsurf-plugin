@@ -7573,7 +7573,16 @@ var DOCUMENT_KINDS = [
   "brand_guidelines",
   "plan",
   "decision",
-  "action"
+  "action",
+  // A plain, user-managed Markdown file (the "Basic MD file management" tier:
+  // upload / edit / download / version history). Rides on the documents +
+  // document_versions machinery but is ISOLATED from the automated knowledge
+  // machinery — the resolver (SEARCHABLE_KINDS), scribe writers, the Review
+  // inbox, memory-quality, the dedup sweep (SWEEP_KINDS), corpus metrics
+  // (CORPUS_KINDS), and the default export all use explicit kind allow-lists
+  // that exclude 'file'. A file enters the core only via an explicit
+  // "Promote to Memory" (which writes a separate kind='memory' doc).
+  "file"
 ];
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];
