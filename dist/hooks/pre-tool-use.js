@@ -3520,7 +3520,8 @@ var require_gray_matter = __commonJS({
 });
 
 // packages/plugin-core/dist/pre-tool-use-handler.js
-import { execSync as execSync2 } from "node:child_process";
+import { execSync as execSync3 } from "node:child_process";
+import path7 from "node:path";
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
@@ -4000,8 +4001,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path6, errorMaps, issueData } = params;
-  const fullPath = [...path6, ...issueData.path || []];
+  const { data, path: path8, errorMaps, issueData } = params;
+  const fullPath = [...path8, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -4117,11 +4118,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path6, key) {
+  constructor(parent, value, path8, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path6;
+    this._path = path8;
     this._key = key;
   }
   get path() {
@@ -8252,7 +8253,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.5";
+  return "0.1.6";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -8511,6 +8512,19 @@ var MemlinApiClient = class {
    */
   async deployGuard(input, opts = {}) {
     return this.request("POST", "/deploy-guard", input, { accountId: opts.accountId });
+  }
+  /**
+   * POST /edit-guard — real-time, pre-edit file-collision check.
+   *
+   * The PreToolUse hook calls this before an Edit/Write/MultiEdit, passing the
+   * repo-relative path(s) about to change. The server reads the same
+   * `edit.activity` feed the resolver's recent_file_edits uses and returns any
+   * LIVE collisions — other sessions that edited the same path within the last
+   * ~10 min — so the hook can warn or block. Read-only; never mutates.
+   * project_id is passed explicitly (the hook resolves it from cwd first).
+   */
+  async editGuard(input, opts = {}) {
+    return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
   }
   /** GET /audit/<id>/replay — reconstruct a past resolve's exact bundle. */
   async replayAudit(auditId) {
@@ -8796,6 +8810,33 @@ function readGitRemote(cwd) {
   }
 }
 
+// packages/plugin-core/dist/edit-activity.js
+import { execSync as execSync2 } from "node:child_process";
+import path6 from "node:path";
+import os5 from "node:os";
+var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+function editedPathsFromHook(toolName, toolInput) {
+  if (!toolName || !EDIT_TOOLS.has(toolName) || !toolInput) return [];
+  const p = typeof toolInput.file_path === "string" && toolInput.file_path || typeof toolInput.notebook_path === "string" && toolInput.notebook_path || null;
+  return p ? [p] : [];
+}
+function repoRelativePath(absPath, cwd) {
+  try {
+    const top = execSync2("git rev-parse --show-toplevel", {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+      timeout: 250
+    }).trim();
+    if (top) {
+      const rel = path6.relative(top, absPath);
+      if (rel && !rel.startsWith("..") && !path6.isAbsolute(rel)) return rel;
+    }
+  } catch {
+  }
+  return path6.basename(absPath);
+}
+
 // packages/plugin-core/dist/pre-tool-use-handler.js
 var ENV_CACHE_TTL_MS = 6e4;
 var envCache = /* @__PURE__ */ new Map();
@@ -8810,7 +8851,7 @@ function inferEnvFromBranch(branch) {
 }
 function getRawBranchName(cwd) {
   try {
-    return execSync2("git rev-parse --abbrev-ref HEAD", {
+    return execSync3("git rev-parse --abbrev-ref HEAD", {
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8",
@@ -8831,7 +8872,7 @@ function detectEnv(cwd) {
   if (cached && Date.now() - cached.at < ENV_CACHE_TTL_MS) return cached.env;
   let env = null;
   try {
-    const branch = execSync2("git rev-parse --abbrev-ref HEAD", {
+    const branch = execSync3("git rev-parse --abbrev-ref HEAD", {
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8",
@@ -8941,6 +8982,50 @@ async function evaluateDeployGuard(ctx, payload, projectId, projectAccountId) {
     matched_decisions: []
   };
 }
+function editGuardMode() {
+  const raw = (process.env.MEMLIN_EDIT_GUARD ?? "").toLowerCase().trim();
+  if (raw === "off" || raw === "warn" || raw === "block") return raw;
+  return "warn";
+}
+var EDIT_GUARD_TIMEOUT_MS = 2500;
+async function evaluateEditCollision(ctx, payload, projectId, projectAccountId) {
+  if (editGuardMode() === "off") return null;
+  if (!projectId || !payload.session_id) return null;
+  const rawPaths = editedPathsFromHook(payload.tool_name, payload.tool_input);
+  if (rawPaths.length === 0) return null;
+  const cwd = payload.cwd ?? process.cwd();
+  const relPaths = [
+    ...new Set(rawPaths.map((p) => repoRelativePath(path7.resolve(cwd, p), cwd)))
+  ];
+  if (relPaths.length === 0) return null;
+  let res;
+  try {
+    const call = ctx.api.editGuard(
+      { project_id: projectId, session_id: payload.session_id, paths: relPaths },
+      projectAccountId ? { accountId: projectAccountId } : {}
+    );
+    const timeout = new Promise(
+      (resolve) => setTimeout(() => resolve({ collisions: [] }), EDIT_GUARD_TIMEOUT_MS)
+    );
+    res = await Promise.race([call, timeout]);
+  } catch (err) {
+    log(
+      `edit-guard: check failed (fail-open): ${err instanceof Error ? err.message : String(err)}`
+    );
+    return null;
+  }
+  const collisions = Array.isArray(res.collisions) ? res.collisions : [];
+  if (collisions.length === 0) return null;
+  const top = collisions[0];
+  const who = top.same_user ? "your own other session" : top.holder_session ? `agent ${top.holder_session}${top.holder_agent_kind ? ` (${top.holder_agent_kind})` : ""}` : "another agent";
+  const fileList = collisions.length === 1 ? `\`${top.path}\`` : `${collisions.length} files (incl. \`${top.path}\`)`;
+  const ago = top.minutes_ago <= 0 ? "just now" : `${top.minutes_ago}m ago`;
+  return {
+    decision: editGuardMode() === "block" ? "block" : "ask",
+    reason: `Memlin edit-guard \xB7 ${who} edited ${fileList} ${ago}. Two agents writing the same file can clobber each other \u2014 pull their change or coordinate before overwriting.`,
+    matched_decisions: []
+  };
+}
 async function runPreToolUseHandler(payload) {
   if (!payload.tool_name) {
     return { decision: "allow", reason: null, matched_decisions: [] };
@@ -8966,6 +9051,8 @@ async function runPreToolUseHandler(payload) {
   }
   const deployVerdict = await evaluateDeployGuard(ctx, payload, projectId, projectAccountId);
   if (deployVerdict) return deployVerdict;
+  const editVerdict = await evaluateEditCollision(ctx, payload, projectId, projectAccountId);
+  if (editVerdict) return editVerdict;
   const decisions = await loadEnforcementDecisions(ctx, projectId);
   if (decisions.length === 0) {
     return { decision: "allow", reason: null, matched_decisions: [] };

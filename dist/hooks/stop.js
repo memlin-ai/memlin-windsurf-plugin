@@ -3742,7 +3742,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.5";
+  return "0.1.6";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -4001,6 +4001,19 @@ var MemlinApiClient = class {
    */
   async deployGuard(input, opts = {}) {
     return this.request("POST", "/deploy-guard", input, { accountId: opts.accountId });
+  }
+  /**
+   * POST /edit-guard — real-time, pre-edit file-collision check.
+   *
+   * The PreToolUse hook calls this before an Edit/Write/MultiEdit, passing the
+   * repo-relative path(s) about to change. The server reads the same
+   * `edit.activity` feed the resolver's recent_file_edits uses and returns any
+   * LIVE collisions — other sessions that edited the same path within the last
+   * ~10 min — so the hook can warn or block. Read-only; never mutates.
+   * project_id is passed explicitly (the hook resolves it from cwd first).
+   */
+  async editGuard(input, opts = {}) {
+    return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
   }
   /** GET /audit/<id>/replay — reconstruct a past resolve's exact bundle. */
   async replayAudit(auditId) {
