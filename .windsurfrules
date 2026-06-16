@@ -16,7 +16,9 @@ At session start, check for assigned handoffs with `memlin_list_handoffs`
 the packet as the task brief. Mark it `complete` when finished.
 
 If the user asks to sync, sign in, query the workspace, or check Memlin status,
-use the `memlin` CLI in the terminal:
+use the `memlin` CLI in the terminal (installed on PATH by the plugin's
+`install.sh`; if it is not found, run that installer or
+`node "<plugin-dir>/dist/cli/main.js" <command>`):
 
 - `memlin login` — OAuth device-flow sign-in
 - `memlin status` — auth, bound account + project, sync state
