@@ -7582,7 +7582,12 @@ var DOCUMENT_KINDS = [
   // (CORPUS_KINDS), and the default export all use explicit kind allow-lists
   // that exclude 'file'. A file enters the core only via an explicit
   // "Promote to Memory" (which writes a separate kind='memory' doc).
-  "file"
+  "file",
+  // A personal-first checklist / list (the people-processed "To-dos" tier). Its
+  // body is a GFM task list. Like 'file', it's ISOLATED from the resolver/
+  // scribe/inbox/export until promoted up a tier. Reuses the shared
+  // goal-criteria checklist helpers (parseGoalCriteria / toggleGoalCriterionInBody).
+  "todo"
 ];
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];
