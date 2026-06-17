@@ -8687,26 +8687,126 @@ var SONNET_OUTPUT_USD_PER_MTOK = MODEL_PRICES["claude-sonnet-4-6"].outputUsdPerM
 
 // packages/shared/dist/memlin-commands.js
 var MEMLIN_COMMANDS = [
-  { section: "Discovery", cmd: "ask", blurb: "ask your workspace anything" },
-  { section: "", cmd: "inbox", blurb: "review scribe proposals" },
-  { section: "", cmd: "scribe", blurb: "extract from this session" },
-  { section: "Sync", cmd: "sync", blurb: "pull + push in one shot" },
-  { section: "", cmd: "pull", blurb: "server \u2192 local" },
-  { section: "", cmd: "push", blurb: "local \u2192 server" },
-  { section: "", cmd: "revert", blurb: "roll a doc back a version" },
-  { section: "Plans", cmd: "push-plan", blurb: "upload a Claude Code plan" },
-  { section: "", cmd: "pull-plans", blurb: "refresh local plans" },
-  { section: "", cmd: "bind-plans", blurb: "assign unbound local plans" },
-  { section: "Actions", cmd: "actions-list", blurb: "callable workspace tools" },
-  { section: "", cmd: "actions-execute", blurb: "invoke one by id" },
-  { section: "Audit", cmd: "audit-replay", blurb: "see the bundle an agent saw" },
-  { section: "", cmd: "audit-explain", blurb: "why each item ranked there" },
-  { section: "Coordination", cmd: "handoffs", blurb: "pass work between agents" },
-  { section: "", cmd: "role", blurb: "assign roles to members/docs" },
-  { section: "Setup & health", cmd: "status", blurb: "auth, account, project, sync state" },
-  { section: "", cmd: "doctor", blurb: "diagnose why status is broken" },
-  { section: "", cmd: "add-project", blurb: "register this workspace" },
-  { section: "", cmd: "link", blurb: "pin a different account" }
+  {
+    section: "Discovery",
+    cmd: "ask",
+    blurb: "ask your workspace anything",
+    details: "Run a natural-language question against your team's shared memory, skills, approved goals, and schemas. The resolver assembles a cited answer pulling from across documents \u2014 each citation shows a path and version so you can click through to the source."
+  },
+  {
+    section: "",
+    cmd: "inbox",
+    blurb: "review scribe proposals",
+    details: "Lists captures the scribe surfaced but didn't auto-accept (typically because confidence was below the activation threshold, or a similar item already exists). Accept individually to promote a proposal into the active corpus, or reject to drop it."
+  },
+  {
+    section: "",
+    cmd: "scribe",
+    blurb: "extract from this session",
+    details: 'Runs the session scribe over the current transcript and proposes decisions, memories, and skills that emerged \u2014 things like "we picked X over Y because Z" or new rules-of-thumb. High-confidence captures activate immediately; the rest queue in the inbox for review.'
+  },
+  {
+    section: "Sync",
+    cmd: "sync",
+    blurb: "pull + push in one shot",
+    details: "Pulls the latest memory, skills, approved goals, and schemas from the server for the current project, then pushes any local edits as new versions. This is the daily driver \u2014 use `pull` or `push` only when you want a one-way move."
+  },
+  {
+    section: "",
+    cmd: "pull",
+    blurb: "server \u2192 local",
+    details: "Server-to-local only. Refreshes the on-disk copy of memory and skills for the current project to whatever the server says is latest. Does not push your local edits."
+  },
+  {
+    section: "",
+    cmd: "push",
+    blurb: "local \u2192 server",
+    details: "Local-to-server only. Uploads every modified memory and skill file in your tracked project tree as a new version. Does not pull team updates first \u2014 combine with `pull` (or just use `sync`) when you want both."
+  },
+  {
+    section: "",
+    cmd: "revert",
+    blurb: "roll a doc back a version",
+    details: "Restore a memory or skill to an earlier version. Pass the document name and optionally a version number \u2014 if omitted, reverts to the immediately previous version. Creates a new version (non-destructive) rather than deleting intermediate ones, so the audit trail stays intact."
+  },
+  {
+    section: "Plans",
+    cmd: "push-plan",
+    blurb: "upload a Claude Code plan",
+    details: "Uploads a Claude Code plan file from `~/.claude/plans/` to Memlin as a versioned plan document. Auto-resolves the active project, attaches the resolver bundle for replay, and prints a URL where the plan can be reviewed in your workspace."
+  },
+  {
+    section: "",
+    cmd: "pull-plans",
+    blurb: "refresh local plans",
+    details: "Refreshes `~/.claude/plans/` from Memlin. Pulls the delta since the last sync by default; pass `--full` for everything, or a plan id to fetch just one. Useful when picking up a plan another agent or teammate uploaded."
+  },
+  {
+    section: "",
+    cmd: "bind-plans",
+    blurb: "assign unbound local plans",
+    details: "`~/.claude/plans/` spans every repo you work in, so plans created before the sync hooks landed have no known project. This command lists locally-stored plans that aren't tied to a Memlin project and walks you through assigning each one \u2014 they then sync on every future run."
+  },
+  {
+    section: "Actions",
+    cmd: "actions-list",
+    blurb: "callable workspace tools",
+    details: 'Lists actions registered in the workspace \u2014 typed, callable tools your team has defined (e.g. "create a Linear ticket", "run a saved query"). Returns id, input schema, and invoke URL so you know exactly how to call each.'
+  },
+  {
+    section: "",
+    cmd: "actions-execute",
+    blurb: "invoke one by id",
+    details: "Invokes a workspace action by id with a JSON input payload. Validates against the action's registered schema before dispatch. Use this to replay actions in scripts or chain them with `memlin ask` output."
+  },
+  {
+    section: "Audit",
+    cmd: "audit-replay",
+    blurb: "see the bundle an agent saw",
+    details: "Re-renders the exact resolved bundle an agent saw for a past resolve. Version-pinned, so even if memory has changed since, you get the original context. Pass the audit id from any prior resolve output."
+  },
+  {
+    section: "",
+    cmd: "audit-explain",
+    blurb: "why each item ranked there",
+    details: `Shows the per-item ranking arithmetic for a resolved bundle \u2014 score breakdown, the reasons each item ranked where it did, and which boosts or penalties applied. Use this to debug "why didn't Memlin surface skill X?"`
+  },
+  {
+    section: "Coordination",
+    cmd: "handoffs",
+    blurb: "pass work between agents",
+    details: 'Create, list, accept, complete, or cancel cross-agent handoff packets. A handoff is a structured task brief targeted at a specific agent kind (claude-code, cursor, codex, etc.). `handoffs list` shows what\'s queued for you; `handoffs create <target> "<task>"` hands work to another agent.'
+  },
+  {
+    section: "",
+    cmd: "role",
+    blurb: "assign roles to members/docs",
+    details: "Assigns functional roles (backend, sre, design, etc.) to workspace members, or tags documents with roles. Roles boost the resolver's relevance for people who hold them \u2014 a backend engineer gets backend-tagged memory ranked higher."
+  },
+  {
+    section: "Setup & health",
+    cmd: "status",
+    blurb: "auth, account, project, sync state",
+    details: "One-shot dashboard. Shows your auth state (token expiry, refresh state), the bound account and project, MCP routing (direct Supabase or hosted), the last sync time, and how many tracked docs are pending push or pull."
+  },
+  {
+    section: "",
+    cmd: "doctor",
+    blurb: "diagnose why status is broken",
+    details: 'Runs a checklist when something\'s wrong \u2014 config readable, token refreshable, Supabase and MCP reachable, project auto-resolves, filesystem permissions. `status` answers "what\'s the state right now"; `doctor` answers "why is the state broken."'
+  },
+  {
+    section: "",
+    cmd: "add-project",
+    blurb: "register this workspace",
+    details: "Registers the current workspace as a Memlin project. Auto-detects the git remote and local paths, writes a workspace pin, and makes sure every future session in this directory binds to the project automatically."
+  },
+  {
+    section: "",
+    cmd: "link",
+    blurb: "pin a different account",
+    details: "Pins this workspace to a specific Memlin account. Use when you switch between accounts (employer / client / personal) \u2014 the pin makes sure the resolver and scribe target the correct workspace for this directory."
+  }
 ];
 
 // packages/plugin-core/src/cli/command-guide.ts
