@@ -8733,18 +8733,21 @@ var MEMLIN_COMMANDS = [
     section: "Plans",
     cmd: "push-plan",
     blurb: "upload a Claude Code plan",
+    hosts: ["claude-code"],
     details: "Uploads a Claude Code plan file from `~/.claude/plans/` to Memlin as a versioned plan document. Auto-resolves the active project, attaches the resolver bundle for replay, and prints a URL where the plan can be reviewed in your workspace."
   },
   {
     section: "",
     cmd: "pull-plans",
     blurb: "refresh local plans",
+    hosts: ["claude-code"],
     details: "Refreshes `~/.claude/plans/` from Memlin. Pulls the delta since the last sync by default; pass `--full` for everything, or a plan id to fetch just one. Useful when picking up a plan another agent or teammate uploaded."
   },
   {
     section: "",
     cmd: "bind-plans",
     blurb: "assign unbound local plans",
+    hosts: ["claude-code"],
     details: "`~/.claude/plans/` spans every repo you work in, so plans created before the sync hooks landed have no known project. This command lists locally-stored plans that aren't tied to a Memlin project and walks you through assigning each one \u2014 they then sync on every future run."
   },
   {
