@@ -8818,6 +8818,12 @@ var MEMLIN_COMMANDS = [
     details: "Invokes a workspace action by id with a JSON input payload. Validates against the action's registered schema before dispatch. Use this to replay actions in scripts or chain them with `memlin ask` output."
   },
   {
+    section: "Outcomes",
+    cmd: "verify",
+    blurb: "record what actually held",
+    details: "Record a measured outcome on a past decision \u2014 `held`, `broke`, or `inconclusive` \u2014 with whatever evidence and measurements you have. Run `memlin verify --due` first to see decisions whose review_by date has arrived. The verdict shows up on the decision and on the Agent Experience page, and rides along on future resolves so what worked steers what comes next."
+  },
+  {
     section: "Audit",
     cmd: "audit-replay",
     blurb: "see the bundle an agent saw",
