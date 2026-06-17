@@ -3407,7 +3407,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs4 = __require("fs");
+    var fs5 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3491,7 +3491,7 @@ var require_gray_matter = __commonJS({
       return stringify(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs4.readFileSync(filepath, "utf8");
+      const str2 = fs5.readFileSync(filepath, "utf8");
       const file = matter3(str2, options2);
       file.path = filepath;
       return file;
@@ -3520,9 +3520,9 @@ var require_gray_matter = __commonJS({
 });
 
 // packages/plugin-core/src/cli/login.ts
-import { promises as fs3 } from "node:fs";
-import path4 from "node:path";
-import os5 from "node:os";
+import { promises as fs4 } from "node:fs";
+import path5 from "node:path";
+import os6 from "node:os";
 
 // packages/plugin-core/src/auth.ts
 import { promises as fs } from "node:fs";
@@ -4122,6 +4122,47 @@ function resolveApiUrl() {
 }
 
 // packages/plugin-core/src/resolver-skill.ts
+import { createHash } from "node:crypto";
+import { promises as fs2 } from "node:fs";
+import os4 from "node:os";
+import path3 from "node:path";
+var RESOLVER_SKILL_DIR = path3.join(os4.homedir(), ".claude", "skills", "memlin");
+var RESOLVER_SKILL_FILE = path3.join(RESOLVER_SKILL_DIR, "SKILL.md");
+var LEGACY_RESOLVER_SKILL_HASHES = [
+  // v1: 2026-06-09 → 2026-06-17. Before the "Writing your own memories"
+  // section was added.
+  "d15dbda39864a93c7bb73e1d13813de0ebacd811fb6260ff2b07436781c544e0"
+];
+async function ensureResolverSkill() {
+  try {
+    let existing = null;
+    try {
+      existing = await fs2.readFile(RESOLVER_SKILL_FILE, "utf8");
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+    }
+    if (existing !== null && existing.length > 0) {
+      if (existing === RESOLVER_SKILL_MD) {
+        return { status: "kept", path: RESOLVER_SKILL_FILE };
+      }
+      const hash = createHash("sha256").update(existing).digest("hex");
+      if (!LEGACY_RESOLVER_SKILL_HASHES.includes(hash)) {
+        return { status: "kept", path: RESOLVER_SKILL_FILE };
+      }
+      await fs2.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+      return { status: "upgraded", path: RESOLVER_SKILL_FILE };
+    }
+    await fs2.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
+    await fs2.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+    return { status: "installed", path: RESOLVER_SKILL_FILE };
+  } catch (e) {
+    return {
+      status: "failed",
+      path: RESOLVER_SKILL_FILE,
+      error: e instanceof Error ? e.message : String(e)
+    };
+  }
+}
 var RESOLVER_SKILL_MD = `---
 name: Memlin
 description: Memlin auto-resolves project context (skills, memory, approved goals, schemas) into your prompt before you process it. This skill tells you how to *use* that context, and when to fall back to invoking memlin_resolve_task manually.
@@ -4169,13 +4210,21 @@ user's prompt was trivial enough that the hook skipped it, or (b) nothing in
 the workspace cleared the per-kind similarity threshold for this task.
 Proceed with your general expertise and note that you didn't find specialized
 context for this task.
+
+## Writing memories
+
+How Memlin expects you to *write* memories (archive vs. delete, distill vs.
+pad, etc.) is delivered as a platform skill seeded into your workspace \u2014
+look for "Memlin: writing memories well" in the resolved bundle when you
+do autonomous memory writes. That's the source of truth; this file stays
+focused on the reader side.
 `;
 
 // packages/plugin-core/src/plugin-install.ts
-import { promises as fs2 } from "node:fs";
+import { promises as fs3 } from "node:fs";
 import { existsSync } from "node:fs";
-import path3 from "node:path";
-import os4 from "node:os";
+import path4 from "node:path";
+import os5 from "node:os";
 var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
 var MEMLIN_MARKETPLACE_KEY = "memlin-ai";
 var MEMLIN_MARKETPLACE_SOURCE = {
@@ -4183,16 +4232,16 @@ var MEMLIN_MARKETPLACE_SOURCE = {
   repo: "memlin-ai/memlin-claude-plugin"
 };
 function defaultUserSettingsPaths() {
-  const claudeDir = path3.join(os4.homedir(), ".claude");
-  return { claudeDir, settingsFile: path3.join(claudeDir, "settings.json") };
+  const claudeDir = path4.join(os5.homedir(), ".claude");
+  return { claudeDir, settingsFile: path4.join(claudeDir, "settings.json") };
 }
 async function ensureUserScopePluginEnabled(paths) {
   const p = paths ?? defaultUserSettingsPaths();
   try {
-    await fs2.mkdir(p.claudeDir, { recursive: true });
+    await fs3.mkdir(p.claudeDir, { recursive: true });
     let current = {};
     if (existsSync(p.settingsFile)) {
-      const raw = await fs2.readFile(p.settingsFile, "utf8");
+      const raw = await fs3.readFile(p.settingsFile, "utf8");
       try {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === "object") current = parsed;
@@ -4228,7 +4277,7 @@ async function ensureUserScopePluginEnabled(paths) {
       };
       touchedMarketplace = true;
     }
-    await fs2.writeFile(p.settingsFile, JSON.stringify(next, null, 2) + "\n", "utf8");
+    await fs3.writeFile(p.settingsFile, JSON.stringify(next, null, 2) + "\n", "utf8");
     return {
       status: touchedMarketplace ? "enabled-with-marketplace" : "enabled",
       settingsFile: p.settingsFile,
@@ -4721,8 +4770,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path5, errorMaps, issueData } = params;
-  const fullPath = [...path5, ...issueData.path || []];
+  const { data, path: path6, errorMaps, issueData } = params;
+  const fullPath = [...path6, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -4838,11 +4887,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path5, key) {
+  constructor(parent, value, path6, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path5;
+    this._path = path6;
     this._key = key;
   }
   get path() {
@@ -8751,6 +8800,12 @@ var MEMLIN_COMMANDS = [
     details: "`~/.claude/plans/` spans every repo you work in, so plans created before the sync hooks landed have no known project. This command lists locally-stored plans that aren't tied to a Memlin project and walks you through assigning each one \u2014 they then sync on every future run."
   },
   {
+    section: "",
+    cmd: "archive-plans",
+    blurb: "archive duplicate local plan files (never deletes)",
+    details: "Folds duplicate plan files in your local plans directory by moving older copies of the same slug into `.archived/<date>/`. Default is dry-run; pass `--apply` to execute. Always reversible \u2014 files move, never delete; recover by moving them back. Useful after a server-side plan-dedup sweep when your disk still holds orphan copies from before the fix."
+  },
+  {
     section: "Actions",
     cmd: "actions-list",
     blurb: "callable workspace tools",
@@ -8836,30 +8891,8 @@ function printCommandGuide(opts = {}) {
 }
 
 // packages/plugin-core/src/cli/login.ts
-var CONFIG_DIR = path4.join(os5.homedir(), ".config", "memlin");
-var CONFIG_FILE = path4.join(CONFIG_DIR, "config.json");
-var RESOLVER_SKILL_DIR = path4.join(os5.homedir(), ".claude", "skills", "memlin");
-var RESOLVER_SKILL_FILE = path4.join(RESOLVER_SKILL_DIR, "SKILL.md");
-async function installResolverSkill() {
-  try {
-    try {
-      const stat = await fs3.stat(RESOLVER_SKILL_FILE);
-      if (stat.size > 0) {
-        return { status: "kept", path: RESOLVER_SKILL_FILE };
-      }
-    } catch {
-    }
-    await fs3.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
-    await fs3.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
-    return { status: "installed", path: RESOLVER_SKILL_FILE };
-  } catch (e) {
-    return {
-      status: "failed",
-      path: RESOLVER_SKILL_FILE,
-      error: e instanceof Error ? e.message : String(e)
-    };
-  }
-}
+var CONFIG_DIR = path5.join(os6.homedir(), ".config", "memlin");
+var CONFIG_FILE = path5.join(CONFIG_DIR, "config.json");
 function parseLoginArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -8966,14 +8999,16 @@ async function main() {
     user_id: me.user_id,
     project_id: null
   };
-  await fs3.mkdir(CONFIG_DIR, { recursive: true });
-  await fs3.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
+  await fs4.mkdir(CONFIG_DIR, { recursive: true });
+  await fs4.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
   const displayName = me.display_name ?? me.email ?? me.user_id.slice(0, 8) + "\u2026";
   console.log(`  \u2713 signed in as ${displayName}`);
   console.log(`  \u2713 workspace "${accountName}"`);
-  const installed = await installResolverSkill();
+  const installed = await ensureResolverSkill();
   if (installed.status === "installed") {
     console.log(`  \u2713 installed Memlin resolver skill (${installed.path})`);
+  } else if (installed.status === "upgraded") {
+    console.log(`  \u2713 upgraded Memlin resolver skill (${installed.path})`);
   } else if (installed.status === "kept") {
     console.log(`  \u2713 Memlin resolver skill already present (${installed.path})`);
   } else {

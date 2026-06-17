@@ -3407,7 +3407,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs7 = __require("fs");
+    var fs8 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3491,7 +3491,7 @@ var require_gray_matter = __commonJS({
       return stringify(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs7.readFileSync(filepath, "utf8");
+      const str2 = fs8.readFileSync(filepath, "utf8");
       const file = matter3(str2, options2);
       file.path = filepath;
       return file;
@@ -3520,7 +3520,7 @@ var require_gray_matter = __commonJS({
 });
 
 // packages/plugin-core/src/cli/sync.ts
-import path9 from "node:path";
+import path10 from "node:path";
 
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
@@ -5004,8 +5004,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path10, errorMaps, issueData } = params;
-  const fullPath = [...path10, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5121,11 +5121,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path10, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path10;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -9084,6 +9084,105 @@ var MODEL_PRICES = {
 var SONNET_INPUT_USD_PER_MTOK = MODEL_PRICES["claude-sonnet-4-6"].inputUsdPerMTok;
 var SONNET_OUTPUT_USD_PER_MTOK = MODEL_PRICES["claude-sonnet-4-6"].outputUsdPerMTok;
 
+// packages/plugin-core/src/resolver-skill.ts
+import { createHash } from "node:crypto";
+import { promises as fs7 } from "node:fs";
+import os7 from "node:os";
+import path9 from "node:path";
+var RESOLVER_SKILL_DIR = path9.join(os7.homedir(), ".claude", "skills", "memlin");
+var RESOLVER_SKILL_FILE = path9.join(RESOLVER_SKILL_DIR, "SKILL.md");
+var LEGACY_RESOLVER_SKILL_HASHES = [
+  // v1: 2026-06-09 → 2026-06-17. Before the "Writing your own memories"
+  // section was added.
+  "d15dbda39864a93c7bb73e1d13813de0ebacd811fb6260ff2b07436781c544e0"
+];
+async function ensureResolverSkill() {
+  try {
+    let existing = null;
+    try {
+      existing = await fs7.readFile(RESOLVER_SKILL_FILE, "utf8");
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+    }
+    if (existing !== null && existing.length > 0) {
+      if (existing === RESOLVER_SKILL_MD) {
+        return { status: "kept", path: RESOLVER_SKILL_FILE };
+      }
+      const hash2 = createHash("sha256").update(existing).digest("hex");
+      if (!LEGACY_RESOLVER_SKILL_HASHES.includes(hash2)) {
+        return { status: "kept", path: RESOLVER_SKILL_FILE };
+      }
+      await fs7.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+      return { status: "upgraded", path: RESOLVER_SKILL_FILE };
+    }
+    await fs7.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
+    await fs7.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+    return { status: "installed", path: RESOLVER_SKILL_FILE };
+  } catch (e) {
+    return {
+      status: "failed",
+      path: RESOLVER_SKILL_FILE,
+      error: e instanceof Error ? e.message : String(e)
+    };
+  }
+}
+var RESOLVER_SKILL_MD = `---
+name: Memlin
+description: Memlin auto-resolves project context (skills, memory, approved goals, schemas) into your prompt before you process it. This skill tells you how to *use* that context, and when to fall back to invoking memlin_resolve_task manually.
+---
+
+# Memlin Resolver
+
+The Memlin plugin's UserPromptSubmit hook auto-injects a \`<memlin-resolved-context>\`
+block into every non-trivial user prompt \u2014 *before* you see the prompt. The
+block contains the same scope-correct, citation-bearing bundle that
+\`memlin_resolve_task\` would return: top skills, memory, approved goals,
+schemas, kind-weighted and threshold-filtered to ~4k tokens.
+
+## How to use the pre-resolved bundle
+
+1. **Read it as authoritative project context.** It's already scope-filtered
+   (project + workspace, RLS-enforced server-side) \u2014 you don't need to ask the
+   user for access.
+2. **Apply the primary skill's framework** first. Use supporting skills for
+   complementary perspectives. **Treat memory facts as project ground truth**
+   (more authoritative than your training data when they conflict). **Honor
+   goals as constraints.** **Validate against any schemas.**
+3. **Cite your sources.** When stating a fact or following a constraint from
+   the bundle, mention the source path + version. Example: "Per
+   \`goals/auth-required.md\` v1, every new endpoint requires authn."
+4. **Don't re-invoke \`memlin_resolve_task\`** for the current user message \u2014
+   the bundle is already in your context. Re-invoking just wastes a tool call.
+
+## When to invoke memlin_search or memlin_read_memory yourself
+
+The auto-resolve covers the task at hand. Use the MCP tools directly when you
+need to *explore* beyond the resolved bundle:
+
+- The user asks "what does Memlin know about X?" where X is broader than the
+  current task \u2192 \`memlin_search\` with X as the query.
+- You need ALL of something (e.g. "list all approved goals in this project")
+  \u2192 \`memlin_read_memory\` with the appropriate filter.
+- You want to read the full body of a doc the bundle only cited a snippet of
+  \u2192 \`memlin_get_document\` with the doc id.
+
+## Empty bundle
+
+If the resolved-context block is missing or empty, it means either (a) the
+user's prompt was trivial enough that the hook skipped it, or (b) nothing in
+the workspace cleared the per-kind similarity threshold for this task.
+Proceed with your general expertise and note that you didn't find specialized
+context for this task.
+
+## Writing memories
+
+How Memlin expects you to *write* memories (archive vs. delete, distill vs.
+pad, etc.) is delivered as a platform skill seeded into your workspace \u2014
+look for "Memlin: writing memories well" in the resolved bundle when you
+do autonomous memory writes. That's the source of truth; this file stays
+focused on the reader side.
+`;
+
 // packages/plugin-core/src/cli/sync.ts
 async function main() {
   const ctx = await getApi();
@@ -9092,6 +9191,10 @@ async function main() {
     process.exit(1);
   }
   const { api, config } = ctx;
+  const skill = await ensureResolverSkill();
+  if (skill.status === "upgraded") {
+    console.log(`  \u2713 refreshed Memlin resolver skill (${skill.path})`);
+  }
   const cwd = runtimeCwd();
   const resolved = await resolveProject(api, cwd, config.project_id);
   console.log(
@@ -9207,7 +9310,7 @@ function inferTitle(relPath, content) {
     const name = m[1].split("\n").find((l) => l.startsWith("name:"));
     if (name) return name.replace(/^name:\s*/, "").trim();
   }
-  return path9.basename(relPath, path9.extname(relPath));
+  return path10.basename(relPath, path10.extname(relPath));
 }
 main().catch((err) => {
   console.error("memlin sync failed:", err instanceof Error ? err.message : err);
