@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { printCommandGuide } from "./command-guide.js";
 const RUN = {
   login: () => import("./login.js"),
   init: () => import("./init.js"),
@@ -38,15 +39,7 @@ async function main() {
     }
   }
   if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
-    process.stdout.write(
-      `memlin \u2014 Memlin CLI
-
-Usage: memlin <command> [args]
-
-Commands:
-  ${Object.keys(RUN).join(", ")}
-`
-    );
+    printCommandGuide({ write: (line) => process.stdout.write(line + "\n") });
     process.exit(sub ? 0 : 1);
   }
   const run = RUN[sub];

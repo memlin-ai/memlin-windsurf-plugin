@@ -174,7 +174,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.6";
+  return "0.1.7";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -725,6 +725,51 @@ async function ensureUserScopePluginEnabled(paths) {
   }
 }
 
+// packages/plugin-core/src/cli/command-guide.ts
+var ROWS = [
+  ["Discovery", "ask", "ask your workspace anything"],
+  ["", "inbox", "review scribe proposals"],
+  ["", "scribe", "extract from this session"],
+  ["Sync", "sync", "pull + push in one shot"],
+  ["", "pull", "server \u2192 local"],
+  ["", "push", "local \u2192 server"],
+  ["", "revert", "roll a doc back a version"],
+  ["Plans", "push-plan", "upload a Claude Code plan"],
+  ["", "pull-plans", "refresh local plans"],
+  ["", "bind-plans", "assign unbound local plans"],
+  ["Actions", "actions-list", "callable workspace tools"],
+  ["", "actions-execute", "invoke one by id"],
+  ["Audit", "audit-replay", "see the bundle an agent saw"],
+  ["", "audit-explain", "why each item ranked there"],
+  ["Coordination", "handoffs", "pass work between agents"],
+  ["", "role", "assign roles to members/docs"],
+  ["Setup & health", "status", "auth, account, project, sync state"],
+  ["", "doctor", "diagnose why status is broken"],
+  ["", "add-project", "register this workspace"],
+  ["", "link", "pin a different account"]
+];
+function printCommandGuide(opts = {}) {
+  const write = opts.write ?? ((line) => console.log(line));
+  const host = resolveHost().kind;
+  const isSlashHost = host === "claude-code" || host === "cursor";
+  const fmt = (cmd) => isSlashHost ? `/memlin-${cmd}` : `memlin ${cmd}`;
+  const helpRef = isSlashHost ? "`/memlin-help`" : "`memlin help`";
+  const cmdCol = Math.max(...ROWS.map((r) => fmt(r[1]).length));
+  if (opts.intro) {
+    write("");
+    write(`  What you can do from here (run ${helpRef} for this list anytime):`);
+    write("");
+  } else {
+    write("memlin \u2014 Memlin commands");
+    write("");
+  }
+  for (const [section, cmd, blurb] of ROWS) {
+    const sectionCol = section.padEnd(16);
+    const cmdStr = fmt(cmd).padEnd(cmdCol);
+    write(`    ${sectionCol} ${cmdStr}  ${blurb}`);
+  }
+}
+
 // packages/plugin-core/src/cli/login.ts
 var CONFIG_DIR = path4.join(os5.homedir(), ".config", "memlin");
 var CONFIG_FILE = path4.join(CONFIG_DIR, "config.json");
@@ -886,6 +931,7 @@ async function main() {
   }
   console.log("");
   console.log("  Run `memlin pull` to fetch your memory, skills, and goals.");
+  printCommandGuide({ intro: true });
 }
 main().catch((err) => {
   console.error("memlin login failed:", err instanceof Error ? err.message : err);

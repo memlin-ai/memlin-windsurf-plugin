@@ -26,5 +26,9 @@ use the `memlin` CLI in the terminal (installed on PATH by the plugin's
 - `memlin ask "<question>"` — natural-language query with citations
 - `memlin scribe` — extract decisions/memories from the session
 - `memlin inbox` — review scribe proposals
+- `memlin help` — full categorized command list (every command, what each does)
+
+If the user asks "what can Memlin do" or which commands exist, run
+`memlin help` and relay the categorized list verbatim.
 
 Cite Memlin sources by path and version when using resolved context.
