@@ -8052,8 +8052,8 @@ var MEMLIN_COMMANDS = [
   {
     section: "",
     cmd: "diff",
-    blurb: "check a code constant against a Memlin contract",
-    details: "CI-friendly drift check. Parses a fenced ```memlin-contract``` JSON block out of a Memlin document body and diffs it against a local JSON file. Exits 0 on match, 1 on drift, 2 on error. Use it in CI to assert that your code's constants still match the approved decision in Memlin \u2014 a backstop against silent drift between a documented choice and what's actually running."
+    blurb: "verify a Memlin doc against your ground truth",
+    details: "CI-friendly contract check. Parses a fenced ```memlin-contract``` JSON block out of a Memlin document body and diffs it against a local JSON file. Exit 0 = clean, 1 = drifted, 2 = error. Pass `--record` to post the result back as a `verified` / `drifted` row on the doc \u2014 the resolver then stamps every future bundle citation with that status so agents can prefer verified knowledge and flag the rest. The trust layer that turns 'governed' into 'verified.'"
   },
   {
     section: "Audit",
