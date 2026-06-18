@@ -8820,8 +8820,8 @@ var MEMLIN_COMMANDS = [
   {
     section: "Outcomes",
     cmd: "verify",
-    blurb: "record what actually held",
-    details: "Record a measured outcome on a past decision \u2014 `held`, `broke`, or `inconclusive` \u2014 with whatever evidence and measurements you have. Run `memlin verify --due` first to see decisions whose review_by date has arrived. The verdict shows up on the decision and on the Agent Experience page, and rides along on future resolves so what worked steers what comes next."
+    blurb: "turn a decision into a verdict",
+    details: "Close the feedback loop on a past decision \u2014 `held`, `broke`, or `inconclusive` \u2014 with whatever evidence and measurements you have. Run `memlin verify --due` first to see decisions whose review_by date has arrived. Each verdict becomes reusable knowledge for the next decision: it shows on the decision, in Agent Experience, and rides along on future resolves so your agents build experience from what actually worked."
   },
   {
     section: "Audit",
