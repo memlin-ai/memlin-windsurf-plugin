@@ -319,6 +319,10 @@ var MemlinApiClient = class {
   async writeDocument(input) {
     return this.request("POST", "/documents", input);
   }
+  /** GET /documents/{id} — fetch one doc with body + metadata. */
+  async getDocument(documentId) {
+    return this.request("GET", `/documents/${encodeURIComponent(documentId)}`);
+  }
   /** GET /documents/{id}/versions — history. */
   async listVersions(documentId) {
     const res = await this.request(

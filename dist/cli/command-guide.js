@@ -8050,6 +8050,12 @@ var MEMLIN_COMMANDS = [
     details: "Close the feedback loop on a past decision \u2014 `held`, `broke`, or `inconclusive` \u2014 with whatever evidence and measurements you have. Run `memlin verify --due` first to see decisions whose review_by date has arrived. Each verdict becomes reusable knowledge for the next decision: it shows on the decision, in Agent Experience, and rides along on future resolves so your agents build experience from what actually worked."
   },
   {
+    section: "",
+    cmd: "diff",
+    blurb: "check a code constant against a Memlin contract",
+    details: "CI-friendly drift check. Parses a fenced ```memlin-contract``` JSON block out of a Memlin document body and diffs it against a local JSON file. Exits 0 on match, 1 on drift, 2 on error. Use it in CI to assert that your code's constants still match the approved decision in Memlin \u2014 a backstop against silent drift between a documented choice and what's actually running."
+  },
+  {
     section: "Audit",
     cmd: "audit-replay",
     blurb: "see the bundle an agent saw",
