@@ -360,6 +360,15 @@ var MemlinApiClient = class {
   async getDocument(documentId) {
     return this.request("GET", `/documents/${encodeURIComponent(documentId)}`);
   }
+  /** POST /documents/{id}/contract-verification — H12. Record a contract
+   *  check. Used by `memlin diff --record`. */
+  async recordContractVerification(documentId, body) {
+    return this.request(
+      "POST",
+      `/documents/${encodeURIComponent(documentId)}/contract-verification`,
+      body
+    );
+  }
   /** GET /documents/{id}/versions — history. */
   async listVersions(documentId) {
     const res = await this.request(
