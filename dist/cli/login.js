@@ -8369,7 +8369,18 @@ var DOCUMENT_KINDS = [
   // body is a GFM task list. Like 'file', it's ISOLATED from the resolver/
   // scribe/inbox/export until promoted up a tier. Reuses the shared
   // goal-criteria checklist helpers (parseGoalCriteria / toggleGoalCriterionInBody).
-  "todo"
+  "todo",
+  // Structured feedback (a thumb / rating / freeform comment) about something —
+  // a memory, an answer, a skill, an audit, or a customer-product surface
+  // identified by an external id. Captured first-party (rate-this-answer
+  // buttons in the UI) AND third-party (customers embed @memlin/feedback-sdk
+  // in their app; signed mlt_ token authorizes the write). Like 'file' and
+  // 'todo', feedback is ISOLATED from the default resolver / scribe / inbox /
+  // Documents browser so low-signal noise never silently rides into agent
+  // bundles — it surfaces via dedicated query paths (memlin_feedback_search,
+  // /api/v1/feedback, the support-role resolver overlay) and via the
+  // clusterer that proposes promotion to a memory when N similar items land.
+  "feedback"
 ];
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];

@@ -893,6 +893,7 @@ async function applyPullToLocal(docs, state, now, rootOverride) {
   const root = rootOverride ?? resolveHost().homeDir();
   for (const d of docs) {
     if (d.kind === "brand_guidelines") continue;
+    if (d.kind === "feedback") continue;
     const localPath = inferLocalPath(d.kind, d.title, d.path);
     currentPaths.add(localPath);
     const full = path7.join(root, localPath);
