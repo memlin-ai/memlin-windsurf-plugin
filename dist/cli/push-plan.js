@@ -225,7 +225,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.9";
+  return "0.1.10";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -747,6 +747,7 @@ function applyWorkspaceOverlay(config, overlay) {
 
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import path5 from "node:path";
 var WORKSPACE_ENV_VARS = [
   // Claude Code exposes the original project dir to hooks/plugin commands.

@@ -225,7 +225,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.9";
+  return "0.1.10";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -763,6 +763,7 @@ function applyWorkspaceOverlay(config, overlay) {
 
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import path5 from "node:path";
 var WORKSPACE_ENV_VARS = [
   // Claude Code exposes the original project dir to hooks/plugin commands.
@@ -783,7 +784,7 @@ function runtimeCwd(fallback = process.cwd()) {
 }
 
 // packages/plugin-core/src/sibling-detect.ts
-import { readdirSync, existsSync } from "node:fs";
+import { readdirSync as readdirSync2, existsSync as existsSync2 } from "node:fs";
 import { execSync as execSync2 } from "node:child_process";
 import path6 from "node:path";
 var MAX_CHILD_DIRS = 32;
@@ -791,14 +792,14 @@ var MAX_REMOTE_PROBES = 5;
 function childGitRemotes(cwd, deps = {}) {
   const listDirs = deps.listDirs ?? ((p) => {
     try {
-      return readdirSync(p, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules").map((e) => e.name);
+      return readdirSync2(p, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules").map((e) => e.name);
     } catch {
       return [];
     }
   });
   const readRemote = deps.readRemote ?? ((repoPath) => {
     try {
-      if (!existsSync(path6.join(repoPath, ".git"))) return null;
+      if (!existsSync2(path6.join(repoPath, ".git"))) return null;
       const url = execSync2("git remote get-url origin", {
         cwd: repoPath,
         stdio: ["ignore", "pipe", "ignore"],
@@ -846,7 +847,7 @@ function decideAddProjectAction(input) {
 
 // packages/plugin-core/src/plugin-install.ts
 import { promises as fs4 } from "node:fs";
-import { existsSync as existsSync2 } from "node:fs";
+import { existsSync as existsSync3 } from "node:fs";
 import path7 from "node:path";
 import os5 from "node:os";
 var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
@@ -857,7 +858,7 @@ function defaultUserSettingsPaths() {
 }
 async function readClaudeUserSettings(paths) {
   const p = paths ?? defaultUserSettingsPaths();
-  if (!existsSync2(p.settingsFile)) return null;
+  if (!existsSync3(p.settingsFile)) return null;
   let raw;
   try {
     raw = await fs4.readFile(p.settingsFile, "utf8");

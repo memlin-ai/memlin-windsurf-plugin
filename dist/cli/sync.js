@@ -3524,6 +3524,7 @@ import path10 from "node:path";
 
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 // packages/plugin-core/src/runtime-shared.ts
@@ -3602,10 +3603,14 @@ function runtimeCwd(fallback = process.cwd()) {
 }
 async function resolveProject(api, cwd, configProjectId) {
   const absCwd = path.resolve(cwd);
-  const remote = readGitRemote(cwd);
+  const remotes = detectGitRemotes(cwd);
   try {
     const result = await api.resolveProject({
-      git_remote: remote,
+      // Primary remote (back-compat with the single-remote server path).
+      git_remote: remotes[0] ?? null,
+      // All detected remotes — for the workspace-root-of-repos case, this is
+      // every sibling repo so the server resolves to the owning project.
+      git_remotes: remotes,
       cwd: absCwd
     });
     if (result.project_id) {
@@ -3640,10 +3645,32 @@ function readGitRemote(cwd) {
     return null;
   }
 }
+var MAX_WORKSPACE_SCAN = 64;
+function detectGitRemotes(cwd) {
+  const enclosing = readGitRemote(cwd);
+  if (enclosing) return [enclosing];
+  const out = [];
+  try {
+    let scanned = 0;
+    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
+      if (scanned >= MAX_WORKSPACE_SCAN) break;
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+      scanned++;
+      const child = path.join(cwd, entry.name);
+      if (!existsSync(path.join(child, ".git"))) continue;
+      const remote = readGitRemote(child);
+      if (remote && !out.includes(remote)) out.push(remote);
+    }
+  } catch {
+  }
+  return out;
+}
 
 // packages/plugin-core/src/local-scan.ts
 import { promises as fs2 } from "node:fs";
-import { existsSync } from "node:fs";
+import { existsSync as existsSync2 } from "node:fs";
 import path4 from "node:path";
 
 // packages/plugin-core/src/state.ts
@@ -3731,7 +3758,7 @@ async function scanLocal(opts = {}) {
   const out = [];
   const root = opts.rootOverride ?? resolveHost().homeDir();
   const memDir = path4.join(root, "memory");
-  if (existsSync(memDir)) {
+  if (existsSync2(memDir)) {
     for (const file of await fs2.readdir(memDir)) {
       if (!file.endsWith(".md") || file === "MEMORY.md") continue;
       const abs = path4.join(memDir, file);
@@ -3746,12 +3773,12 @@ async function scanLocal(opts = {}) {
     }
   }
   const skillsDir = path4.join(root, "skills");
-  if (existsSync(skillsDir)) {
+  if (existsSync2(skillsDir)) {
     const entries = await fs2.readdir(skillsDir, { withFileTypes: true });
     for (const e of entries) {
       if (!e.isDirectory()) continue;
       const skillMd = path4.join(skillsDir, e.name, "SKILL.md");
-      if (!existsSync(skillMd)) continue;
+      if (!existsSync2(skillMd)) continue;
       const content = await fs2.readFile(skillMd, "utf8");
       out.push({
         path: `skills/${e.name}/SKILL.md`,
@@ -3764,7 +3791,7 @@ async function scanLocal(opts = {}) {
   }
   if (opts.includePlans) {
     const plansDir = resolveHost().plansDir();
-    if (existsSync(plansDir)) {
+    if (existsSync2(plansDir)) {
       for (const file of await fs2.readdir(plansDir)) {
         if (!file.endsWith(".md")) continue;
         const abs = path4.join(plansDir, file);
@@ -3784,7 +3811,7 @@ async function scanLocal(opts = {}) {
 
 // packages/plugin-core/src/apply.ts
 import { promises as fs3 } from "node:fs";
-import { existsSync as existsSync2 } from "node:fs";
+import { existsSync as existsSync3 } from "node:fs";
 import os3 from "node:os";
 import path5 from "node:path";
 
@@ -3822,12 +3849,12 @@ function archiveRoot() {
 }
 async function archiveDestination(trackedRelPath) {
   const base = path5.join(archiveRoot(), trackedRelPath);
-  if (!existsSync2(base)) return base;
+  if (!existsSync3(base)) return base;
   const ext = path5.extname(base);
   const stem = base.slice(0, base.length - ext.length);
   for (let i = 1; i < 1e3; i++) {
     const candidate = `${stem}.${i}${ext}`;
-    if (!existsSync2(candidate)) return candidate;
+    if (!existsSync3(candidate)) return candidate;
   }
   return `${stem}.${Date.now()}${ext}`;
 }
@@ -3873,7 +3900,7 @@ async function applyPullToLocal(docs, state, now, rootOverride) {
   for (const tracked of Object.keys(state.documents)) {
     if (currentPaths.has(tracked)) continue;
     const full = path5.join(root, tracked);
-    if (existsSync2(full)) {
+    if (existsSync3(full)) {
       let userEdited = false;
       try {
         const local = await fs3.readFile(full, "utf8");
@@ -4020,7 +4047,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os5.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.9";
+  return "0.1.10";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];

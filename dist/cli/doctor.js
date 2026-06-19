@@ -8,6 +8,7 @@ import os6 from "node:os";
 
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 // packages/plugin-core/src/runtime-shared.ts
@@ -86,10 +87,14 @@ function runtimeCwd(fallback = process.cwd()) {
 }
 async function resolveProject(api, cwd, configProjectId) {
   const absCwd = path.resolve(cwd);
-  const remote = readGitRemote(cwd);
+  const remotes = detectGitRemotes(cwd);
   try {
     const result = await api.resolveProject({
-      git_remote: remote,
+      // Primary remote (back-compat with the single-remote server path).
+      git_remote: remotes[0] ?? null,
+      // All detected remotes — for the workspace-root-of-repos case, this is
+      // every sibling repo so the server resolves to the owning project.
+      git_remotes: remotes,
       cwd: absCwd
     });
     if (result.project_id) {
@@ -123,6 +128,28 @@ function readGitRemote(cwd) {
   } catch {
     return null;
   }
+}
+var MAX_WORKSPACE_SCAN = 64;
+function detectGitRemotes(cwd) {
+  const enclosing = readGitRemote(cwd);
+  if (enclosing) return [enclosing];
+  const out = [];
+  try {
+    let scanned = 0;
+    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
+      if (scanned >= MAX_WORKSPACE_SCAN) break;
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+      scanned++;
+      const child = path.join(cwd, entry.name);
+      if (!existsSync(path.join(child, ".git"))) continue;
+      const remote = readGitRemote(child);
+      if (remote && !out.includes(remote)) out.push(remote);
+    }
+  } catch {
+  }
+  return out;
 }
 
 // packages/plugin-core/src/client.ts
@@ -288,7 +315,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.9";
+  return "0.1.10";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -915,7 +942,7 @@ function evaluatePluginPresence(presence, settingsFile) {
 
 // packages/plugin-core/src/plugin-install.ts
 import { promises as fs4 } from "node:fs";
-import { existsSync } from "node:fs";
+import { existsSync as existsSync2 } from "node:fs";
 import path6 from "node:path";
 import os5 from "node:os";
 var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
@@ -926,7 +953,7 @@ function defaultUserSettingsPaths() {
 }
 async function readClaudeUserSettings(paths) {
   const p = paths ?? defaultUserSettingsPaths();
-  if (!existsSync(p.settingsFile)) return null;
+  if (!existsSync2(p.settingsFile)) return null;
   let raw;
   try {
     raw = await fs4.readFile(p.settingsFile, "utf8");

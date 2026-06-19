@@ -8106,7 +8106,7 @@ var MEMLIN_COMMANDS = [
     section: "",
     cmd: "add-project",
     blurb: "register this workspace",
-    details: "Registers the current workspace as a Memlin project. Auto-detects the git remote and local paths, writes a workspace pin, and makes sure every future session in this directory binds to the project automatically."
+    details: "Registers the current workspace as a Memlin project. Auto-detects the git remote and local paths, writes a workspace pin, and makes sure every future session in this directory binds to the project automatically. You usually don\u2019t need it: opening your agent inside a repo (or at a workspace root holding sibling repos, e.g. ~/Repos/Drip/{drip-api,web,mobile}) auto-resolves to the project that owns those repos \u2014 forks included, via the project\u2019s additional remotes. Reach for add-project only for a single standalone repo that isn\u2019t attached yet, or a non-git folder."
   },
   {
     section: "",
