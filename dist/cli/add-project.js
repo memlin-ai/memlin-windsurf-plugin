@@ -225,7 +225,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.11";
+  return "0.1.12";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -971,6 +971,26 @@ async function main() {
   const { api, config } = ctx;
   const cwd = runtimeCwd();
   const gitRemote = readGitRemote(cwd);
+  const me = await api.me();
+  const accounts = me.accounts.map((a) => ({
+    id: a.id,
+    name: a.name,
+    kind: a.kind,
+    role: a.role
+  }));
+  let explicitTarget = null;
+  if (parsed.org) {
+    explicitTarget = pickAccount(accounts, parsed.org, config.account_id);
+    if (!explicitTarget) {
+      console.error(`memlin add-project: couldn't match --org "${parsed.org}".`);
+      console.error("Your orgs:");
+      for (const a of accounts) {
+        const tag = a.kind === "personal" ? " (personal)" : "";
+        console.error(`  ${a.id}  ${a.name}${tag}  [${a.role}]`);
+      }
+      process.exit(1);
+    }
+  }
   let resolved;
   try {
     resolved = await api.resolveProject({ git_remote: gitRemote, cwd });
@@ -981,57 +1001,86 @@ async function main() {
     process.exit(1);
   }
   if (resolved.project_id && resolved.account_id) {
-    const pin2 = await writeWorkspaceBinding(cwd, {
-      account_id: resolved.account_id,
-      project_id: resolved.project_id
-    });
-    console.log(`Already registered. Pinned ${cwd}`);
-    console.log(`  \u2192 project "${resolved.name ?? "(unnamed)"}" via ${resolved.reason}`);
-    console.log(`  wrote ${pin2}`);
-    return;
+    const reTarget = Boolean(explicitTarget && explicitTarget.id !== resolved.account_id);
+    if (!reTarget) {
+      const pin2 = await writeWorkspaceBinding(cwd, {
+        account_id: resolved.account_id,
+        project_id: resolved.project_id
+      });
+      console.log(`Already registered. Pinned ${cwd}`);
+      console.log(`  \u2192 project "${resolved.name ?? "(unnamed)"}" via ${resolved.reason}`);
+      console.log(`  wrote ${pin2}`);
+      return;
+    }
+    console.log(
+      `Re-targeting this workspace to "${explicitTarget.name}" (was resolving to "${resolved.name ?? resolved.project_id}" under another org via ${resolved.reason}).`
+    );
+    if (resolved.reason === "local-path") {
+      try {
+        await api.patchProject(
+          resolved.project_id,
+          { remove_local_paths: [cwd] },
+          { accountId: resolved.account_id }
+        );
+        console.log(`  detached ${cwd} from the old project`);
+      } catch (err) {
+        console.error(
+          `  warning: couldn't auto-detach the old local-path registration (${err instanceof Error ? err.message : err}).`
+        );
+        console.error(
+          `  Remove ${cwd} from that project's local_paths in the web app, or resolution may keep reverting.`
+        );
+      }
+    }
   }
-  const sibling = await detectSiblingProject(cwd, (input) => api.resolveProject(input));
-  const action = decideAddProjectAction({
-    attachFlag: parsed.attach ?? null,
-    createNewFlag: parsed.createNew === true,
-    sibling,
-    isTTY: process.stdout.isTTY === true && process.stdin.isTTY === true
-  });
   let attachTargetId = null;
-  if (action.kind === "attach") {
-    attachTargetId = action.projectId;
-  } else if (action.kind === "error-need-flag") {
-    console.error(
-      `memlin add-project: this folder's child repo ${sibling.via}/ already belongs to project "${sibling.name ?? sibling.project_id}".`
-    );
-    console.error("Refusing to silently create a second project. Choose explicitly:");
-    console.error(`  memlin add-project --attach ${sibling.project_id}   # attach this root to it`);
-    console.error("  memlin add-project --create-new                      # really create a new project");
-    process.exit(2);
-  } else if (action.kind === "prompt") {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const answer = await new Promise(
-      (resolve) => rl.question(
-        `Child repo ${sibling.via}/ already belongs to project "${sibling.name ?? sibling.project_id}".
+  let attachAccountId = null;
+  if (!explicitTarget) {
+    const sibling = await detectSiblingProject(cwd, (input) => api.resolveProject(input));
+    const action = decideAddProjectAction({
+      attachFlag: parsed.attach ?? null,
+      createNewFlag: parsed.createNew === true,
+      sibling,
+      isTTY: process.stdout.isTTY === true && process.stdin.isTTY === true
+    });
+    attachAccountId = sibling?.account_id ?? null;
+    if (action.kind === "attach") {
+      attachTargetId = action.projectId;
+    } else if (action.kind === "error-need-flag") {
+      console.error(
+        `memlin add-project: this folder's child repo ${sibling.via}/ already belongs to project "${sibling.name ?? sibling.project_id}".`
+      );
+      console.error("Refusing to silently create a second project. Choose explicitly:");
+      console.error(`  memlin add-project --attach ${sibling.project_id}   # attach this root to it`);
+      console.error(
+        "  memlin add-project --create-new                      # really create a new project"
+      );
+      process.exit(2);
+    } else if (action.kind === "prompt") {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise(
+        (resolve) => rl.question(
+          `Child repo ${sibling.via}/ already belongs to project "${sibling.name ?? sibling.project_id}".
 Attach this folder to it instead of creating a new project? [Y/n] `,
-        resolve
-      )
-    );
-    rl.close();
-    if (answer.trim() === "" || /^y(es)?$/i.test(answer.trim())) {
-      attachTargetId = sibling.project_id;
+          resolve
+        )
+      );
+      rl.close();
+      if (answer.trim() === "" || /^y(es)?$/i.test(answer.trim())) {
+        attachTargetId = sibling.project_id;
+      }
     }
   }
   if (attachTargetId) {
-    const attachAccountId = sibling?.account_id ?? config.account_id;
+    const attachAcct = attachAccountId ?? config.account_id;
     try {
       const updated = await api.patchProject(
         attachTargetId,
         { add_local_paths: [cwd] },
-        { accountId: attachAccountId }
+        { accountId: attachAcct }
       );
       const pin2 = await writeWorkspaceBinding(cwd, {
-        account_id: attachAccountId,
+        account_id: attachAcct,
         project_id: attachTargetId
       });
       console.log(`Attached ${cwd} \u2192 project "${updated.name}"`);
@@ -1045,18 +1094,9 @@ Attach this folder to it instead of creating a new project? [Y/n] `,
       process.exit(1);
     }
   }
-  const me = await api.me();
-  const accounts = me.accounts.map((a) => ({
-    id: a.id,
-    name: a.name,
-    kind: a.kind,
-    role: a.role
-  }));
-  const target = pickAccount(accounts, parsed.org, config.account_id);
+  const target = explicitTarget ?? pickAccount(accounts, void 0, config.account_id);
   if (!target) {
-    console.error(
-      `memlin add-project: couldn't pick an org${parsed.org ? ` matching "${parsed.org}"` : ""}.`
-    );
+    console.error("memlin add-project: couldn't pick a default org.");
     console.error("Pass --org <name> explicitly. Your orgs:");
     for (const a of accounts) {
       const tag = a.kind === "personal" ? " (personal)" : "";
