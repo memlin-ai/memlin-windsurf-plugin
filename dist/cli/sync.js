@@ -4020,7 +4020,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os5.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.8";
+  return "0.1.9";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
