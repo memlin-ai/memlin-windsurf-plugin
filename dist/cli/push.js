@@ -86,6 +86,7 @@ function runtimeCwd(fallback = process.cwd()) {
 async function resolveProject(api, cwd, configProjectId) {
   const absCwd = path.resolve(cwd);
   const remotes = detectGitRemotes(cwd);
+  const hasGitRemote = remotes.length > 0;
   try {
     const result = await api.resolveProject({
       // Primary remote (back-compat with the single-remote server path).
@@ -100,7 +101,8 @@ async function resolveProject(api, cwd, configProjectId) {
         project_id: result.project_id,
         project_name: result.name,
         account_id: result.account_id,
-        reason: result.reason === "none" ? "config" : result.reason
+        reason: result.reason === "none" ? "config" : result.reason,
+        hasGitRemote
       };
     }
   } catch {
@@ -110,10 +112,11 @@ async function resolveProject(api, cwd, configProjectId) {
       project_id: configProjectId,
       project_name: null,
       account_id: null,
-      reason: "config"
+      reason: "config",
+      hasGitRemote
     };
   }
-  return { project_id: null, project_name: null, account_id: null, reason: "none" };
+  return { project_id: null, project_name: null, account_id: null, reason: "none", hasGitRemote };
 }
 function readGitRemote(cwd) {
   try {
@@ -397,7 +400,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os4.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.10";
+  return "0.1.11";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];

@@ -3742,7 +3742,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.10";
+  return "0.1.11";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -4294,9 +4294,21 @@ async function writeState(state) {
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import path6 from "node:path";
+var ALLOW_ACCOUNT_MISMATCH_ENV = "MEMLIN_ALLOW_ACCOUNT_MISMATCH";
+function allowAccountMismatch(env = process.env) {
+  const v = env[ALLOW_ACCOUNT_MISMATCH_ENV];
+  return v === "1" || v === "true" || v === "yes";
+}
+function accountBindingHazard(r, opts = {}) {
+  if (!r.hasGitRemote || !r.project_id) return "none";
+  if (r.reason === "local-path") return opts.allowMismatch ? "warn" : "block";
+  if (r.reason === "config") return "warn";
+  return "none";
+}
 async function resolveProject(api, cwd, configProjectId) {
   const absCwd = path6.resolve(cwd);
   const remotes = detectGitRemotes(cwd);
+  const hasGitRemote = remotes.length > 0;
   try {
     const result = await api.resolveProject({
       // Primary remote (back-compat with the single-remote server path).
@@ -4311,7 +4323,8 @@ async function resolveProject(api, cwd, configProjectId) {
         project_id: result.project_id,
         project_name: result.name,
         account_id: result.account_id,
-        reason: result.reason === "none" ? "config" : result.reason
+        reason: result.reason === "none" ? "config" : result.reason,
+        hasGitRemote
       };
     }
   } catch {
@@ -4321,10 +4334,11 @@ async function resolveProject(api, cwd, configProjectId) {
       project_id: configProjectId,
       project_name: null,
       account_id: null,
-      reason: "config"
+      reason: "config",
+      hasGitRemote
     };
   }
-  return { project_id: null, project_name: null, account_id: null, reason: "none" };
+  return { project_id: null, project_name: null, account_id: null, reason: "none", hasGitRemote };
 }
 function readGitRemote(cwd) {
   try {
@@ -9041,12 +9055,14 @@ async function maybeProposeMemory(ctx, payload) {
   const gitRemote = readGitRemote2(cwd);
   let accountOverride;
   let resolvedProjectId = null;
+  let hazard = "none";
   try {
     const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
     resolvedProjectId = resolved.project_id;
     if (resolved.account_id && resolved.account_id !== ctx.config.account_id) {
       accountOverride = resolved.account_id;
     }
+    hazard = accountBindingHazard(resolved, { allowMismatch: allowAccountMismatch() });
   } catch {
   }
   const active = isWorkspaceActive({
@@ -9055,6 +9071,12 @@ async function maybeProposeMemory(ctx, payload) {
   });
   if (!active) {
     log("memory propose: skipped \u2014 not a known Memlin workspace");
+    return;
+  }
+  if (hazard === "block") {
+    log(
+      "memory propose: BLOCKED \u2014 account-binding mismatch (git remote not owned by the resolved project). Re-link with `memlin add-project`, or set MEMLIN_ALLOW_ACCOUNT_MISMATCH=1 to record here anyway."
+    );
     return;
   }
   const propose = ctx.api.proposeMemory(
@@ -9196,15 +9218,23 @@ async function maybeScribeSession(ctx, payload) {
   const cwd = payload.cwd ?? process.cwd();
   let resolvedProjectId = null;
   let accountOverride;
+  let hazard = "none";
   try {
     const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
     resolvedProjectId = resolved.project_id;
     if (resolved.account_id && resolved.account_id !== ctx.config.account_id) {
       accountOverride = resolved.account_id;
     }
+    hazard = accountBindingHazard(resolved, { allowMismatch: allowAccountMismatch() });
   } catch {
   }
   if (!isWorkspaceActive({ resolvedProjectId, workspaceBound: ctx.workspaceBound })) {
+    return;
+  }
+  if (hazard === "block") {
+    log(
+      "session scribe: BLOCKED \u2014 account-binding mismatch. Re-link with `memlin add-project`, or set MEMLIN_ALLOW_ACCOUNT_MISMATCH=1 to record here anyway."
+    );
     return;
   }
   const lines = raw.split("\n").filter((l) => l.trim());

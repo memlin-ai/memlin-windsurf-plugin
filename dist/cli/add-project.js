@@ -225,7 +225,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.10";
+  return "0.1.11";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -1063,6 +1063,14 @@ Attach this folder to it instead of creating a new project? [Y/n] `,
       console.error(`  ${a.id}  ${a.name}${tag}  [${a.role}]`);
     }
     process.exit(1);
+  }
+  if (!parsed.org && gitRemote && accounts.length > 1) {
+    console.log(
+      `Note: this repo's git remote isn't attached to any of your ${accounts.length} orgs yet.`
+    );
+    console.log(
+      `Creating a new project under "${target.name}" (your default). If it belongs to a different org, cancel and pass --org <name>, or run \`memlin login\` to refresh your account list first.`
+    );
   }
   const projectName = parsed.name?.trim() || path8.basename(cwd).trim() || "untitled";
   let project;
