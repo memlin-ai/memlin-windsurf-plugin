@@ -8230,6 +8230,24 @@ async function withTimeout(promise, ms, fallback) {
     if (timer !== void 0) clearTimeout(timer);
   }
 }
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/dist/host.js
 import os2 from "node:os";
@@ -8292,7 +8310,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.14";
+  return "0.1.15";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -8766,6 +8784,9 @@ async function findWorkspaceBinding(startDir) {
 }
 
 // packages/plugin-core/dist/client.js
+function exitClean(code) {
+  void closeHttpSockets().finally(() => process.exit(code));
+}
 var CONFIG_DIR = path4.join(os4.homedir(), ".config", "memlin");
 var CONFIG_FILE = path4.join(CONFIG_DIR, "config.json");
 var TOKEN_FILE = path4.join(CONFIG_DIR, "token.json");
@@ -9221,7 +9242,7 @@ function readHookInput() {
 
 // apps/windsurf-plugin/src/hooks/pre-tool-use.ts
 function emitAllow() {
-  process.exit(0);
+  exitClean(0);
 }
 function emit(decision, reason) {
   const payload = {
@@ -9232,7 +9253,7 @@ function emit(decision, reason) {
     }
   };
   process.stdout.write(JSON.stringify(payload) + "\n");
-  process.exit(0);
+  exitClean(0);
 }
 async function main() {
   process.env.MEMLIN_HOST = "windsurf";
