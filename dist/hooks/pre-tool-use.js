@@ -8216,6 +8216,20 @@ function normalizeGitRemote(raw) {
   }
   return s || null;
 }
+async function withTimeout(promise, ms, fallback) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+        timer.unref?.();
+      })
+    ]);
+  } finally {
+    if (timer !== void 0) clearTimeout(timer);
+  }
+}
 
 // packages/plugin-core/dist/host.js
 import os2 from "node:os";
@@ -9068,14 +9082,14 @@ async function evaluateEditCollision(ctx, payload, projectId, projectAccountId) 
   if (relPaths.length === 0) return null;
   let res;
   try {
-    const call = ctx.api.editGuard(
-      { project_id: projectId, session_id: payload.session_id, paths: relPaths },
-      projectAccountId ? { accountId: projectAccountId } : {}
+    res = await withTimeout(
+      ctx.api.editGuard(
+        { project_id: projectId, session_id: payload.session_id, paths: relPaths },
+        projectAccountId ? { accountId: projectAccountId } : {}
+      ),
+      EDIT_GUARD_TIMEOUT_MS,
+      { collisions: [] }
     );
-    const timeout = new Promise(
-      (resolve) => setTimeout(() => resolve({ collisions: [] }), EDIT_GUARD_TIMEOUT_MS)
-    );
-    res = await Promise.race([call, timeout]);
   } catch (err) {
     log(
       `edit-guard: check failed (fail-open): ${err instanceof Error ? err.message : String(err)}`
