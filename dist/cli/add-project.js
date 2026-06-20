@@ -816,6 +816,22 @@ function detectGitRemotes(cwd) {
   }
   return out;
 }
+function selectAnchorRemote(input) {
+  if (input.enclosingRemote) {
+    return { gitRemote: input.enclosingRemote, umbrella: false, childCount: 0 };
+  }
+  if (input.childRemotes.length > 0) {
+    return {
+      gitRemote: input.childRemotes[0],
+      umbrella: true,
+      childCount: input.childRemotes.length
+    };
+  }
+  return { gitRemote: null, umbrella: false, childCount: 0 };
+}
+function shouldReTarget(input) {
+  return Boolean(input.explicitTargetId && input.explicitTargetId !== input.resolvedAccountId);
+}
 
 // packages/plugin-core/src/sibling-detect.ts
 import { readdirSync as readdirSync2, existsSync as existsSync2 } from "node:fs";
@@ -1004,15 +1020,18 @@ async function main() {
   }
   const { api, config } = ctx;
   const cwd = runtimeCwd();
-  let gitRemote = readGitRemote2(cwd);
-  if (!gitRemote) {
-    const childRemotes = detectGitRemotes(cwd);
-    if (childRemotes.length > 0) {
-      gitRemote = childRemotes[0];
-      console.log(
-        `Umbrella folder detected (${childRemotes.length} child repo${childRemotes.length === 1 ? "" : "s"}); anchoring the project to ${gitRemote} so it resolves by git remote.`
-      );
-    }
+  const enclosingRemote = readGitRemote2(cwd);
+  const anchor = selectAnchorRemote({
+    enclosingRemote,
+    // Only scan children when there's no enclosing repo — detectGitRemotes does
+    // its own enclosing-first check, so this skips a redundant git call.
+    childRemotes: enclosingRemote ? [] : detectGitRemotes(cwd)
+  });
+  const gitRemote = anchor.gitRemote;
+  if (anchor.umbrella) {
+    console.log(
+      `Umbrella folder detected (${anchor.childCount} child repo${anchor.childCount === 1 ? "" : "s"}); anchoring the project to ${gitRemote} so it resolves by git remote.`
+    );
   }
   const me = await api.me();
   const accounts = me.accounts.map((a) => ({
@@ -1044,7 +1063,10 @@ async function main() {
     process.exit(1);
   }
   if (resolved.project_id && resolved.account_id) {
-    const reTarget = Boolean(explicitTarget && explicitTarget.id !== resolved.account_id);
+    const reTarget = shouldReTarget({
+      explicitTargetId: explicitTarget?.id ?? null,
+      resolvedAccountId: resolved.account_id
+    });
     if (!reTarget) {
       const pin2 = await writeWorkspaceBinding(cwd, {
         account_id: resolved.account_id,
