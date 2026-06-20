@@ -128,6 +128,40 @@ var AGENT_EXPECTED_CAPABILITIES = {
   mcp: ["mcp", "resolve"],
   "claude-ai": ["mcp", "resolve"]
 };
+var PROVIDER_HOSTS = [
+  "github.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "dev.azure.com",
+  "ssh.dev.azure.com",
+  "codeberg.org",
+  "sr.ht",
+  "git.sr.ht"
+];
+function normalizeGitRemote(raw) {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  s = s.replace(/^git@([^:]+):/, "https://$1/");
+  s = s.replace(/^ssh:\/\//, "");
+  s = s.replace(/^https?:\/\//, "");
+  s = s.replace(/^git@/, "");
+  s = s.replace(/\.git$/, "");
+  s = s.replace(/\/$/, "");
+  const slash = s.indexOf("/");
+  if (slash > 0) {
+    const host = s.slice(0, slash);
+    const rest = s.slice(slash);
+    for (const provider of PROVIDER_HOSTS) {
+      if (host === provider) break;
+      if (host.startsWith(provider + "-")) {
+        s = provider + rest;
+        break;
+      }
+    }
+  }
+  return s || null;
+}
 
 // packages/plugin-core/dist/host.js
 import os2 from "node:os";
@@ -190,7 +224,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.13";
+  return "0.1.14";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -710,6 +744,132 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/dist/project-resolver.js
+import { execSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+import path5 from "node:path";
+var ALLOW_ACCOUNT_MISMATCH_ENV = "MEMLIN_ALLOW_ACCOUNT_MISMATCH";
+function allowAccountMismatch(env = process.env) {
+  const v = env[ALLOW_ACCOUNT_MISMATCH_ENV];
+  return v === "1" || v === "true" || v === "yes";
+}
+function accountBindingHazard(r, opts = {}) {
+  if (!r.hasGitRemote || !r.project_id) return "none";
+  if (r.reason === "local-path") return opts.allowMismatch ? "warn" : "block";
+  if (r.reason === "config") return "warn";
+  return "none";
+}
+function formatAccountMismatchWarning(input) {
+  if (input.hazard === "none") return null;
+  const acct = input.accountName ? `"${input.accountName}"` : "this account";
+  const proj = input.projectName ? `"${input.projectName}"` : "a project";
+  const head = input.hazard === "block" ? "Memlin: account-binding mismatch \u2014 capture paused." : "Memlin: account-binding check.";
+  return [
+    head,
+    `  This repo has a git remote, but it resolved to ${proj} under ${acct} via ${input.reason} \u2014`,
+    `  that project does not own your git remote, so you may be recording to the wrong org.`,
+    "  Fix: run `memlin login` to refresh your accounts, then `memlin add-project`",
+    "  (or `memlin link <correct-org>`)." + (input.hazard === "block" ? ` To record here anyway, set ${ALLOW_ACCOUNT_MISMATCH_ENV}=1.` : "")
+  ].join("\n");
+}
+async function resolveSessionHazard(api, cwd, configProjectId, fallbackAccountId) {
+  let resolved;
+  try {
+    resolved = await resolveProject(api, cwd, configProjectId);
+  } catch {
+    resolved = {
+      project_id: configProjectId ?? null,
+      project_name: null,
+      account_id: null,
+      reason: configProjectId ? "config" : "none",
+      hasGitRemote: false
+    };
+  }
+  const hazard = accountBindingHazard(resolved, { allowMismatch: allowAccountMismatch() });
+  if (hazard === "none") return { resolved, hazardWarning: null };
+  let accountName = fallbackAccountId ? `${fallbackAccountId.slice(0, 8)}\u2026` : null;
+  try {
+    accountName = (await api.getAccount()).name;
+  } catch {
+  }
+  const hazardWarning = formatAccountMismatchWarning({
+    hazard,
+    accountName,
+    projectName: resolved.project_name,
+    reason: resolved.reason
+  });
+  return { resolved, hazardWarning };
+}
+async function resolveProject(api, cwd, configProjectId) {
+  const absCwd = path5.resolve(cwd);
+  const remotes = detectGitRemotes(cwd);
+  const hasGitRemote = remotes.length > 0;
+  try {
+    const result = await api.resolveProject({
+      // Primary remote (back-compat with the single-remote server path).
+      git_remote: remotes[0] ?? null,
+      // All detected remotes — for the workspace-root-of-repos case, this is
+      // every sibling repo so the server resolves to the owning project.
+      git_remotes: remotes,
+      cwd: absCwd
+    });
+    if (result.project_id) {
+      return {
+        project_id: result.project_id,
+        project_name: result.name,
+        account_id: result.account_id,
+        reason: result.reason === "none" ? "config" : result.reason,
+        hasGitRemote
+      };
+    }
+  } catch {
+  }
+  if (configProjectId) {
+    return {
+      project_id: configProjectId,
+      project_name: null,
+      account_id: null,
+      reason: "config",
+      hasGitRemote
+    };
+  }
+  return { project_id: null, project_name: null, account_id: null, reason: "none", hasGitRemote };
+}
+function readGitRemote(cwd) {
+  try {
+    const url = execSync("git remote get-url origin", {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8"
+    }).trim();
+    return normalizeGitRemote(url);
+  } catch {
+    return null;
+  }
+}
+var MAX_WORKSPACE_SCAN = 64;
+function detectGitRemotes(cwd) {
+  const enclosing = readGitRemote(cwd);
+  if (enclosing) return [enclosing];
+  const out = [];
+  try {
+    let scanned = 0;
+    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
+      if (scanned >= MAX_WORKSPACE_SCAN) break;
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+      scanned++;
+      const child = path5.join(cwd, entry.name);
+      if (!existsSync(path5.join(child, ".git"))) continue;
+      const remote = readGitRemote(child);
+      if (remote && !out.includes(remote)) out.push(remote);
+    }
+  } catch {
+  }
+  return out;
+}
+
 // packages/plugin-core/dist/handoffs.js
 async function acceptPendingHandoffContext(api, projectId) {
   const targetAgentKind = resolveHost().kind;
@@ -783,9 +943,19 @@ async function main() {
   const cwd = input?.cwd ?? input?.workspace_roots?.[0] ?? process.cwd();
   firePlanSync(cwd);
   let handoffContext = null;
+  let hazardWarning = null;
   try {
     const ctx = await getApi({ cwd });
-    if (ctx) handoffContext = await acceptPendingHandoffContext(ctx.api, ctx.config.project_id);
+    if (ctx) {
+      const { resolved, hazardWarning: warning } = await resolveSessionHazard(
+        ctx.api,
+        cwd,
+        ctx.config.project_id,
+        ctx.config.account_id
+      );
+      hazardWarning = warning;
+      handoffContext = await acceptPendingHandoffContext(ctx.api, resolved.project_id);
+    }
   } catch {
     handoffContext = null;
   }
@@ -794,13 +964,14 @@ async function main() {
     "non-trivial work to load this project\u2019s skills, memory, approved goals,",
     "and schemas. Cite Memlin sources by path and version."
   ].join(" ");
+  const additionalContext = [hazardWarning, note, handoffContext].filter(Boolean).join("\n\n");
   process.stdout.write(
     JSON.stringify({
       continue: true,
-      additional_context: [note, handoffContext].filter(Boolean).join("\n\n"),
+      additional_context: additionalContext,
       hookSpecificOutput: {
         hookEventName: "SessionStart",
-        additionalContext: [note, handoffContext].filter(Boolean).join("\n\n")
+        additionalContext
       }
     })
   );
