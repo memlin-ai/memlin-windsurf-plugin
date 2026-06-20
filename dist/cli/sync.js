@@ -9184,6 +9184,15 @@ async function ensureResolverSkill() {
 var RESOLVER_SKILL_MD = `---
 name: Memlin
 description: Memlin auto-resolves project context (skills, memory, approved goals, schemas) into your prompt before you process it. This skill tells you how to *use* that context, and when to fall back to invoking memlin_resolve_task manually.
+examples:
+  - "A <memlin-resolved-context> block is present \u2014 apply the primary skill's framework and cite memory facts by path + version."
+  - "A resolved memory fact conflicts with your training data \u2014 treat the resolved fact as project ground truth."
+  - "A resolved goal states a constraint \u2014 honor it as a hard requirement on the change."
+  - "The user asks about something broader than the bundle \u2014 only then invoke memlin_search / memlin_read_memory to explore."
+anti-examples:
+  - "I don't have access to this project's conventions \u2014 can you paste them for me?"
+  - "Let me first gather context by resolving the task again before I answer."
+  - "Based on my general training the usual approach is X (disregarding the resolved memory that says otherwise)."
 ---
 
 # Memlin Resolver
