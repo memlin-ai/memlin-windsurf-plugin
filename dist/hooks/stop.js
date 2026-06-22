@@ -8965,6 +8965,28 @@ var MODEL_PRICES = {
 var SONNET_INPUT_USD_PER_MTOK = MODEL_PRICES["claude-sonnet-4-6"].inputUsdPerMTok;
 var SONNET_OUTPUT_USD_PER_MTOK = MODEL_PRICES["claude-sonnet-4-6"].outputUsdPerMTok;
 
+// packages/shared/dist/feature-discovery.js
+var FEATURE_DISCOVERY_SYSTEM = [
+  "You are Memlin's feature mapper. You read the inventory of a software project \u2014",
+  "its components (subsystems), recent pull requests, and plans \u2014 and group them",
+  "into a short list of FEATURES: the real units of work a team organizes around",
+  '(e.g. "Authentication & sessions", "Billing & credits", "Capture pipeline").',
+  "",
+  "Rules:",
+  "- Propose between 4 and 15 features. Fewer is better than padding with noise.",
+  "- A feature is a cohesive capability or workstream, NOT a single file, a layer",
+  '  ("frontend"), or a restatement of the whole project.',
+  "- Each feature's members must be drawn ONLY from the provided item ids. Never",
+  "  invent ids. Omit items that do not clearly belong to any feature.",
+  "- Do NOT duplicate or restate the existing features listed; only propose what is",
+  "  genuinely missing.",
+  "- Name features the way the team would say them out loud: short, exact nouns.",
+  "",
+  "Return ONLY a JSON object of the form:",
+  '{ "features": [ { "name": string, "summary": string, "members": string[] } ] }',
+  "where each members entry is an id from the inventory. No prose outside the JSON."
+].join("\n");
+
 // packages/plugin-core/dist/stop-handler.js
 var MEMORABLE_USER_PATTERNS = [
   // Explicit memory triggers.
