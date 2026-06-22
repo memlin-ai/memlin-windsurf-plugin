@@ -399,6 +399,18 @@ var MemlinApiClient = class {
   async createHandoff(input) {
     return this.request("POST", "/handoffs", input);
   }
+  async listFeatures(opts = {}) {
+    const qs = new URLSearchParams();
+    if (opts.project_id) qs.set("project_id", opts.project_id);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return this.request("GET", `/features${suffix}`);
+  }
+  async createFeature(input) {
+    return this.request("POST", "/features", input);
+  }
+  async addFeatureMember(featureId, source) {
+    return this.request("POST", `/features/${featureId}/members`, { source });
+  }
   /** POST /documents/search — semantic + text. */
   async search(query, opts = {}) {
     const res = await this.request("POST", "/documents/search", {
