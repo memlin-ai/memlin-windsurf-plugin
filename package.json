@@ -1,6 +1,6 @@
 {
   "name": "@memlin/windsurf-plugin-bundle",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "type": "module",
   "private": true
 }

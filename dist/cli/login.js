@@ -3520,7 +3520,7 @@ var require_gray_matter = __commonJS({
 });
 
 // packages/plugin-core/src/cli/login.ts
-import { promises as fs4 } from "node:fs";
+import { promises as fs4, writeSync } from "node:fs";
 import path5 from "node:path";
 import os6 from "node:os";
 
@@ -3692,7 +3692,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.16";
+  return "0.1.17";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -9014,19 +9014,20 @@ async function main() {
   console.log("memlin login");
   console.log("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
   const device = await startDeviceFlow();
-  console.log("");
-  console.log("  Open this URL in your browser to sign in:");
-  console.log("");
-  console.log(`    \x1B[1m${device.verification_uri_complete}\x1B[0m`);
-  console.log("");
-  console.log(`  Verification code: \x1B[1m${device.user_code}\x1B[0m`);
-  console.log(`  Expires in ${Math.floor(device.expires_in / 60)} min.`);
-  console.log("");
-  process.stdout.write("  waiting for approval");
+  const urlMsg = `
+  Open this URL in your browser to sign in:
+
+    \x1B[1m${device.verification_uri_complete}\x1B[0m
+
+  Verification code: \x1B[1m${device.user_code}\x1B[0m
+  Expires in ${Math.floor(device.expires_in / 60)} min.
+
+  waiting for approval`;
+  writeSync(2, urlMsg);
   const token = await pollForToken(device.device_code, device.interval, (elapsed) => {
-    process.stdout.write(elapsed % 5 === 0 ? "." : "");
+    if (elapsed % 5 === 0) writeSync(2, ".");
   });
-  process.stdout.write("\n\n");
+  writeSync(2, "\n\n");
   await writePersistedToken(token);
   const apiUrl = resolveApiUrl();
   const probe = new MemlinApiClient({
