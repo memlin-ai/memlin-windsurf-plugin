@@ -901,7 +901,7 @@ function evaluateApiReachable(url, probe) {
 }
 function evaluateMcpReachable(url, result) {
   if (!url) {
-    return { status: "warn", detail: "MEMLIN_MCP_URL not set \u2014 routing is direct Supabase" };
+    return { status: "pass", detail: "managed endpoint (default)" };
   }
   if (!result) {
     return { status: "fail", detail: "no response from MCP endpoint" };
