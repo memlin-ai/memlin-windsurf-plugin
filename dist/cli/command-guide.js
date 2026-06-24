@@ -8180,12 +8180,18 @@ var AntigravityHost = class extends BaseHost {
     super("antigravity", path.join(os.homedir(), ".config", "memlin"));
   }
 };
+var VSCodeHost = class extends BaseHost {
+  constructor() {
+    super("vscode", path.join(os.homedir(), ".config", "memlin"));
+  }
+};
 var HOSTS = {
   "claude-code": () => new ClaudeCodeHost(),
   cursor: () => new CursorHost(),
   codex: () => new CodexHost(),
   windsurf: () => new WindsurfHost(),
-  antigravity: () => new AntigravityHost()
+  antigravity: () => new AntigravityHost(),
+  vscode: () => new VSCodeHost()
 };
 function resolveHost() {
   const envHost = process.env.MEMLIN_HOST ?? (process.env.CURSOR_AGENT ? "cursor" : "claude-code");
