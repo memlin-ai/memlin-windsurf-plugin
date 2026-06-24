@@ -336,6 +336,36 @@ async function scanLocal(opts = {}) {
       });
     }
   }
+  const goalsDir = path4.join(root, "goals");
+  if (existsSync2(goalsDir)) {
+    for (const file of await fs2.readdir(goalsDir)) {
+      if (!file.endsWith(".md")) continue;
+      const abs = path4.join(goalsDir, file);
+      const content = await fs2.readFile(abs, "utf8");
+      out.push({
+        path: `goals/${file}`,
+        abs_path: abs,
+        kind: "goal",
+        content,
+        hash: hash(content)
+      });
+    }
+  }
+  const schemasDir = path4.join(root, "schemas");
+  if (existsSync2(schemasDir)) {
+    for (const file of await fs2.readdir(schemasDir)) {
+      if (!file.endsWith(".json")) continue;
+      const abs = path4.join(schemasDir, file);
+      const content = await fs2.readFile(abs, "utf8");
+      out.push({
+        path: `schemas/${file}`,
+        abs_path: abs,
+        kind: "schema",
+        content,
+        hash: hash(content)
+      });
+    }
+  }
   if (opts.includePlans) {
     const plansDir2 = resolveHost().plansDir();
     if (existsSync2(plansDir2)) {
@@ -351,6 +381,23 @@ async function scanLocal(opts = {}) {
           hash: hash(content)
         });
       }
+    }
+  }
+  if (opts.trackedDocs) {
+    const seen = new Set(out.map((d) => d.path));
+    for (const [relPath, meta] of Object.entries(opts.trackedDocs)) {
+      if (seen.has(relPath)) continue;
+      if (relPath.startsWith("plans/")) continue;
+      const abs = path4.join(root, relPath);
+      if (!existsSync2(abs)) continue;
+      const content = await fs2.readFile(abs, "utf8");
+      out.push({
+        path: relPath,
+        abs_path: abs,
+        kind: meta.kind,
+        content,
+        hash: hash(content)
+      });
     }
   }
   return out;
@@ -466,7 +513,7 @@ function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os4.hostname() || "unknown";
 }
 function agentVersion() {
-  return "0.1.18";
+  return "0.1.19";
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
@@ -1169,7 +1216,7 @@ async function printLocalState() {
   console.log("");
   console.log("Local state");
   const state = await readState();
-  const allLocal = await scanLocal({ includePlans: true });
+  const allLocal = await scanLocal({ includePlans: true, trackedDocs: state.documents });
   const local = allLocal.filter((doc) => doc.kind !== "plan");
   const localPlanCount = allLocal.length - local.length;
   const trackedPlanCount = Object.keys(state.documents).filter(
