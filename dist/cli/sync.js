@@ -4097,13 +4097,19 @@ function requireClientId() {
 }
 
 // packages/plugin-core/src/memlin-api-client.ts
+import { readFileSync } from "node:fs";
 import os5 from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os5.hostname() || "unknown";
 }
+var cachedAgentVersion = null;
 function agentVersion() {
-  return "0.1.20";
+  if (cachedAgentVersion) return cachedAgentVersion;
+  cachedAgentVersion = "0.1.20";
+  return cachedAgentVersion;
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];

@@ -3623,7 +3623,10 @@ function requireClientId() {
 }
 
 // packages/plugin-core/dist/memlin-api-client.js
+import { readFileSync } from "node:fs";
 import os3 from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // packages/plugin-core/dist/runtime-shared.js
 var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
@@ -3761,8 +3764,11 @@ var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
   return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
 }
+var cachedAgentVersion = null;
 function agentVersion() {
-  return "0.1.20";
+  if (cachedAgentVersion) return cachedAgentVersion;
+  cachedAgentVersion = "0.1.20";
+  return cachedAgentVersion;
 }
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];

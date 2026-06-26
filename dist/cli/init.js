@@ -35,7 +35,10 @@ async function writePersistedToken(t) {
 }
 
 // packages/plugin-core/src/memlin-api-client.ts
+import { readFileSync } from "node:fs";
 import os3 from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // packages/plugin-core/src/host.ts
 import os2 from "node:os";
