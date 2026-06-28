@@ -1,7 +1,11 @@
 {
   "mcpServers": {
     "memlin": {
-      "serverUrl": "https://memlin.ai/mcp"
+      "command": "node",
+      "args": ["__BUNDLE_DIR__/dist/mcp-server.js"],
+      "env": {
+        "MEMLIN_HOST": "windsurf"
+      }
     }
   }
 }

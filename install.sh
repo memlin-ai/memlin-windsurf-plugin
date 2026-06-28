@@ -69,12 +69,36 @@ else
   echo "⚠  could not absolutize hooks.json — its hook commands stay relative and may no-op."
 fi
 
+# Install the local MCP server into Windsurf's config (~/.codeium/windsurf).
+# mcp_config.json ships with a __BUNDLE_DIR__ placeholder so the
+# `node .../dist/mcp-server.js` command resolves against THIS install (a relative
+# path would make Windsurf fail to start the server). Merge into any existing
+# config with jq so we never clobber the user's other MCP servers.
+WS_MCP_DIR="$HOME/.codeium/windsurf"
+WS_MCP_DST="$WS_MCP_DIR/mcp_config.json"
+RESOLVED_MCP="$(sed "s|__BUNDLE_DIR__|$BUNDLE_DIR|g" "$BUNDLE_DIR/mcp_config.json")"
+mkdir -p "$WS_MCP_DIR"
+if [ ! -s "$WS_MCP_DST" ]; then
+  echo "$RESOLVED_MCP" > "$WS_MCP_DST"
+  echo "→ MCP server installed → $WS_MCP_DST (new)"
+elif command -v jq >/dev/null 2>&1; then
+  tmp="$(mktemp)"
+  if jq -s '.[0] * .[1]' "$WS_MCP_DST" <(echo "$RESOLVED_MCP") > "$tmp" 2>/dev/null && mv "$tmp" "$WS_MCP_DST"; then
+    echo "→ MCP server installed → $WS_MCP_DST (merged)"
+  else
+    rm -f "$tmp"
+    echo "⚠  could not merge $WS_MCP_DST — add this 'memlin' server by hand:"; echo "$RESOLVED_MCP"
+  fi
+else
+  echo "⚠  jq not found — add this 'memlin' server to $WS_MCP_DST (keep your existing servers):"
+  echo "$RESOLVED_MCP"
+fi
+
 cat <<EOF
 
-✅ Memlin CLI installed for Windsurf.
+✅ Memlin installed for Windsurf — MCP server is live (local, token.json-auth).
 
 Still manual (per Windsurf's config-location rules):
-  • MCP:   add mcp_config.json (hosted serverUrl) to Windsurf.
   • Rules: copy .windsurfrules into your project root.
   • Hooks: install hooks.json (now absolute-pathed) + dist/ per Windsurf's hook
            rules. Windsurf hook support is provisional; resolve also works via
