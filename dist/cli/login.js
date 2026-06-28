@@ -4065,6 +4065,17 @@ var MemlinApiClient = class {
     return this.request("POST", "/scribe/session", input, { accountId: opts.accountId });
   }
   /**
+   * POST /memory/ingest-native — ingest a host's native auto-memory.
+   *
+   * Sends the raw native MEMORY.md index (+ the satellite filenames the
+   * adapter already pulls) so the server parses it and runs the entries
+   * through the scribe dedup (corroborate, don't duplicate). Makes turning
+   * off native auto-memory lossless.
+   */
+  async ingestNativeMemory(input, opts = {}) {
+    return this.request("POST", "/memory/ingest-native", input, { accountId: opts.accountId });
+  }
+  /**
    * POST /plans — upload a Claude Code plan as a first-class plan document.
    *
    * Server resolves project from cwd/git_remote (when not pinned), writes
@@ -8933,6 +8944,18 @@ var MEMLIN_COMMANDS = [
     cmd: "link",
     blurb: "pin a different account",
     details: "Pins this workspace to a specific Memlin account. Use when you switch between accounts (employer / client / personal) \u2014 the pin makes sure the resolver and scribe target the correct workspace for this directory."
+  },
+  {
+    section: "",
+    cmd: "managed-memory",
+    blurb: "hand memory to Memlin (turn off native auto-memory)",
+    details: "Turns off this host's built-in native auto-memory so it stops keeping a redundant, machine-bound copy that loads an unranked blob into context every session. Run with no args to see the current state, `disable` to turn it off, or `off` to revert to the host default. It only changes the single native toggle; Memlin keeps capturing, so you lose nothing, and everything Memlin stores is fully exportable (memlin pull, or Settings \u2192 Export memory). Always reversible."
+  },
+  {
+    section: "",
+    cmd: "ingest-native-memory",
+    blurb: "pull this host's native auto-memory into Memlin",
+    details: "Reads this host's native auto-memory index (Claude Code's ~/.claude/projects/<repo>/memory/MEMORY.md) and runs each entry through the Memlin scribe dedup, so native learnings corroborate what Memlin already knows instead of duplicating. Run once before `managed-memory disable` so turning native memory off is lossless \u2014 everything moves into the governed, fully exportable corpus."
   }
 ];
 

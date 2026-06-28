@@ -559,6 +559,17 @@ var MemlinApiClient = class {
     return this.request("POST", "/scribe/session", input, { accountId: opts.accountId });
   }
   /**
+   * POST /memory/ingest-native — ingest a host's native auto-memory.
+   *
+   * Sends the raw native MEMORY.md index (+ the satellite filenames the
+   * adapter already pulls) so the server parses it and runs the entries
+   * through the scribe dedup (corroborate, don't duplicate). Makes turning
+   * off native auto-memory lossless.
+   */
+  async ingestNativeMemory(input, opts = {}) {
+    return this.request("POST", "/memory/ingest-native", input, { accountId: opts.accountId });
+  }
+  /**
    * POST /plans — upload a Claude Code plan as a first-class plan document.
    *
    * Server resolves project from cwd/git_remote (when not pinned), writes
