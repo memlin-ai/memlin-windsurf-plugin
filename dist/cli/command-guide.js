@@ -8116,15 +8116,15 @@ var MEMLIN_COMMANDS = [
   },
   {
     section: "",
-    cmd: "managed-memory",
-    blurb: "hand memory to Memlin (turn off native auto-memory)",
-    details: "Turns off this host's built-in native auto-memory so it stops keeping a redundant, machine-bound copy that loads an unranked blob into context every session. Run with no args to see the current state, `disable` to turn it off, or `off` to revert to the host default. It only changes the single native toggle; Memlin keeps capturing, so you lose nothing, and everything Memlin stores is fully exportable (memlin pull, or Settings \u2192 Export memory). Always reversible."
+    cmd: "manage-memory",
+    blurb: "let Memlin manage your memory (turn off the editor\u2019s native auto-memory)",
+    details: "Makes Memlin your single memory store by turning OFF the editor's built-in native auto-memory, which otherwise keeps a redundant, machine-bound copy that loads an unranked blob into context every session. NEVER touches Memlin \u2014 Memlin stays on either way. Run with no args to let Memlin take over, `--status` to see state without changing anything, or `--revert` to hand memory back to the editor. Memlin keeps capturing, so you lose nothing, and everything it stores is fully exportable (memlin pull, or Settings \u2192 Export memory). Always reversible. (Old alias: `managed-memory disable`.)"
   },
   {
     section: "",
     cmd: "ingest-native-memory",
     blurb: "pull this host's native auto-memory into Memlin",
-    details: "Reads this host's native auto-memory index (Claude Code's ~/.claude/projects/<repo>/memory/MEMORY.md) and runs each entry through the Memlin scribe dedup, so native learnings corroborate what Memlin already knows instead of duplicating. Run once before `managed-memory disable` so turning native memory off is lossless \u2014 everything moves into the governed, fully exportable corpus."
+    details: "Reads this host's native auto-memory index (Claude Code's ~/.claude/projects/<repo>/memory/MEMORY.md) and runs each entry through the Memlin scribe dedup, so native learnings corroborate what Memlin already knows instead of duplicating. Run once before `manage-memory` so letting Memlin take over is lossless \u2014 everything moves into the governed, fully exportable corpus."
   }
 ];
 

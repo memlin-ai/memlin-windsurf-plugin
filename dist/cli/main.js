@@ -24,7 +24,9 @@ const RUN = {
   revert: () => import("./revert.js"),
   pin: () => import("./pin.js"),
   "add-project": () => import("./add-project.js"),
+  "manage-memory": () => import("./manage-memory.js"),
   "managed-memory": () => import("./managed-memory.js"),
+  // back-compat alias
   "ingest-native-memory": () => import("./ingest-native-memory.js"),
   "attach-path": () => import("./attach-path.js"),
   "audit-replay": () => import("./audit-replay.js"),
