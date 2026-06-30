@@ -58182,6 +58182,20 @@ var REDACTION_PATTERNS = [
     description: "Slack bot/user/app token (xoxb-/xoxp-/xoxa-/xoxr-)",
     regex: /xox[bpar]-[A-Za-z0-9-]{10,}/g
   },
+  // ---------- Supabase ----------
+  {
+    name: "supabase-access-token",
+    description: "Supabase personal / Management-API token (sbp_\u2026)",
+    // The CLI / Management-API token shape — sbp_ + a long body. This is the
+    // exact shape that leaked into a transcript and went undetected before this
+    // rule existed. The project anon/service keys are JWTs (caught below).
+    regex: /\bsbp_[A-Za-z0-9]{20,}\b/g
+  },
+  {
+    name: "supabase-secret-key",
+    description: "Supabase secret API key (sb_secret_\u2026)",
+    regex: /\bsb_secret_[A-Za-z0-9_-]{20,}\b/g
+  },
   // ---------- JWTs (catch-all for bearer-token leaks) ----------
   {
     name: "jwt",
@@ -61614,7 +61628,7 @@ async function assembleClaimGuardrails(ctx, projectId) {
   let query = ctx.supabase.from("documents").select(
     `id, kind, title, path, metadata, updated_at,
        document_versions!documents_current_version_fk ( content, version_number, author_id )`
-  ).eq("account_id", ctx.accountId).eq("kind", "memory").not("metadata->>claim_guardrail", "is", null).limit(50);
+  ).eq("account_id", ctx.accountId).eq("kind", "memory").not("metadata->>claim_guardrail", "is", null).eq("locked_to_owners", false).limit(50);
   if (projectId) query = query.or(`project_id.is.null,project_id.eq.${projectId}`);
   else query = query.is("project_id", null);
   const { data, error: error2 } = await query;
@@ -61654,7 +61668,7 @@ async function assemblePinned(ctx, projectId) {
   let query = ctx.supabase.from("documents").select(
     `id, kind, title, path, status, metadata, updated_at,
        document_versions!documents_current_version_fk ( content, version_number, author_id )`
-  ).eq("account_id", ctx.accountId).eq("metadata->>pinned", "true").limit(50);
+  ).eq("account_id", ctx.accountId).eq("metadata->>pinned", "true").eq("locked_to_owners", false).limit(50);
   if (projectId) query = query.or(`project_id.is.null,project_id.eq.${projectId}`);
   else query = query.is("project_id", null);
   const { data, error: error2 } = await query;
@@ -62207,7 +62221,7 @@ async function assembleArchitecture(ctx, projectId, component, componentNameById
   }
   if (arch.data.length > 0) {
     const tableNames = [...new Set(arch.data.map((d2) => d2.table))];
-    const { data: schemaDocs, error: sErr } = await ctx.supabase.from("documents").select("id, title, path, metadata").eq("account_id", ctx.accountId).eq("project_id", projectId).eq("kind", "schema").in("title", tableNames);
+    const { data: schemaDocs, error: sErr } = await ctx.supabase.from("documents").select("id, title, path, metadata").eq("account_id", ctx.accountId).eq("project_id", projectId).eq("kind", "schema").eq("locked_to_owners", false).in("title", tableNames);
     if (sErr) {
       console.warn(`[resolver] architecture schema-doc fetch failed: ${sErr.message}`);
     } else {
@@ -62499,7 +62513,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         let q2 = ctx.supabase.from("documents").select(
           `id, title, kind, scope, path, updated_at, created_at, metadata,
              document_versions!documents_current_version_fk ( version_number, author_id )`
-        ).eq("account_id", ctx.accountId).eq("kind", kind2).ilike("title", `%${titleNeedle}%`).limit(kPerKind);
+        ).eq("account_id", ctx.accountId).eq("kind", kind2).ilike("title", `%${titleNeedle}%`).eq("locked_to_owners", false).limit(kPerKind);
         if (projectId) q2 = q2.or(`scope.eq.team,project_id.eq.${projectId}`);
         const { data: titleData, error: titleErr } = await q2;
         if (!titleErr) {
@@ -62760,7 +62774,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         const { data: replacementRows, error: replacementErr } = await ctx.supabase.from("documents").select(
           `id, title, kind, path, status, updated_at, created_at,
              document_versions!documents_current_version_fk ( version_number, author_id )`
-        ).in("id", replacementIds);
+        ).eq("locked_to_owners", false).in("id", replacementIds);
         if (replacementErr) {
           console.warn(
             `[resolver] project brain override replacement fetch failed: ${replacementErr.message}`
