@@ -61320,6 +61320,8 @@ var CONCURRENT_WINDOW_MS = 20 * 6e4;
 var CONCURRENT_MAX = 5;
 var DEPLOY_WINDOW_MS = 12 * 6e4;
 var WORK_SIMILARITY_GATE = 0.62;
+var WORK_PATH_MATCH_MAX = 3;
+var OWN_EDIT_WINDOW_MS = 2 * 60 * 6e4;
 var DUP_SIMILARITY_GATE = 0.86;
 function parsePgVector(v2) {
   if (Array.isArray(v2)) return v2;
@@ -61410,7 +61412,9 @@ function buildCollisionWarnings(concurrent, activeComponentName, currentTask) {
   );
   const dupeKeys = new Set(dupes.map((entry) => entry.session_short ?? entry.task));
   if (dupes.length > 0) {
-    const pct = Math.round(Math.max(...dupes.map((entry) => entry.task_similarity)) * 100);
+    const pct = Math.round(
+      Math.max(...dupes.map((entry) => entry.task_similarity)) * 100
+    );
     warnings.push({
       component: currentArea,
       guidance: `Likely DUPLICATE work: another live session is running a near-identical task (${pct}% match). Check what they're building before you continue \u2014 you may be redoing it. Coordinate, take their branch, or split off a non-overlapping slice.`,
@@ -61594,7 +61598,9 @@ async function assembleWorkInFlight(ctx, projectId, queryVec) {
   });
   if (error2 || !data) {
     if (error2) {
-      console.warn(`[resolver] work-in-flight query failed: ${error2.message} \u2014 proceeding without it`);
+      console.warn(
+        `[resolver] work-in-flight query failed: ${error2.message} \u2014 proceeding without it`
+      );
     }
     return [];
   }
@@ -61618,6 +61624,121 @@ async function assembleWorkInFlight(ctx, projectId, queryVec) {
     });
   }
   return entries;
+}
+function dirsOfPaths(paths) {
+  const dirs = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const p2 of paths) {
+    if (typeof p2 !== "string" || !p2) continue;
+    const clean = p2.replace(/^\.?\//, "").trim();
+    if (!clean) continue;
+    const segs = clean.split("/");
+    segs.pop();
+    const d2 = segs.length === 0 ? "." : segs.slice(0, 3).join("/");
+    if (seen.has(d2)) continue;
+    seen.add(d2);
+    dirs.push(d2);
+    if (dirs.length >= 30) break;
+  }
+  return dirs;
+}
+function extractPathTokens(task) {
+  const out = [];
+  const re2 = /(?:^|[\s`'"(,;])((?:[\w.@-]+\/)+[\w.@*-]+)/g;
+  let m2;
+  while ((m2 = re2.exec(task)) !== null && out.length < 10) {
+    const tok = m2[1].replace(/[.,;:)]+$/, "");
+    if (/^https?:/.test(tok) || tok.includes("//")) continue;
+    out.push(tok);
+  }
+  return out;
+}
+function patternPrefixDirs(patterns) {
+  const out = [];
+  for (const pat of patterns) {
+    if (typeof pat !== "string" || !pat) continue;
+    const segs = [];
+    for (const seg of pat.replace(/^\.?\//, "").split("/")) {
+      if (!seg || /[*?[\]{}]/.test(seg)) break;
+      segs.push(seg);
+      if (segs.length >= 3) break;
+    }
+    if (segs.length > 0) out.push(segs.join("/"));
+  }
+  return [...new Set(out)];
+}
+async function assembleOwnEditPaths(ctx, projectId, ownSessionId) {
+  if (!projectId || !ownSessionId) return [];
+  const sinceIso = new Date(Date.now() - OWN_EDIT_WINDOW_MS).toISOString();
+  const { data, error: error2 } = await ctx.supabase.from("usage_events").select("metadata").eq("account_id", ctx.accountId).eq("event_type", "edit.activity").gte("created_at", sinceIso).order("created_at", { ascending: false }).limit(300);
+  if (error2 || !data) return [];
+  const paths = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const row of data) {
+    const meta = row.metadata ?? {};
+    if (meta.project_id !== projectId) continue;
+    if (meta.session_id !== ownSessionId) continue;
+    for (const p2 of Array.isArray(meta.paths) ? meta.paths : []) {
+      if (typeof p2 !== "string" || !p2 || seen.has(p2)) continue;
+      seen.add(p2);
+      paths.push(p2);
+      if (paths.length >= 50) return paths;
+    }
+  }
+  return paths;
+}
+async function assembleWorkTouchingMyFiles(ctx, projectId, myDirs) {
+  if (myDirs.length === 0) return [];
+  const { data, error: error2 } = await ctx.supabase.rpc("search_work_items_by_paths", {
+    p_account_id: ctx.accountId,
+    p_project_id: projectId,
+    p_dirs: myDirs,
+    p_limit: WORK_PATH_MATCH_MAX
+  });
+  if (error2 || !data) {
+    if (error2 && error2.code !== "PGRST202") {
+      console.warn(
+        `[resolver] path-matched work query failed: ${error2.message} \u2014 proceeding without it`
+      );
+    }
+    return [];
+  }
+  const now = Date.now();
+  const entries = [];
+  for (const r2 of data) {
+    const ageDays = r2.pr_updated_at ? Math.max(0, Math.round((now - new Date(r2.pr_updated_at).getTime()) / 864e5)) : 0;
+    entries.push({
+      state: "open",
+      number: r2.number,
+      title: typeof r2.title === "string" ? r2.title.slice(0, 140) : "",
+      url: r2.url ?? null,
+      author_login: r2.author_login ?? null,
+      head_ref: r2.head_ref ?? null,
+      repo_full_name: r2.repo_full_name,
+      similarity: 0,
+      age_days: ageDays,
+      match: "paths",
+      overlap_paths: (r2.matched_dirs ?? []).slice(0, 6)
+    });
+  }
+  return entries;
+}
+function mergeWorkInFlight(semantic, pathMatched) {
+  const out = semantic.map((e2) => ({
+    ...e2,
+    match: e2.match ?? "semantic"
+  }));
+  const byKey = new Map(out.map((e2) => [`${e2.repo_full_name}#${e2.number}`, e2]));
+  for (const p2 of pathMatched) {
+    const existing = byKey.get(`${p2.repo_full_name}#${p2.number}`);
+    if (existing) {
+      existing.match = "both";
+      existing.overlap_paths = p2.overlap_paths;
+    } else {
+      out.push(p2);
+    }
+  }
+  return out;
 }
 async function recordDeployActivity(ctx, deploy) {
   try {
@@ -62478,12 +62599,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const governanceUserId = ctx.userId ?? null;
   const teamId = await getProjectTeamId(ctx, projectId);
   const requestedKinds = args.kinds ? args.kinds.filter((k2) => SEARCHABLE_KINDS.includes(k2)) : [...SEARCHABLE_KINDS];
-  const projectBrainPolicy = await loadProjectBrainPolicy(
-    ctx,
-    projectId,
-    teamId,
-    governanceUserId
-  );
+  const projectBrainPolicy = await loadProjectBrainPolicy(ctx, projectId, teamId, governanceUserId);
   let customThresholds = null;
   let thresholdsMode = "default";
   let brandContextMode = "always";
@@ -63449,6 +63565,29 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       `[resolver] work-in-flight assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
     );
   }
+  try {
+    const myPaths = await assembleOwnEditPaths(ctx, projectId, audit.sessionId ?? null);
+    let componentDirs = [];
+    if (activeComponentId) {
+      const { data: compRow } = await ctx.supabase.from("components").select("path_patterns").eq("id", activeComponentId).maybeSingle();
+      componentDirs = patternPrefixDirs(
+        compRow?.path_patterns ?? []
+      );
+    }
+    const myDirs = [
+      .../* @__PURE__ */ new Set([
+        ...dirsOfPaths(myPaths),
+        ...componentDirs,
+        ...dirsOfPaths(extractPathTokens(args.task))
+      ])
+    ].slice(0, 30);
+    const pathMatched = await assembleWorkTouchingMyFiles(ctx, projectId, myDirs);
+    workInFlight = mergeWorkInFlight(workInFlight, pathMatched);
+  } catch (e2) {
+    console.warn(
+      `[resolver] path-matched work assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
+    );
+  }
   const bySkill = included.filter((i2) => i2.kind === "skill");
   const primary = primarySkill ? bySkill.find((i2) => i2.id === primarySkill.id) ?? null : null;
   const supportingSkills = bySkill.filter((i2) => i2.id !== primary?.id);
@@ -63741,6 +63880,16 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     // covers historical rows.
     task_category: classifyTask(args.task),
     project_id: projectId,
+    // Axis-A telemetry: how the work_in_flight entries surfaced, so the
+    // dashboard can show the path-matched hit-rate (was the file-shaped door
+    // actually used, or did semantic alone cover it?).
+    ...workInFlight.length > 0 ? {
+      work_in_flight_matches: {
+        semantic: workInFlight.filter((w2) => (w2.match ?? "semantic") === "semantic").length,
+        paths: workInFlight.filter((w2) => w2.match === "paths").length,
+        both: workInFlight.filter((w2) => w2.match === "both").length
+      }
+    } : {},
     similarity_thresholds: {
       skill: customThresholds?.skill ?? KIND_THRESHOLDS.skill,
       memory: customThresholds?.memory ?? KIND_THRESHOLDS.memory,

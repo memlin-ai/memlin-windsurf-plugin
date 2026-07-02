@@ -1250,8 +1250,12 @@ function compileBundle(result, parsedTask, agent) {
       out.push("");
       for (const item of packContext) {
         const attribution2 = item.pack ? `pack: ${item.pack.slug} v${item.pack.version}${item.pack.publisher_name ? ` \xB7 published by ${item.pack.publisher_name}` : ""}` : "pack";
-        out.push(`### [${item.kind.toUpperCase()}] ${item.title} (similarity ${item.similarity.toFixed(2)})`);
-        out.push(`# source: ${attribution2} \xB7 ${item.citation.path ?? "(no path)"} v${item.citation.version_number}`);
+        out.push(
+          `### [${item.kind.toUpperCase()}] ${item.title} (similarity ${item.similarity.toFixed(2)})`
+        );
+        out.push(
+          `# source: ${attribution2} \xB7 ${item.citation.path ?? "(no path)"} v${item.citation.version_number}`
+        );
         out.push("");
         out.push(item.body.trimEnd());
         out.push("");
@@ -1269,7 +1273,9 @@ function compileBundle(result, parsedTask, agent) {
       );
       for (const d of deploys) {
         const where = d.component ? `component "${d.component}"` : "project-wide";
-        out.push(`  - agent ${d.session_short} \xB7 ${where} \xB7 ${d.minutes_ago}m ago \xB7 task: ${d.task}`);
+        out.push(
+          `  - agent ${d.session_short} \xB7 ${where} \xB7 ${d.minutes_ago}m ago \xB7 task: ${d.task}`
+        );
       }
       out.push("");
     }
@@ -1277,16 +1283,28 @@ function compileBundle(result, parsedTask, agent) {
     if (inFlight.length > 0) {
       out.push("## ALREADY BUILT / IN FLIGHT \u2014 CHECK BEFORE YOU BUILD");
       out.push("");
-      out.push(`# ${inFlight.length} PR(s) look semantically close to your task. READ THESE FIRST \u2014`);
+      out.push(
+        `# ${inFlight.length} PR(s) look semantically close to your task. READ THESE FIRST \u2014`
+      );
       out.push("# you may be about to rebuild merged work or duplicate an open PR. If one covers");
       out.push("# your task, stop and extend/rebase onto it instead of starting fresh.");
       for (const w of inFlight) {
         const who = w.author_login ? ` by ${w.author_login}` : "";
         const branch = w.head_ref ? ` (${w.head_ref})` : "";
         const link = w.url ? ` \xB7 ${w.url}` : "";
+        const how = w.match === "paths" ? "path match" : `sim ${w.similarity}`;
         out.push(
-          `  - ${w.state.toUpperCase()} #${w.number}${who}${branch} \xB7 ${w.repo_full_name} \xB7 ${w.age_days}d ago \xB7 sim ${w.similarity} \xB7 ${w.title}${link}`
+          `  - ${w.state.toUpperCase()} #${w.number}${who}${branch} \xB7 ${w.repo_full_name} \xB7 ${w.age_days}d ago \xB7 ${how} \xB7 ${w.title}${link}`
         );
+        if ((w.match === "paths" || w.match === "both") && (w.overlap_paths?.length ?? 0) > 0) {
+          out.push(`    \u26A0 touches your working area: ${w.overlap_paths.join(", ")}`);
+          if (w.state === "open") {
+            out.push(
+              "    # This PR is unmerged \u2014 its conventions are NOT in the codebase you see."
+            );
+            out.push("    # Read the PR before building anything under those paths.");
+          }
+        }
       }
       out.push("");
     }
