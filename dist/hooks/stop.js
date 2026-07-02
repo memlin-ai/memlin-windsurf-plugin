@@ -9340,8 +9340,16 @@ ${text}`);
   const scribe = ctx.api.scribeSession(
     // resolvedProjectId was computed above for the workspace gate — pass
     // it through so the captured memories attach to this project instead
-    // of landing project-less at the team scope.
-    { session_id: sessionId, transcript: delta, project_id: resolvedProjectId },
+    // of landing project-less at the team scope. cwd + git_remote let the
+    // server bind captures to this session's repo when the project has
+    // several repos attached (root-component binding).
+    {
+      session_id: sessionId,
+      transcript: delta,
+      project_id: resolvedProjectId,
+      cwd,
+      git_remote: readGitRemote2(cwd)
+    },
     accountOverride ? { accountId: accountOverride } : {}
   );
   try {

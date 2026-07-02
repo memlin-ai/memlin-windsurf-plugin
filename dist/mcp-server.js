@@ -58109,6 +58109,47 @@ function mergeBrandGuidelines(parent, override) {
   };
 }
 
+// packages/shared/dist/git-remote.js
+var PROVIDER_HOSTS = [
+  "github.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "dev.azure.com",
+  "ssh.dev.azure.com",
+  "codeberg.org",
+  "sr.ht",
+  "git.sr.ht"
+];
+function normalizeGitRemote(raw) {
+  if (!raw) return null;
+  let s2 = raw.trim();
+  if (!s2) return null;
+  s2 = s2.replace(/^git@([^:]+):/, "https://$1/");
+  s2 = s2.replace(/^ssh:\/\//, "");
+  s2 = s2.replace(/^https?:\/\//, "");
+  s2 = s2.replace(/^git@/, "");
+  s2 = s2.replace(/\.git$/, "");
+  s2 = s2.replace(/\/$/, "");
+  const slash = s2.indexOf("/");
+  if (slash > 0) {
+    const host = s2.slice(0, slash);
+    const rest = s2.slice(slash);
+    for (const provider of PROVIDER_HOSTS) {
+      if (host === provider) break;
+      if (host.startsWith(provider + "-")) {
+        s2 = provider + rest;
+        break;
+      }
+    }
+  }
+  return s2 || null;
+}
+function remoteMatchesRepo(normalizedRemote, repoFullName) {
+  if (!normalizedRemote || !repoFullName) return false;
+  if (!repoFullName.includes("/")) return false;
+  return normalizedRemote.toLowerCase().endsWith("/" + repoFullName.toLowerCase());
+}
+
 // packages/shared/dist/redact.js
 var REDACTION_PATTERNS = [
   // ---------- AI provider keys ----------
@@ -61875,6 +61916,8 @@ var MEMORY_TYPE_WEIGHTS = {
   episodic: 1
 };
 var ACTIVE_COMPONENT_BOOST = 0.15;
+var SAME_REPO_BOOST = 0.1;
+var CROSS_REPO_DEMOTION = 0.6;
 var ROLE_MATCH_BOOST = 0.12;
 var APPROVED_STATUS_BOOST = 0.1;
 function estimateTokens(text) {
@@ -62052,6 +62095,42 @@ function matchPathPattern(cwd, pattern) {
   }
   if (c2.includes(p2)) return p2.length;
   return null;
+}
+function inferActiveRepo(args) {
+  const { repoNames } = args;
+  const normalizedRemote = normalizeGitRemote(args.gitRemote ?? null);
+  if (normalizedRemote) {
+    const hits = repoNames.filter((r2) => remoteMatchesRepo(normalizedRemote, r2));
+    if (hits.length === 1) return hits[0] ?? null;
+  }
+  if (args.cwd) {
+    const segments = new Set(args.cwd.toLowerCase().split("/").filter(Boolean));
+    const hits = repoNames.filter((r2) => {
+      const base = r2.split("/").pop()?.toLowerCase();
+      return !!base && segments.has(base);
+    });
+    if (hits.length === 1) return hits[0] ?? null;
+  }
+  {
+    const taskLower = args.task.toLowerCase();
+    let best = null;
+    let bestLen = -1;
+    let tied = false;
+    for (const r2 of repoNames) {
+      const base = r2.split("/").pop()?.toLowerCase();
+      if (!base) continue;
+      if (!taskLower.includes(`${base}/`)) continue;
+      if (base.length > bestLen) {
+        best = r2;
+        bestLen = base.length;
+        tied = false;
+      } else if (base.length === bestLen && r2 !== best) {
+        tied = true;
+      }
+    }
+    if (best && !tied) return best;
+  }
+  return args.activeComponentRepo ?? null;
 }
 function emptyProjectBrainPolicy() {
   return {
@@ -62900,8 +62979,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   let activeComponentSlug = null;
   let activeComponent = null;
   const componentNameById = /* @__PURE__ */ new Map();
+  const componentRepoById = /* @__PURE__ */ new Map();
   if (projectId) {
-    const { data: compRows, error: compErr } = await ctx.supabase.from("components").select("id, name, slug, path_patterns").eq("project_id", projectId);
+    const { data: compRows, error: compErr } = await ctx.supabase.from("components").select("id, name, slug, path_patterns, repo").eq("project_id", projectId);
     if (compErr) {
       console.warn(
         `[resolver] components lookup failed: ${compErr.message} \u2014 proceeding without component boost`
@@ -62909,6 +62989,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     } else if (compRows && compRows.length > 0) {
       for (const row of compRows) {
         componentNameById.set(row.id, { name: row.name, slug: row.slug });
+        componentRepoById.set(row.id, row.repo ?? null);
       }
       if (args.cwd) {
         let bestLen = -1;
@@ -62930,6 +63011,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         for (const row of compRows) {
           for (const pat of row.path_patterns ?? []) {
             const dir = pat === "**" ? "" : pat.replace(/\/\*\*$/, "");
+            if (dir.length === 0) continue;
             if (dir.length > bestLen && args.task.includes(dir)) {
               bestLen = dir.length;
               activeComponentId = row.id;
@@ -62945,6 +63027,28 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
           name: activeComponentName,
           slug: activeComponentSlug
         };
+      }
+    }
+  }
+  let activeRepo = null;
+  {
+    const distinctRepos = /* @__PURE__ */ new Set();
+    for (const r2 of componentRepoById.values()) if (r2) distinctRepos.add(r2);
+    if (projectId && distinctRepos.size > 1) {
+      const { data: repoRows, error: repoErr } = await ctx.supabase.from("project_github_repos").select("repo_full_name").eq("project_id", projectId);
+      if (repoErr) {
+        console.warn(
+          `[resolver] project repos lookup failed: ${repoErr.message} \u2014 proceeding repo-neutral`
+        );
+      } else {
+        const repoNames = (repoRows ?? []).map((r2) => r2.repo_full_name).filter((r2) => typeof r2 === "string" && r2.length > 0);
+        activeRepo = inferActiveRepo({
+          gitRemote: args.git_remote ?? null,
+          cwd: args.cwd ?? null,
+          task: args.task,
+          repoNames,
+          activeComponentRepo: activeComponentId ? componentRepoById.get(activeComponentId) ?? null : null
+        });
       }
     }
   }
@@ -62972,9 +63076,15 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     if (compId) {
       const info = componentNameById.get(compId);
       c2.componentName = info?.name ?? null;
+      c2.repo = componentRepoById.get(compId) ?? null;
     }
     if (activeComponentId && compId === activeComponentId) {
       c2.score = (c2.similarity + ACTIVE_COMPONENT_BOOST) * KIND_WEIGHTS[c2.kind];
+    } else if (activeRepo && c2.repo === activeRepo) {
+      c2.score = (c2.similarity + SAME_REPO_BOOST) * KIND_WEIGHTS[c2.kind];
+    }
+    if (activeRepo && c2.repo && c2.repo !== activeRepo && (c2.kind === "memory" || c2.kind === "skill")) {
+      c2.score *= CROSS_REPO_DEMOTION;
     }
   }
   for (let i2 = candidates.length - 1; i2 >= 0; i2--) {
@@ -63239,6 +63349,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       },
       component_id: c2.componentId,
       component_name: c2.componentName,
+      repo: c2.repo ?? null,
       version_tag: versionTag,
       collapsed_duplicates: c2.collapsedDuplicates?.length
     });
@@ -63246,9 +63357,19 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   }
   let brandGuidelines = null;
   try {
+    const componentInfoById = /* @__PURE__ */ new Map();
+    for (const [id, info] of componentNameById) {
+      componentInfoById.set(id, {
+        repo: componentRepoById.get(id) ?? null,
+        slug: info.slug
+      });
+    }
     brandGuidelines = await assembleBrandGuidelines(ctx, {
       accountId: ctx.accountId,
-      projectId
+      projectId,
+      activeComponentId,
+      activeRepo,
+      componentInfoById
     });
   } catch (e2) {
     console.warn(
@@ -63653,6 +63774,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     truncated,
     active_component_id: activeComponentId,
     active_component_name: activeComponentName,
+    active_repo: activeRepo,
     project_brain: {
       inherited_default_ids: [...new Set(projectBrainPolicy.inheritedDefaultIds)],
       required_ids: [...new Set(projectBrainPolicy.requiredIds)],
@@ -63811,8 +63933,27 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     audit_id: auditId,
     resolved_at: resolvedAt,
     active_component: activeComponent,
+    active_repo: activeRepo,
     omitted_candidates: omittedCandidates.slice(0, 40)
   };
+}
+var BRAND_DEAD_STATUSES = /* @__PURE__ */ new Set(["rejected", "archived", "merged"]);
+function pickBrandOverrideLayers(rows, args) {
+  const overrideId = rows.find((r2) => r2.component_id === null)?.id ?? null;
+  let surfaceId = null;
+  const surfaceRows = rows.filter((r2) => r2.component_id !== null);
+  if (surfaceRows.length > 0) {
+    if (args.activeComponentId) {
+      surfaceId = surfaceRows.find((r2) => r2.component_id === args.activeComponentId)?.id ?? null;
+    }
+    if (!surfaceId && args.activeRepo && args.componentInfoById) {
+      surfaceId = surfaceRows.find((r2) => {
+        const info = r2.component_id ? args.componentInfoById?.get(r2.component_id) : null;
+        return info?.repo === args.activeRepo && info?.slug === "root";
+      })?.id ?? null;
+    }
+  }
+  return { overrideId, surfaceId };
 }
 async function assembleBrandGuidelines(ctx, args) {
   const { accountId, projectId } = args;
@@ -63834,16 +63975,29 @@ async function assembleBrandGuidelines(ctx, args) {
     }
   }
   let overrideId = null;
+  let surfaceId = null;
   if (projectId) {
-    const { data: ovr, error: error2 } = await ctx.supabase.from("documents").select("id").eq("project_id", projectId).eq("kind", "brand_guidelines").maybeSingle();
+    const { data: ovrRows, error: error2 } = await ctx.supabase.from("documents").select("id, component_id, metadata, updated_at").eq("project_id", projectId).eq("kind", "brand_guidelines");
     if (error2) {
       console.warn(`[resolver] brand-guidelines: override lookup failed: ${error2.message}`);
-    } else if (ovr) {
-      overrideId = ovr.id;
+    } else {
+      const live = (ovrRows ?? []).filter((row) => {
+        const meta = row.metadata;
+        const status = typeof meta?.status === "string" ? meta.status : "active";
+        return !BRAND_DEAD_STATUSES.has(status);
+      });
+      live.sort((a2, b2) => a2.updated_at < b2.updated_at ? 1 : -1);
+      const picked = pickBrandOverrideLayers(live, {
+        activeComponentId: args.activeComponentId,
+        activeRepo: args.activeRepo,
+        componentInfoById: args.componentInfoById
+      });
+      overrideId = picked.overrideId;
+      surfaceId = picked.surfaceId;
     }
   }
-  if (!parentId && !overrideId) return null;
-  const ids = [parentId, overrideId].filter((x2) => x2 !== null);
+  if (!parentId && !overrideId && !surfaceId) return null;
+  const ids = [parentId, overrideId, surfaceId].filter((x2) => x2 !== null);
   const { data: docRows, error: docErr } = await ctx.supabase.from("documents").select(
     `id, updated_at,
        document_versions!documents_current_version_fk ( content )`
@@ -63863,9 +64017,16 @@ async function assembleBrandGuidelines(ctx, args) {
   }
   const parentDoc = parentId ? contentById.get(parentId) : null;
   const overrideDoc = overrideId ? contentById.get(overrideId) : null;
+  const surfaceDoc = surfaceId ? contentById.get(surfaceId) : null;
   const parentParsed = parentDoc ? parseBrandGuidelines(parentDoc.content) : null;
   const overrideParsed = overrideDoc ? parseBrandGuidelines(overrideDoc.content) : null;
-  const merged = parentParsed ? mergeBrandGuidelines(parentParsed, overrideParsed) : overrideParsed;
+  const surfaceParsed = surfaceDoc ? parseBrandGuidelines(surfaceDoc.content) : null;
+  let merged = parentParsed;
+  for (const layer of [overrideParsed, surfaceParsed]) {
+    if (!layer) continue;
+    merged = merged ? mergeBrandGuidelines(merged, layer) : layer;
+  }
+  if (!merged) return null;
   const logoUrls = {};
   const logos = merged.frontmatter.logos;
   if (logos) {
@@ -63898,9 +64059,10 @@ async function assembleBrandGuidelines(ctx, args) {
 ${content.trim()}`);
   }
   const body = bodyParts.join("\n\n");
-  const source = parentParsed && overrideParsed ? "merged" : overrideParsed ? "project_override" : "account";
-  const effectiveId = overrideId ?? parentId;
-  const effectiveUpdatedAt = overrideDoc?.updated_at ?? parentDoc?.updated_at ?? (/* @__PURE__ */ new Date()).toISOString();
+  const layerCount = [parentParsed, overrideParsed, surfaceParsed].filter(Boolean).length;
+  const source = layerCount > 1 ? "merged" : surfaceParsed ? "surface_override" : overrideParsed ? "project_override" : "account";
+  const effectiveId = surfaceId ?? overrideId ?? parentId;
+  const effectiveUpdatedAt = surfaceDoc?.updated_at ?? overrideDoc?.updated_at ?? parentDoc?.updated_at ?? (/* @__PURE__ */ new Date()).toISOString();
   return {
     brand_guidelines_id: effectiveId,
     frontmatter: merged.frontmatter,
@@ -64949,7 +65111,11 @@ function renderCitation(it2) {
 var CaptureArgs = external_exports.object({
   transcript: external_exports.string().min(50).max(2e6),
   session_id: external_exports.string().min(1).max(128).optional(),
-  project_id: external_exports.string().uuid().nullish()
+  project_id: external_exports.string().uuid().nullish(),
+  // Optional repo hints: on multi-repo projects the scribe binds captures
+  // to the matched repo's root component (see scribe/session route).
+  cwd: external_exports.string().max(4096).nullish(),
+  git_remote: external_exports.string().max(512).nullish()
 });
 async function captureSession(ctx, rawArgs) {
   const args = CaptureArgs.parse(rawArgs);
@@ -64972,7 +65138,9 @@ async function captureSession(ctx, rawArgs) {
     body: JSON.stringify({
       session_id: sessionId,
       transcript: args.transcript,
-      project_id: projectId
+      project_id: projectId,
+      cwd: args.cwd ?? null,
+      git_remote: args.git_remote ?? null
     })
   });
   const text = await res.text();
@@ -65420,7 +65588,7 @@ var AGENT_EXPECTED_CAPABILITIES = {
   mcp: ["mcp", "resolve"],
   "claude-ai": ["mcp", "resolve"]
 };
-var PROVIDER_HOSTS = [
+var PROVIDER_HOSTS2 = [
   "github.com",
   "gitlab.com",
   "bitbucket.org",
@@ -65430,7 +65598,7 @@ var PROVIDER_HOSTS = [
   "sr.ht",
   "git.sr.ht"
 ];
-function normalizeGitRemote(raw) {
+function normalizeGitRemote2(raw) {
   if (!raw) return null;
   let s2 = raw.trim();
   if (!s2) return null;
@@ -65444,7 +65612,7 @@ function normalizeGitRemote(raw) {
   if (slash > 0) {
     const host = s2.slice(0, slash);
     const rest = s2.slice(slash);
-    for (const provider of PROVIDER_HOSTS) {
+    for (const provider of PROVIDER_HOSTS2) {
       if (host === provider) break;
       if (host.startsWith(provider + "-")) {
         s2 = provider + rest;
@@ -66134,7 +66302,7 @@ function readGitRemote(cwd) {
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8"
     }).trim();
-    return normalizeGitRemote(url);
+    return normalizeGitRemote2(url);
   } catch {
     return null;
   }
@@ -66619,7 +66787,7 @@ async function readPersistedConfig() {
     return null;
   }
 }
-function normalizeGitRemote2(raw) {
+function normalizeGitRemote3(raw) {
   if (!raw) return null;
   let s2 = raw.trim();
   if (!s2) return null;
@@ -66673,7 +66841,7 @@ function readGitRemote2(cwd) {
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8"
     }).trim();
-    return normalizeGitRemote2(raw);
+    return normalizeGitRemote3(raw);
   } catch {
     return null;
   }
