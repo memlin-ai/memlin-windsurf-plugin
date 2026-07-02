@@ -61325,6 +61325,8 @@ var OWN_EDIT_WINDOW_MS = 2 * 60 * 6e4;
 var DOC_PATH_MATCH_MAX = 2;
 var DOC_PATH_BODY_CAP = 6e3;
 var RECALL_FLOOR = 0.45;
+var CONCURRENT_PR_WINDOW_MS = 24 * 60 * 6e4;
+var CONCURRENT_PR_MAX = 3;
 var DUP_SIMILARITY_GATE = 0.86;
 function parsePgVector(v2) {
   if (Array.isArray(v2)) return v2;
@@ -61743,6 +61745,54 @@ function mergeWorkInFlight(semantic, pathMatched) {
   }
   return out;
 }
+async function assembleOpenPrPresence(ctx, projectId, ownSessionId, ownUserId) {
+  if (!projectId) return [];
+  const { data: prRows, error: prErr } = await ctx.supabase.from("work_items").select("head_ref, number").eq("account_id", ctx.accountId).eq("project_id", projectId).eq("state", "open").not("head_ref", "is", null).limit(100);
+  if (prErr || !prRows || prRows.length === 0) return [];
+  const prByBranch = new Map(
+    prRows.map((r2) => [r2.head_ref, r2.number])
+  );
+  const sinceIso = new Date(Date.now() - CONCURRENT_PR_WINDOW_MS).toISOString();
+  const { data, error: error2 } = await ctx.supabase.from("usage_events").select("created_at, user_id, metadata").eq("account_id", ctx.accountId).eq("event_type", "resolve.invocation").gte("created_at", sinceIso).order("created_at", { ascending: false }).limit(500);
+  if (error2 || !data) return [];
+  const now = Date.now();
+  const entries = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const row of data) {
+    const meta = row.metadata ?? {};
+    if (meta.project_id !== projectId) continue;
+    const sid = typeof meta.session_id === "string" ? meta.session_id : null;
+    if (!sid || sid === ownSessionId || seen.has(sid)) continue;
+    const branch = typeof meta.git_branch === "string" ? meta.git_branch : null;
+    if (!branch || !prByBranch.has(branch)) continue;
+    seen.add(sid);
+    entries.push({
+      component: null,
+      task: typeof meta.task === "string" ? meta.task.slice(0, 140) : "",
+      minutes_ago: Math.max(0, Math.round((now - new Date(row.created_at).getTime()) / 6e4)),
+      session_short: sid.slice(0, 8),
+      agent_kind: typeof meta.agent_kind === "string" ? meta.agent_kind : null,
+      same_user: row.user_id != null && row.user_id === ownUserId,
+      presence: "open_pr",
+      open_pr_number: prByBranch.get(branch)
+    });
+    if (entries.length >= CONCURRENT_PR_MAX) break;
+  }
+  return entries;
+}
+async function attachWorkItemProposals(ctx, entries) {
+  const open = entries.filter((e2) => e2.state === "open").slice(0, 3);
+  for (const entry of open) {
+    try {
+      const { data } = await ctx.supabase.from("documents").select("title, kind, metadata").eq("account_id", ctx.accountId).eq("metadata->>status", "proposed").eq("metadata->source_ref->>repo_full_name", entry.repo_full_name).eq("metadata->source_ref->>pr_number", String(entry.number)).limit(2);
+      const rows = data ?? [];
+      if (rows.length > 0) {
+        entry.proposals = rows.map((r2) => ({ title: r2.title.slice(0, 120), kind: r2.kind }));
+      }
+    } catch {
+    }
+  }
+}
 async function assembleDocsTouchingMyFiles(ctx, projectId, myDirs, excludeIds) {
   if (myDirs.length === 0) return [];
   const { data, error: error2 } = await ctx.supabase.rpc("search_documents_by_paths", {
@@ -61938,6 +61988,11 @@ var AssembleBundleArgs = external_exports.object({
   k_per_kind: external_exports.number().int().min(1).max(50).optional(),
   cwd: external_exports.string().max(4096).nullable().optional(),
   git_remote: external_exports.string().max(512).nullable().optional(),
+  /** Caller's current git branch. Recorded in the resolve audit so LATER
+   *  resolves can recognize "that session's work continues in open PR #N"
+   *  (axis C: branch ↔ work_items.head_ref match) long after the 20-minute
+   *  live window. Optional; older plugins simply don't send it. */
+  git_branch: external_exports.string().max(300).nullable().optional(),
   /** Retrieval mode switch. Hybrid (cosine + BM25 via RRF) is the default
    *  because skill names, tool names, and internal identifiers often need
    *  exact-token matching in addition to semantic similarity. Set false to
@@ -63578,6 +63633,25 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     );
   }
   const collisionWarnings = buildCollisionWarnings(concurrentWork, activeComponentName, args.task);
+  try {
+    const liveSessionIds = new Set(
+      concurrentWork.map((e2) => e2.session_short).filter((s2) => typeof s2 === "string" && s2.length > 0)
+    );
+    const prPresence = await assembleOpenPrPresence(
+      ctx,
+      projectId,
+      audit.sessionId ?? null,
+      ctx.userId ?? null
+    );
+    for (const e2 of prPresence) {
+      if (e2.session_short && liveSessionIds.has(e2.session_short)) continue;
+      concurrentWork.push(e2);
+    }
+  } catch (e2) {
+    console.warn(
+      `[resolver] open-pr presence assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
+    );
+  }
   let recentFileEdits = [];
   try {
     recentFileEdits = await assembleFileActivity(
@@ -63631,6 +63705,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     ].slice(0, 30);
     const pathMatched = await assembleWorkTouchingMyFiles(ctx, projectId, myDirs);
     workInFlight = mergeWorkInFlight(workInFlight, pathMatched);
+    await attachWorkItemProposals(ctx, workInFlight);
   } catch (e2) {
     console.warn(
       `[resolver] path-matched work assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
@@ -63981,6 +64056,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     // covers historical rows.
     task_category: classifyTask(args.task),
     project_id: projectId,
+    // Axis C: the caller's branch, so a LATER resolve can match this session
+    // to an open PR (work_items.head_ref) after the live window closes.
+    ...args.git_branch ? { git_branch: args.git_branch } : {},
     // Axis-A telemetry: how the work_in_flight entries surfaced, so the
     // dashboard can show the path-matched hit-rate (was the file-shaped door
     // actually used, or did semantic alone cover it?).
