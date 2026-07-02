@@ -64478,7 +64478,7 @@ async function listProposals(ctx, rawArgs) {
       update_target: updateTarget
     };
   });
-  return { proposals, count: proposals.length };
+  return { proposals, count: proposals.length, account_id: ctx.accountId };
 }
 var RecentCapturesArgs = external_exports.object({
   /** Look-back window in hours (default 24). */
@@ -64580,7 +64580,8 @@ async function applyMergeProposal(ctx, proposalId, doc, existing, actor, nowIso)
     throw new Error("resolve_proposal: merge proposal has no body to apply");
   }
   const { data: survivor, error: survivorErr } = await ctx.supabase.from("documents").select("id, account_id, project_id, scope, kind, title, path, metadata").eq("id", survivorId).maybeSingle();
-  if (survivorErr) throw new Error(`resolve_proposal: survivor read failed: ${survivorErr.message}`);
+  if (survivorErr)
+    throw new Error(`resolve_proposal: survivor read failed: ${survivorErr.message}`);
   if (!survivor || survivor.account_id !== ctx.accountId) {
     throw new Error("resolve_proposal: merge survivor not found in this account");
   }
@@ -64657,7 +64658,8 @@ async function applyUpdateProposal(ctx, proposalId, doc, existing, actor, nowIso
     throw new Error("resolve_proposal: update proposal has no body to apply");
   }
   const { data: target, error: targetErr } = await ctx.supabase.from("documents").select("id, account_id, project_id, scope, kind, title, path, status, metadata").eq("id", targetId).maybeSingle();
-  if (targetErr) throw new Error(`resolve_proposal: update target read failed: ${targetErr.message}`);
+  if (targetErr)
+    throw new Error(`resolve_proposal: update target read failed: ${targetErr.message}`);
   if (!target || target.account_id !== ctx.accountId) {
     throw new Error("resolve_proposal: update target not found in this account");
   }
@@ -67389,7 +67391,11 @@ async function buildStatus() {
         Object.entries(state.documents).filter(([p2]) => !p2.startsWith("plans/"))
       )
     };
-    const { added, modified, deleted: flaggedDeleted } = diffStates(
+    const {
+      added,
+      modified,
+      deleted: flaggedDeleted
+    } = diffStates(
       trackedDocs,
       local.map((l2) => ({ path: l2.path, hash: l2.hash }))
     );
@@ -67442,6 +67448,17 @@ var cfg = await resolveConfig().catch((err) => {
 `);
   process.exit(1);
 });
+var cfgResolvedAt = Date.now();
+var CFG_TTL_MS = 3e4;
+async function refreshCfg() {
+  if (Date.now() - cfgResolvedAt < CFG_TTL_MS) return;
+  try {
+    cfg = await resolveConfig();
+    cfgResolvedAt = Date.now();
+  } catch {
+    cfgResolvedAt = Date.now() - CFG_TTL_MS + 5e3;
+  }
+}
 var server = new Server(
   { name: "memlin", version: "0.1.24" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
@@ -67453,6 +67470,7 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => ({
   prompts: listPrompts()
 }));
 server.setRequestHandler(GetPromptRequestSchema, async (req) => {
+  await refreshCfg();
   const name = req.params.name;
   const args = req.params.arguments ?? {};
   const token = await currentAccessToken();
@@ -67474,6 +67492,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
   return result;
 });
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  await refreshCfg();
   const name = req.params.name;
   const args = req.params.arguments ?? {};
   try {
