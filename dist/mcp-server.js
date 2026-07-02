@@ -61322,6 +61322,9 @@ var DEPLOY_WINDOW_MS = 12 * 6e4;
 var WORK_SIMILARITY_GATE = 0.62;
 var WORK_PATH_MATCH_MAX = 3;
 var OWN_EDIT_WINDOW_MS = 2 * 60 * 6e4;
+var DOC_PATH_MATCH_MAX = 2;
+var DOC_PATH_BODY_CAP = 6e3;
+var RECALL_FLOOR = 0.45;
 var DUP_SIMILARITY_GATE = 0.86;
 function parsePgVector(v2) {
   if (Array.isArray(v2)) return v2;
@@ -61739,6 +61742,50 @@ function mergeWorkInFlight(semantic, pathMatched) {
     }
   }
   return out;
+}
+async function assembleDocsTouchingMyFiles(ctx, projectId, myDirs, excludeIds) {
+  if (myDirs.length === 0) return [];
+  const { data, error: error2 } = await ctx.supabase.rpc("search_documents_by_paths", {
+    p_account_id: ctx.accountId,
+    p_project_id: projectId,
+    p_dirs: myDirs,
+    p_limit: DOC_PATH_MATCH_MAX + excludeIds.size
+  });
+  if (error2 || !data) {
+    if (error2 && error2.code !== "PGRST202") {
+      console.warn(
+        `[resolver] path-matched docs query failed: ${error2.message} \u2014 proceeding without it`
+      );
+    }
+    return [];
+  }
+  const items = [];
+  for (const r2 of data) {
+    if (excludeIds.has(r2.id)) continue;
+    if (r2.kind !== "memory" && r2.kind !== "skill" && r2.kind !== "decision" && r2.kind !== "schema" && r2.kind !== "goal")
+      continue;
+    const rawBody = r2.body ?? "";
+    items.push({
+      id: r2.id,
+      kind: r2.kind,
+      title: r2.title,
+      body: rawBody.length > DOC_PATH_BODY_CAP ? `${rawBody.slice(0, DOC_PATH_BODY_CAP)}
+\u2026 (truncated \u2014 path-matched doc)` : rawBody,
+      similarity: 0,
+      citation: {
+        path: r2.path,
+        version_number: r2.version_number ?? 1,
+        updated_at: r2.updated_at,
+        author_id: r2.author_id
+      },
+      component_id: null,
+      component_name: null,
+      match_source: "paths",
+      overlap_paths: (r2.matched_dirs ?? []).slice(0, 6)
+    });
+    if (items.length >= DOC_PATH_MATCH_MAX) break;
+  }
+  return items;
 }
 async function recordDeployActivity(ctx, deploy) {
   try {
@@ -63565,6 +63612,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       `[resolver] work-in-flight assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
     );
   }
+  let myDirs = [];
   try {
     const myPaths = await assembleOwnEditPaths(ctx, projectId, audit.sessionId ?? null);
     let componentDirs = [];
@@ -63574,7 +63622,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         compRow?.path_patterns ?? []
       );
     }
-    const myDirs = [
+    myDirs = [
       .../* @__PURE__ */ new Set([
         ...dirsOfPaths(myPaths),
         ...componentDirs,
@@ -63587,6 +63635,59 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     console.warn(
       `[resolver] path-matched work assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
     );
+  }
+  let docPathMatches = 0;
+  try {
+    const pathDocs = await assembleDocsTouchingMyFiles(
+      ctx,
+      projectId,
+      myDirs,
+      new Set(included.map((i2) => i2.id))
+    );
+    for (const d2 of pathDocs) included.push(d2);
+    docPathMatches = pathDocs.length;
+  } catch (e2) {
+    console.warn(
+      `[resolver] path-matched docs assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
+    );
+  }
+  let floorIncludedId = null;
+  if (included.length === 0) {
+    const best = omittedCandidates.filter((o2) => o2.reason === "below_threshold" && o2.similarity >= RECALL_FLOOR).sort((a2, b2) => b2.similarity - a2.similarity)[0];
+    if (best) {
+      try {
+        const { data: row } = await ctx.supabase.from("documents").select(
+          `id, kind, title, path, updated_at,
+             document_versions!documents_current_version_fk ( content, version_number, author_id )`
+        ).eq("id", best.id).eq("account_id", ctx.accountId).eq("locked_to_owners", false).maybeSingle();
+        if (row) {
+          const version4 = Array.isArray(row.document_versions) ? row.document_versions[0] : row.document_versions;
+          const rawBody = version4?.content ?? "";
+          included.push({
+            id: best.id,
+            kind: best.kind,
+            title: best.title,
+            body: rawBody.length > DOC_PATH_BODY_CAP ? `${rawBody.slice(0, DOC_PATH_BODY_CAP)}
+\u2026 (truncated)` : rawBody,
+            similarity: best.similarity,
+            citation: {
+              path: row.path ?? null,
+              version_number: version4?.version_number ?? 1,
+              updated_at: row.updated_at,
+              author_id: version4?.author_id ?? null
+            },
+            component_id: null,
+            component_name: null,
+            below_gate: true
+          });
+          floorIncludedId = best.id;
+        }
+      } catch (e2) {
+        console.warn(
+          `[resolver] recall-floor fetch failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 bundle stays empty`
+        );
+      }
+    }
   }
   const bySkill = included.filter((i2) => i2.kind === "skill");
   const primary = primarySkill ? bySkill.find((i2) => i2.id === primarySkill.id) ?? null : null;
@@ -63890,6 +63991,20 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         both: workInFlight.filter((w2) => w2.match === "both").length
       }
     } : {},
+    // Recall telemetry: the top below-gate candidates with their exact scores
+    // (so audit explain/replay can say "memory X scored 0.57 vs gate 0.62"
+    // instead of just "0 items"), plus what the recall floor / path-doc legs
+    // contributed this resolve.
+    ...omittedCandidates.length > 0 ? {
+      near_misses: omittedCandidates.filter((o2) => o2.reason === "below_threshold").sort((a2, b2) => b2.similarity - a2.similarity).slice(0, 5).map((o2) => ({
+        id: o2.id,
+        kind: o2.kind,
+        title: o2.title.slice(0, 80),
+        similarity: Math.round(o2.similarity * 1e3) / 1e3
+      }))
+    } : {},
+    ...docPathMatches > 0 ? { doc_path_matches: docPathMatches } : {},
+    ...floorIncludedId ? { recall_floor_included: floorIncludedId } : {},
     similarity_thresholds: {
       skill: customThresholds?.skill ?? KIND_THRESHOLDS.skill,
       memory: customThresholds?.memory ?? KIND_THRESHOLDS.memory,

@@ -1005,7 +1005,8 @@ function renderArchitecture(a) {
 }
 function renderItem(label, item, extra = []) {
   const lines = [];
-  const metaParts = [`similarity ${item.similarity.toFixed(2)}`, ...extra];
+  const simLabel = item.match_source === "paths" ? `surfaced by path overlap: ${(item.overlap_paths ?? []).join(", ") || "your working area"}` : item.below_gate ? `closest match ${item.similarity.toFixed(2)} \u2014 BELOW confidence gate; verify before trusting` : `similarity ${item.similarity.toFixed(2)}`;
+  const metaParts = [simLabel, ...extra];
   if (item.collapsed_duplicates && item.collapsed_duplicates > 0) {
     metaParts.push(`+${item.collapsed_duplicates} corroborating`);
   }
@@ -1077,9 +1078,11 @@ function renderItemXml(tagName, item, attributes = {}) {
   const verified = item.verification ? ` verified="${item.verification.verdict}" verified_at="${item.verification.observed_at}"` : "";
   const verifiedModel = item.verification ? verificationModelLabel(item.verification.model_attribution) : null;
   const verifiedModelAttr = verifiedModel ? ` verified_model="${verifiedModel}"` : "";
+  const pathMatched = item.match_source === "paths" ? ` path_match="${(item.overlap_paths ?? []).join(",")}"` : "";
+  const belowGate = item.below_gate ? ` below_gate="true"` : "";
   const lines = [];
   lines.push(
-    `<${tagName}${attrs} title="${item.title}" similarity="${item.similarity.toFixed(2)}"${corroborating}${verified}${verifiedModelAttr}>`
+    `<${tagName}${attrs} title="${item.title}" similarity="${item.similarity.toFixed(2)}"${corroborating}${verified}${verifiedModelAttr}${pathMatched}${belowGate}>`
   );
   lines.push(
     `  <citation path="${item.citation.path ?? "(no path)"}" version="v${item.citation.version_number}" updated="${item.citation.updated_at}" />`
