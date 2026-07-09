@@ -67219,9 +67219,12 @@ async function resolveConfig() {
   const apiUrl = process.env.MEMLIN_API_URL || config2?.api_url || "https://memlin.ai/api/v1";
   const supabaseUrl = process.env.MEMLIN_SUPABASE_URL || MEMLIN_PROD_SUPABASE_URL;
   const supabaseAnon = process.env.MEMLIN_SUPABASE_ANON_KEY || MEMLIN_PROD_SUPABASE_ANON_KEY;
-  let accountId = process.env.MEMLIN_ACCOUNT_ID || config2?.account_id || "";
+  const pin = await findWorkspaceBinding(cwd);
+  const pinnedAccountId = pin?.binding.account_id ?? null;
+  const pinnedProjectId = pin ? pin.binding.project_id ?? null : void 0;
+  let accountId = process.env.MEMLIN_ACCOUNT_ID || pinnedAccountId || config2?.account_id || "";
   const userId = process.env.MEMLIN_USER_ID || config2?.user_id || "";
-  let projectId = process.env.MEMLIN_PROJECT_ID || config2?.project_id || null;
+  let projectId = process.env.MEMLIN_PROJECT_ID || (pinnedProjectId !== void 0 ? pinnedProjectId : config2?.project_id ?? null);
   const accessToken = await currentAccessToken();
   if (!supabaseUrl || !supabaseAnon || !accessToken || !accountId || !userId) {
     const missing = [
