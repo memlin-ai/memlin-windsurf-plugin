@@ -61782,16 +61782,18 @@ async function assembleOpenPrPresence(ctx, projectId, ownSessionId, ownUserId) {
 }
 async function attachWorkItemProposals(ctx, entries) {
   const open = entries.filter((e2) => e2.state === "open").slice(0, 3);
-  for (const entry of open) {
-    try {
-      const { data } = await ctx.supabase.from("documents").select("title, kind, metadata").eq("account_id", ctx.accountId).eq("metadata->>status", "proposed").eq("metadata->source_ref->>repo_full_name", entry.repo_full_name).eq("metadata->source_ref->>pr_number", String(entry.number)).limit(2);
-      const rows = data ?? [];
-      if (rows.length > 0) {
-        entry.proposals = rows.map((r2) => ({ title: r2.title.slice(0, 120), kind: r2.kind }));
+  await Promise.all(
+    open.map(async (entry) => {
+      try {
+        const { data } = await ctx.supabase.from("documents").select("title, kind, metadata").eq("account_id", ctx.accountId).eq("metadata->>status", "proposed").eq("metadata->source_ref->>repo_full_name", entry.repo_full_name).eq("metadata->source_ref->>pr_number", String(entry.number)).limit(2);
+        const rows = data ?? [];
+        if (rows.length > 0) {
+          entry.proposals = rows.map((r2) => ({ title: r2.title.slice(0, 120), kind: r2.kind }));
+        }
+      } catch {
       }
-    } catch {
-    }
-  }
+    })
+  );
 }
 async function assembleDocsTouchingMyFiles(ctx, projectId, myDirs, excludeIds) {
   if (myDirs.length === 0) return [];
@@ -62695,6 +62697,7 @@ async function maybeReactivateColdMatches(ctx, accountId, queryVec) {
   }
 }
 async function assembleBundle(ctx, rawArgs, audit = {}) {
+  const bundleStartedAt = Date.now();
   const args = AssembleBundleArgs.parse(rawArgs);
   const kPerKind = args.k_per_kind ?? DEFAULT_K_PER_KIND;
   const projectId = args.project_id ?? ctx.projectId ?? null;
@@ -63573,159 +63576,163 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     });
     used += cost;
   }
-  let brandGuidelines = null;
-  try {
-    const componentInfoById = /* @__PURE__ */ new Map();
-    for (const [id, info] of componentNameById) {
-      componentInfoById.set(id, {
-        repo: componentRepoById.get(id) ?? null,
-        slug: info.slug
-      });
+  const feed = async (name, fallback, run) => {
+    try {
+      return await run();
+    } catch (e2) {
+      console.warn(
+        `[resolver] ${name} failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
+      );
+      return fallback;
     }
-    brandGuidelines = await assembleBrandGuidelines(ctx, {
-      accountId: ctx.accountId,
-      projectId,
-      activeComponentId,
-      activeRepo,
-      componentInfoById
-    });
-  } catch (e2) {
-    console.warn(
-      `[resolver] brand-guidelines fetch failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without brand-guidelines context`
-    );
-  }
+  };
+  const feedsStartedAt = Date.now();
+  const [
+    brandGuidelinesRaw,
+    claimGuardrails,
+    architecture,
+    concurrentWork,
+    prPresence,
+    recentFileEdits,
+    deployInProgress,
+    semanticWorkInFlight,
+    myEditPaths,
+    componentDirs
+  ] = await Promise.all([
+    // Brand-guidelines context. Always-on (not semantic) — fetched directly
+    // from the project's chosen pointer (or the account default) and merged
+    // with any project-level override doc.
+    feed("brand-guidelines fetch", null, async () => {
+      const componentInfoById = /* @__PURE__ */ new Map();
+      for (const [id, info] of componentNameById) {
+        componentInfoById.set(id, {
+          repo: componentRepoById.get(id) ?? null,
+          slug: info.slug
+        });
+      }
+      return assembleBrandGuidelines(ctx, {
+        accountId: ctx.accountId,
+        projectId,
+        activeComponentId,
+        activeRepo,
+        componentInfoById
+      });
+    }),
+    wantsClaimGuardrails(args.task) ? feed(
+      "claim-guardrails assembly",
+      null,
+      () => assembleClaimGuardrails(ctx, projectId)
+    ) : Promise.resolve(null),
+    // Code-graph architecture. When cwd matched a component, fold that
+    // component's functions + cross-component contracts into the bundle.
+    activeComponent && projectId ? feed(
+      "architecture assembly",
+      null,
+      () => assembleArchitecture(ctx, projectId, activeComponent, componentNameById)
+    ) : Promise.resolve(null),
+    // Concurrent-work awareness — other agents resolving on this project
+    // right now, so the bundle can flag who else is in the room.
+    feed(
+      "concurrent-work assembly",
+      [],
+      () => assembleConcurrentWork(
+        ctx,
+        projectId,
+        audit.sessionId ?? null,
+        componentNameById,
+        queryVec ?? null
+      )
+    ),
+    // Axis C. Durable presence: sessions quiet for hours whose branch has an
+    // OPEN PR. Fetched here, appended to concurrentWork AFTER collision
+    // promotion below — a 6-hour-old session is context, not contention.
+    feed(
+      "open-pr presence assembly",
+      [],
+      () => assembleOpenPrPresence(ctx, projectId, audit.sessionId ?? null, ctx.userId ?? null)
+    ),
+    // File-level activity — what OTHER sessions actually edited recently.
+    // Resolve-level concurrency says "someone's awake"; this says
+    // "resolver.ts was touched 3m ago."
+    feed(
+      "file-activity assembly",
+      [],
+      () => assembleFileActivity(ctx, projectId, audit.sessionId ?? null, ctx.userId ?? null)
+    ),
+    // Deploy-in-progress awareness — other agents that look like they're
+    // shipping right now. Distinct, louder signal than file collisions.
+    feed(
+      "deploy-in-progress assembly",
+      [],
+      () => assembleDeployInProgress(ctx, projectId, audit.sessionId ?? null, componentNameById)
+    ),
+    // Work-ledger awareness — open / recently-merged PRs whose title+body is
+    // semantically close to this task (the work_items ledger).
+    feed(
+      "work-in-flight assembly",
+      [],
+      () => assembleWorkInFlight(ctx, projectId, queryVec ?? null)
+    ),
+    // Axis A input: repo-relative paths THIS session edited recently.
+    feed(
+      "own-edit-paths assembly",
+      [],
+      () => assembleOwnEditPaths(ctx, projectId, audit.sessionId ?? null)
+    ),
+    // Axis A input: leading literal dirs of the active component's
+    // path_patterns.
+    activeComponentId ? feed("component path-patterns fetch", [], async () => {
+      const { data: compRow } = await ctx.supabase.from("components").select("path_patterns").eq("id", activeComponentId).maybeSingle();
+      return patternPrefixDirs(
+        compRow?.path_patterns ?? []
+      );
+    }) : Promise.resolve([])
+  ]);
+  const awarenessFeedsMs = Date.now() - feedsStartedAt;
+  let brandGuidelines = brandGuidelinesRaw;
   if (brandGuidelines) {
     const demote = brandContextMode === "auto" && !taskLooksBrandRelated(args.task);
     brandGuidelines = demote ? { ...brandGuidelines, body: "", logo_urls: {}, mode: "pointer" } : { ...brandGuidelines, mode: "full" };
   }
-  let claimGuardrails = null;
-  if (wantsClaimGuardrails(args.task)) {
-    try {
-      claimGuardrails = await assembleClaimGuardrails(ctx, projectId);
-    } catch (e2) {
-      console.warn(
-        `[resolver] claim-guardrails assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
-      );
-    }
-  }
-  let architecture = null;
-  if (activeComponent && projectId) {
-    try {
-      architecture = await assembleArchitecture(ctx, projectId, activeComponent, componentNameById);
-    } catch (e2) {
-      console.warn(
-        `[resolver] architecture assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
-      );
-    }
-  }
-  let concurrentWork = [];
-  try {
-    concurrentWork = await assembleConcurrentWork(
-      ctx,
-      projectId,
-      audit.sessionId ?? null,
-      componentNameById,
-      queryVec ?? null
-    );
-  } catch (e2) {
-    console.warn(
-      `[resolver] concurrent-work assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
-    );
-  }
   const collisionWarnings = buildCollisionWarnings(concurrentWork, activeComponentName, args.task);
-  try {
+  {
     const liveSessionIds = new Set(
       concurrentWork.map((e2) => e2.session_short).filter((s2) => typeof s2 === "string" && s2.length > 0)
-    );
-    const prPresence = await assembleOpenPrPresence(
-      ctx,
-      projectId,
-      audit.sessionId ?? null,
-      ctx.userId ?? null
     );
     for (const e2 of prPresence) {
       if (e2.session_short && liveSessionIds.has(e2.session_short)) continue;
       concurrentWork.push(e2);
     }
-  } catch (e2) {
-    console.warn(
-      `[resolver] open-pr presence assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
-    );
   }
-  let recentFileEdits = [];
-  try {
-    recentFileEdits = await assembleFileActivity(
-      ctx,
-      projectId,
-      audit.sessionId ?? null,
-      ctx.userId ?? null
-    );
-  } catch (e2) {
-    console.warn(
-      `[resolver] file-activity assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
-    );
-  }
-  let deployInProgress = [];
-  try {
-    deployInProgress = await assembleDeployInProgress(
-      ctx,
-      projectId,
-      audit.sessionId ?? null,
-      componentNameById
-    );
-  } catch (e2) {
-    console.warn(
-      `[resolver] deploy-in-progress assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
-    );
-  }
-  let workInFlight = [];
-  try {
-    workInFlight = await assembleWorkInFlight(ctx, projectId, queryVec ?? null);
-  } catch (e2) {
-    console.warn(
-      `[resolver] work-in-flight assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
-    );
-  }
-  let myDirs = [];
-  try {
-    const myPaths = await assembleOwnEditPaths(ctx, projectId, audit.sessionId ?? null);
-    let componentDirs = [];
-    if (activeComponentId) {
-      const { data: compRow } = await ctx.supabase.from("components").select("path_patterns").eq("id", activeComponentId).maybeSingle();
-      componentDirs = patternPrefixDirs(
-        compRow?.path_patterns ?? []
-      );
-    }
-    myDirs = [
-      .../* @__PURE__ */ new Set([
-        ...dirsOfPaths(myPaths),
-        ...componentDirs,
-        ...dirsOfPaths(extractPathTokens(args.task))
-      ])
-    ].slice(0, 30);
-    const pathMatched = await assembleWorkTouchingMyFiles(ctx, projectId, myDirs);
-    workInFlight = mergeWorkInFlight(workInFlight, pathMatched);
-    await attachWorkItemProposals(ctx, workInFlight);
-  } catch (e2) {
-    console.warn(
-      `[resolver] path-matched work assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
-    );
-  }
-  let docPathMatches = 0;
-  try {
-    const pathDocs = await assembleDocsTouchingMyFiles(
-      ctx,
-      projectId,
-      myDirs,
-      new Set(included.map((i2) => i2.id))
-    );
-    for (const d2 of pathDocs) included.push(d2);
-    docPathMatches = pathDocs.length;
-  } catch (e2) {
-    console.warn(
-      `[resolver] path-matched docs assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
-    );
-  }
+  const pathRecallStartedAt = Date.now();
+  const myDirs = [
+    .../* @__PURE__ */ new Set([
+      ...dirsOfPaths(myEditPaths),
+      ...componentDirs,
+      ...dirsOfPaths(extractPathTokens(args.task))
+    ])
+  ].slice(0, 30);
+  const [pathMatchedWork, pathDocs] = await Promise.all([
+    feed(
+      "path-matched work assembly",
+      [],
+      () => assembleWorkTouchingMyFiles(ctx, projectId, myDirs)
+    ),
+    feed(
+      "path-matched docs assembly",
+      [],
+      () => assembleDocsTouchingMyFiles(ctx, projectId, myDirs, new Set(included.map((i2) => i2.id)))
+    )
+  ]);
+  const workInFlight = mergeWorkInFlight(semanticWorkInFlight, pathMatchedWork);
+  await feed(
+    "work-item proposals attach",
+    void 0,
+    () => attachWorkItemProposals(ctx, workInFlight)
+  );
+  for (const d2 of pathDocs) included.push(d2);
+  const docPathMatches = pathDocs.length;
+  const pathRecallMs = Date.now() - pathRecallStartedAt;
   let floorIncludedId = null;
   if (included.length === 0) {
     const best = omittedCandidates.filter((o2) => o2.reason === "below_threshold" && o2.similarity >= RECALL_FLOOR).sort((a2, b2) => b2.similarity - a2.similarity)[0];
@@ -64083,6 +64090,17 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     } : {},
     ...docPathMatches > 0 ? { doc_path_matches: docPathMatches } : {},
     ...floorIncludedId ? { recall_floor_included: floorIncludedId } : {},
+    // Latency telemetry — total assembly time plus the two awareness phases,
+    // measured server-side up to (not including) this audit write. Client
+    // hooks drop bundles that miss their delivery budget, so this is the
+    // number that says whether resolves are landing in agents' context or
+    // silently dying at the deadline. rerank_latency_ms (below) remains the
+    // rerank-only slice.
+    latency_ms: {
+      total: Date.now() - bundleStartedAt,
+      awareness_feeds: awarenessFeedsMs,
+      path_recall: pathRecallMs
+    },
     similarity_thresholds: {
       skill: customThresholds?.skill ?? KIND_THRESHOLDS.skill,
       memory: customThresholds?.memory ?? KIND_THRESHOLDS.memory,
@@ -66050,7 +66068,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.24";
+  cachedAgentVersion = "0.1.25";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -66157,10 +66175,11 @@ var MemlinApiClient = class {
   }
   /** POST /usage/event — write a usage_events row from the client.
    *  Server-side enforces an allowlist of event_types (today:
-   *  tool.guardrail, action.invoke, resolve.outcome, edit.activity) and
-   *  re-derives account_id and user_id from the auth context so callers
-   *  can't forge rows for other workspaces. `opts.accountId` routes the
-   *  write to a non-default account (multi-account workspaces). */
+   *  tool.guardrail, action.invoke, resolve.outcome, edit.activity,
+   *  resolve.delivery) and re-derives account_id and user_id from the auth
+   *  context so callers can't forge rows for other workspaces.
+   *  `opts.accountId` routes the write to a non-default account
+   *  (multi-account workspaces). */
   async writeUsageEvent(input, opts = {}) {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
@@ -67254,7 +67273,7 @@ function agentHeaders(accessToken, accountId) {
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.1.24",
+    "Memlin-Agent-Version": "0.1.25",
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -67460,7 +67479,7 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.1.24" },
+  { name: "memlin", version: "0.1.25" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

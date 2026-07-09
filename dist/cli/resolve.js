@@ -234,7 +234,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.24";
+  cachedAgentVersion = "0.1.25";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -341,10 +341,11 @@ var MemlinApiClient = class {
   }
   /** POST /usage/event — write a usage_events row from the client.
    *  Server-side enforces an allowlist of event_types (today:
-   *  tool.guardrail, action.invoke, resolve.outcome, edit.activity) and
-   *  re-derives account_id and user_id from the auth context so callers
-   *  can't forge rows for other workspaces. `opts.accountId` routes the
-   *  write to a non-default account (multi-account workspaces). */
+   *  tool.guardrail, action.invoke, resolve.outcome, edit.activity,
+   *  resolve.delivery) and re-derives account_id and user_id from the auth
+   *  context so callers can't forge rows for other workspaces.
+   *  `opts.accountId` routes the write to a non-default account
+   *  (multi-account workspaces). */
   async writeUsageEvent(input, opts = {}) {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
@@ -900,6 +901,23 @@ async function recordLastResolve(entry) {
     await writeState(state);
   } catch {
   }
+}
+
+// packages/plugin-core/src/pending-bundle.ts
+import { spawn } from "node:child_process";
+import { promises as fs5 } from "node:fs";
+import path7 from "node:path";
+import os6 from "node:os";
+var PENDING_BUNDLE_MAX_AGE_MS = 10 * 60 * 1e3;
+function pendingBundlePath() {
+  return process.env.MEMLIN_RESOLVE_OUT ?? path7.join(os6.homedir(), ".config", "memlin", "pending-bundle.json");
+}
+async function writePendingBundle(bundle) {
+  const file = pendingBundlePath();
+  await fs5.mkdir(path7.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  await fs5.writeFile(tmp, JSON.stringify(bundle), "utf8");
+  await fs5.rename(tmp, file);
 }
 
 // packages/plugin-core/src/cli/compile-bundle.ts
@@ -1513,6 +1531,10 @@ function readGitBranch(cwd) {
   }
 }
 async function main() {
+  const startedAt = Date.now();
+  const hookOutFile = process.env.MEMLIN_RESOLVE_OUT ?? null;
+  const deadlineMsRaw = Number(process.env.MEMLIN_RESOLVE_DEADLINE_MS);
+  const deadlineMs = Number.isFinite(deadlineMsRaw) && deadlineMsRaw > 0 ? deadlineMsRaw : null;
   const argv = process.argv.slice(2);
   const parsed = parseArgs(argv);
   if ("error" in parsed) {
@@ -1593,6 +1615,46 @@ async function main() {
   }
   const outString = compileBundle(result, parsed.task, parsed.agent);
   process.stdout.write(outString);
+  const latencyMs = Date.now() - startedAt;
+  const missedDeadline = deadlineMs !== null && latencyMs > deadlineMs;
+  const host = process.env.MEMLIN_HOST ?? "claude-code";
+  const sessionId = process.env.MEMLIN_SESSION_ID ?? null;
+  if (hookOutFile && outString.trim()) {
+    try {
+      await writePendingBundle({
+        task: parsed.task,
+        cwd,
+        host,
+        session_id: sessionId,
+        rendered: outString,
+        audit_id: result.audit_id ?? null,
+        completed_at: Date.now(),
+        latency_ms: latencyMs,
+        deadline_ms: deadlineMs
+      });
+    } catch {
+    }
+  }
+  if (missedDeadline) {
+    try {
+      await api.writeUsageEvent(
+        {
+          event_type: "resolve.delivery",
+          metadata: {
+            outcome: "late",
+            audit_id: result.audit_id ?? null,
+            latency_ms: latencyMs,
+            deadline_ms: deadlineMs,
+            session_id: sessionId,
+            host,
+            project_id: projectId
+          }
+        },
+        accountOverride ? { accountId: accountOverride } : {}
+      );
+    } catch {
+    }
+  }
   if (result.audit_id) {
     const bundleHasContent = Boolean(result.bundle.primary_skill) || result.bundle.supporting_skills.length > 0 || result.bundle.memory.length > 0 || result.bundle.goals.length > 0 || result.bundle.schemas.length > 0 || (result.bundle.decisions?.length ?? 0) > 0 || (result.bundle.pinned?.length ?? 0) > 0;
     await recordLastResolve({
@@ -1604,7 +1666,13 @@ async function main() {
       // Every adapter spawns this CLI with MEMLIN_HOST set; the Claude Code
       // plugin is the unset default. The continuity check matches on this so
       // hosts never consume each other's cache entries.
-      host: process.env.MEMLIN_HOST ?? "claude-code"
+      host,
+      // Continuity guards: a second window in the same cwd must not
+      // "continue" this bundle (session_id), and a bundle that missed the
+      // hook's deadline was NOT injected into any conversation yet
+      // (delivered=false) — continuity has nothing to point at.
+      session_id: sessionId,
+      delivered: !missedDeadline
     });
   }
 }
