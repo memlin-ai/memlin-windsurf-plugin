@@ -1,10 +1,187 @@
 #!/usr/bin/env node
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// packages/plugin-core/src/companion-client.ts
+var companion_client_exports = {};
+__export(companion_client_exports, {
+  COMPANION_PROTOCOL: () => COMPANION_PROTOCOL,
+  COMPANION_SOCKET_ENV: () => COMPANION_SOCKET_ENV,
+  IS_COMPANION_ENV: () => IS_COMPANION_ENV,
+  MAX_COMPANION_PROTOCOL: () => MAX_COMPANION_PROTOCOL,
+  MIN_COMPANION_PROTOCOL: () => MIN_COMPANION_PROTOCOL,
+  NO_COMPANION_ENV: () => NO_COMPANION_ENV,
+  USE_COMPANION_ENV: () => USE_COMPANION_ENV,
+  companionDelegationEnabled: () => companionDelegationEnabled,
+  companionForDelegation: () => companionForDelegation,
+  companionGetToken: () => companionGetToken,
+  companionReportSession: () => companionReportSession,
+  companionRequest: () => companionRequest,
+  companionResolveWorkspace: () => companionResolveWorkspace,
+  companionRunDir: () => companionRunDir,
+  companionSocketPath: () => companionSocketPath,
+  companionStatus: () => companionStatus,
+  companionSyncNow: () => companionSyncNow,
+  isCompanionHealthyForDelegation: () => isCompanionHealthyForDelegation,
+  resetCompanionClientCache: () => resetCompanionClientCache
+});
+import http from "node:http";
+import os from "node:os";
+import path2 from "node:path";
+function companionSocketPath(env = process.env) {
+  const override = env[COMPANION_SOCKET_ENV];
+  if (override) return override;
+  if (process.platform === "win32") {
+    return `\\\\.\\pipe\\memlin-companion-${os.userInfo().username}`;
+  }
+  return path2.join(os.homedir(), ".config", "memlin", "run", "companion.sock");
+}
+function companionRunDir() {
+  return path2.join(os.homedir(), ".config", "memlin", "run");
+}
+function companionDisabled(env = process.env) {
+  const off = env[NO_COMPANION_ENV];
+  if (off === "1" || off === "true" || off === "yes") return true;
+  return env[IS_COMPANION_ENV] === "1";
+}
+async function companionRequest(method, body, opts = {}) {
+  const env = opts.env ?? process.env;
+  if (companionDisabled(env)) return null;
+  if (Date.now() < socketDeadUntil) return null;
+  const timeoutMs = opts.timeoutMs ?? CALL_TIMEOUTS[method] ?? DEFAULT_CALL_TIMEOUT_MS;
+  const payload = JSON.stringify(body ?? {});
+  return new Promise((resolve) => {
+    let settled = false;
+    const fail = (markDead) => {
+      if (settled) return;
+      settled = true;
+      if (markDead) socketDeadUntil = Date.now() + SOCKET_DEAD_TTL_MS;
+      resolve(null);
+    };
+    const req = http.request(
+      {
+        socketPath: companionSocketPath(env),
+        path: `/v1/${method}`,
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(payload),
+          "memlin-client-protocol": String(COMPANION_PROTOCOL)
+        },
+        // Overall call budget; the connect phase gets its own tighter cap
+        // below via the socket timeout before the connection exists.
+        timeout: timeoutMs
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          if (settled) return;
+          settled = true;
+          if (res.statusCode !== 200) return resolve(null);
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+          } catch {
+            resolve(null);
+          }
+        });
+        res.on("error", () => fail(false));
+      }
+    );
+    const connectTimer = setTimeout(() => {
+      req.destroy();
+      fail(true);
+    }, CONNECT_TIMEOUT_MS);
+    connectTimer.unref?.();
+    req.on("socket", (socket) => {
+      socket.once("connect", () => clearTimeout(connectTimer));
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      fail(false);
+    });
+    req.on("error", () => fail(true));
+    req.end(payload);
+  });
+}
+async function companionStatus() {
+  const status = await companionRequest("status.get", {});
+  if (!status) return null;
+  if (status.protocol < MIN_COMPANION_PROTOCOL || status.protocol > MAX_COMPANION_PROTOCOL) {
+    return null;
+  }
+  return status;
+}
+async function companionGetToken() {
+  const token = await companionRequest("token.get", {});
+  if (!token || token.expires_at <= Date.now() + 6e4) return null;
+  return token;
+}
+async function companionResolveWorkspace(cwd) {
+  return companionRequest("workspace.resolve", { cwd });
+}
+async function companionSyncNow(req) {
+  return companionRequest("sync.now", req);
+}
+async function companionReportSession(req) {
+  return (await companionRequest("session.report", req))?.registered ?? false;
+}
+function isCompanionHealthyForDelegation(status) {
+  if (!status) return false;
+  if (status.auth.state !== "ok") return false;
+  if (status.sync.mode === "realtime") return true;
+  if (status.sync.mode !== "polling") return false;
+  if (!status.sync.last_delta_at) return false;
+  const age = Date.now() - Date.parse(status.sync.last_delta_at);
+  return Number.isFinite(age) && age < 5 * 6e4;
+}
+function companionDelegationEnabled(env = process.env) {
+  const v = env[USE_COMPANION_ENV];
+  return v === "1" || v === "true" || v === "yes";
+}
+async function companionForDelegation() {
+  if (!companionDelegationEnabled()) return null;
+  const status = await companionStatus();
+  return isCompanionHealthyForDelegation(status) ? status : null;
+}
+function resetCompanionClientCache() {
+  socketDeadUntil = 0;
+}
+var COMPANION_PROTOCOL, MIN_COMPANION_PROTOCOL, MAX_COMPANION_PROTOCOL, NO_COMPANION_ENV, IS_COMPANION_ENV, COMPANION_SOCKET_ENV, CONNECT_TIMEOUT_MS, DEFAULT_CALL_TIMEOUT_MS, CALL_TIMEOUTS, socketDeadUntil, SOCKET_DEAD_TTL_MS, USE_COMPANION_ENV;
+var init_companion_client = __esm({
+  "packages/plugin-core/src/companion-client.ts"() {
+    "use strict";
+    COMPANION_PROTOCOL = 1;
+    MIN_COMPANION_PROTOCOL = 1;
+    MAX_COMPANION_PROTOCOL = 1;
+    NO_COMPANION_ENV = "MEMLIN_NO_DAEMON";
+    IS_COMPANION_ENV = "MEMLIN_DAEMON";
+    COMPANION_SOCKET_ENV = "MEMLIN_COMPANION_SOCKET";
+    CONNECT_TIMEOUT_MS = 150;
+    DEFAULT_CALL_TIMEOUT_MS = 1e3;
+    CALL_TIMEOUTS = {
+      "workspace.resolve": 2e3,
+      "sync.now": 5e3,
+      "login.start": 1e4
+    };
+    socketDeadUntil = 0;
+    SOCKET_DEAD_TTL_MS = 5e3;
+    USE_COMPANION_ENV = "MEMLIN_USE_DAEMON";
+  }
+});
 
 // packages/plugin-core/src/cli/doctor.ts
 import { promises as fs5 } from "node:fs";
-import path7 from "node:path";
-import os6 from "node:os";
+import path8 from "node:path";
+import os7 from "node:os";
 
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
@@ -30,7 +207,11 @@ var AGENT_EXPECTED_CAPABILITIES = {
   openclaw: ["mcp", "rules", "resolve"],
   antigravity: ["mcp", "cli", "hooks", "commands", "rules", "sync", "scribe", "resolve"],
   mcp: ["mcp", "resolve"],
-  "claude-ai": ["mcp", "resolve"]
+  "claude-ai": ["mcp", "resolve"],
+  // Companion daemon (apps/companion): background token keeper + realtime
+  // plan sync + local IPC socket other agents delegate to. No hooks/commands
+  // of its own.
+  companion: ["cli", "sync", "realtime", "resolve"]
 };
 var PROVIDER_HOSTS = [
   "github.com",
@@ -157,20 +338,20 @@ function detectGitRemotes(cwd) {
 
 // packages/plugin-core/src/client.ts
 import { promises as fs3 } from "node:fs";
-import path5 from "node:path";
-import os4 from "node:os";
+import path6 from "node:path";
+import os5 from "node:os";
 
 // packages/plugin-core/src/auth.ts
 import { promises as fs } from "node:fs";
-import path2 from "node:path";
-import os from "node:os";
+import path3 from "node:path";
+import os2 from "node:os";
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
 var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
 function tokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path2.join(os.homedir(), ".config", "memlin", "token.json");
+  return process.env.MEMLIN_TOKEN_FILE || path3.join(os2.homedir(), ".config", "memlin", "token.json");
 }
 async function readPersistedToken() {
   try {
@@ -182,8 +363,8 @@ async function readPersistedToken() {
 }
 async function writePersistedToken(t) {
   const file = tokenFilePath();
-  await fs.mkdir(path2.dirname(file), { recursive: true });
-  const tmp = path2.join(path2.dirname(file), `token.json.tmp-${process.pid}`);
+  await fs.mkdir(path3.dirname(file), { recursive: true });
+  const tmp = path3.join(path3.dirname(file), `token.json.tmp-${process.pid}`);
   await fs.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
   await fs.chmod(tmp, 384).catch(() => {
   });
@@ -208,19 +389,31 @@ async function refreshAccessToken(refreshToken) {
   return toPersisted(json, refreshToken);
 }
 var refreshInFlight = null;
+var DEFAULT_FRESHNESS_MARGIN_MS = 6e4;
 async function getValidAccessToken() {
+  return ensureFreshToken(DEFAULT_FRESHNESS_MARGIN_MS);
+}
+async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS) {
   const persisted = await readPersistedToken();
   if (!persisted) throw new Error("not signed in \u2014 run `memlin login`");
-  if (Date.now() < persisted.expires_at - 6e4) return persisted.access_token;
+  if (Date.now() < persisted.expires_at - marginMs) return persisted.access_token;
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = doRefresh(persisted).finally(() => {
+  refreshInFlight = doRefresh(persisted, marginMs).finally(() => {
     refreshInFlight = null;
   });
   return refreshInFlight;
 }
-async function doRefresh(stale) {
+async function doRefresh(stale, marginMs) {
   const latest = await readPersistedToken();
-  if (latest && Date.now() < latest.expires_at - 6e4) return latest.access_token;
+  if (latest && Date.now() < latest.expires_at - marginMs) return latest.access_token;
+  try {
+    const { companionGetToken: companionGetToken2 } = await Promise.resolve().then(() => (init_companion_client(), companion_client_exports));
+    const fromDaemon = await companionGetToken2();
+    if (fromDaemon && Date.now() < fromDaemon.expires_at - marginMs) {
+      return fromDaemon.access_token;
+    }
+  } catch {
+  }
   const refreshToken = latest?.refresh_token ?? stale.refresh_token;
   if (!refreshToken) {
     throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
@@ -256,13 +449,13 @@ function requireClientId() {
 
 // packages/plugin-core/src/memlin-api-client.ts
 import { readFileSync } from "node:fs";
-import os3 from "node:os";
+import os4 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // packages/plugin-core/src/host.ts
-import os2 from "node:os";
-import path3 from "node:path";
+import os3 from "node:os";
+import path4 from "node:path";
 var BaseHost = class {
   constructor(kind, home) {
     this.kind = kind;
@@ -274,37 +467,42 @@ var BaseHost = class {
     return this.home;
   }
   plansDir() {
-    return path3.join(this.home, "plans");
+    return path4.join(this.home, "plans");
   }
 };
 var ClaudeCodeHost = class extends BaseHost {
   constructor() {
-    super("claude-code", path3.join(os2.homedir(), ".claude"));
+    super("claude-code", path4.join(os3.homedir(), ".claude"));
   }
 };
 var CursorHost = class extends BaseHost {
   constructor() {
-    super("cursor", path3.join(os2.homedir(), ".config", "memlin"));
+    super("cursor", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var CodexHost = class extends BaseHost {
   constructor() {
-    super("codex", path3.join(os2.homedir(), ".config", "memlin"));
+    super("codex", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var WindsurfHost = class extends BaseHost {
   constructor() {
-    super("windsurf", path3.join(os2.homedir(), ".config", "memlin"));
+    super("windsurf", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var AntigravityHost = class extends BaseHost {
   constructor() {
-    super("antigravity", path3.join(os2.homedir(), ".config", "memlin"));
+    super("antigravity", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var VSCodeHost = class extends BaseHost {
   constructor() {
-    super("vscode", path3.join(os2.homedir(), ".config", "memlin"));
+    super("vscode", path4.join(os3.homedir(), ".config", "memlin"));
+  }
+};
+var CompanionHost = class extends BaseHost {
+  constructor() {
+    super("companion", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var HOSTS = {
@@ -313,7 +511,8 @@ var HOSTS = {
   codex: () => new CodexHost(),
   windsurf: () => new WindsurfHost(),
   antigravity: () => new AntigravityHost(),
-  vscode: () => new VSCodeHost()
+  vscode: () => new VSCodeHost(),
+  companion: () => new CompanionHost()
 };
 function resolveHost() {
   const envHost = process.env.MEMLIN_HOST ?? (process.env.CURSOR_AGENT ? "cursor" : "claude-code");
@@ -324,7 +523,7 @@ function resolveHost() {
 // packages/plugin-core/src/memlin-api-client.ts
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
+  return process.env.MEMLIN_AGENT_DEVICE || os4.hostname() || "unknown";
 }
 var cachedAgentVersion = null;
 function agentVersion() {
@@ -389,6 +588,17 @@ var MemlinApiClient = class {
   /** GET /me — identity + account list. No account header sent (this is the discovery call). */
   async me() {
     return this.request("GET", "/me", void 0, { includeAccount: false });
+  }
+  /**
+   * GET /realtime/config — Supabase connection info for the caller's
+   * effective account. The client config file is deliberately
+   * backend-agnostic (no Supabase URL / anon key), so Realtime subscribers
+   * — the Companion daemon (packages/companion-core) — bootstrap the
+   * connection from here. Dedicated-instance (paid org) accounts get THEIR
+   * instance's values, which is why this rides normal account-header auth.
+   */
+  async getRealtimeConfig(opts = {}) {
+    return this.request("GET", "/realtime/config", void 0, { accountId: opts.accountId });
   }
   /**
    * POST /roles/assign — set a member's functional roles (backend, sre,
@@ -798,13 +1008,13 @@ function resolveApiUrl() {
 
 // packages/plugin-core/src/workspace-binding.ts
 import { promises as fs2 } from "node:fs";
-import path4 from "node:path";
+import path5 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
 var WORKSPACE_BINDING_FILE = "config.json";
 async function findWorkspaceBinding(startDir) {
-  let dir = path4.resolve(startDir);
+  let dir = path5.resolve(startDir);
   for (let i = 0; i < 64; i++) {
-    const candidate = path4.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
+    const candidate = path5.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
     try {
       const raw = await fs2.readFile(candidate, "utf8");
       const parsed = JSON.parse(raw);
@@ -820,7 +1030,7 @@ async function findWorkspaceBinding(startDir) {
       }
     } catch {
     }
-    const parent = path4.dirname(dir);
+    const parent = path5.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
@@ -828,9 +1038,9 @@ async function findWorkspaceBinding(startDir) {
 }
 
 // packages/plugin-core/src/client.ts
-var CONFIG_DIR = path5.join(os4.homedir(), ".config", "memlin");
-var CONFIG_FILE = path5.join(CONFIG_DIR, "config.json");
-var TOKEN_FILE = path5.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path6.join(os5.homedir(), ".config", "memlin");
+var CONFIG_FILE = path6.join(CONFIG_DIR, "config.json");
+var TOKEN_FILE = path6.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
     const raw = await fs3.readFile(CONFIG_FILE, "utf8");
@@ -978,17 +1188,48 @@ function evaluatePluginPresence(presence, settingsFile) {
     detail: `${settingsFile} present but Memlin plugin not enabled \u2014 capture is dark in unbound workspaces. Re-run \`memlin login\` to fix.`
   };
 }
+function evaluateCompanion(probe, now) {
+  if (!probe) {
+    return {
+      status: "pass",
+      detail: "not installed (optional) \u2014 background sync app: https://memlin.ai/download"
+    };
+  }
+  if (probe.auth_state !== "ok") {
+    return {
+      status: "warn",
+      detail: `running v${probe.daemon_version} but ${probe.auth_state === "signed-out" ? "signed out" : "re-auth required"} \u2014 click its tray icon to sign in`
+    };
+  }
+  const deltaAge = probe.last_delta_at ? now - Date.parse(probe.last_delta_at) : Number.NaN;
+  if (probe.sync_mode === "realtime") {
+    return { status: "pass", detail: `running v${probe.daemon_version}, realtime sync live` };
+  }
+  if (probe.sync_mode === "polling" && Number.isFinite(deltaAge) && deltaAge < 5 * 6e4) {
+    return {
+      status: "pass",
+      detail: `running v${probe.daemon_version}, realtime degraded \u2014 polling (last delta ${Math.round(deltaAge / 1e3)}s ago)`
+    };
+  }
+  return {
+    status: "warn",
+    detail: `running v${probe.daemon_version} but sync is stale (mode ${probe.sync_mode}) \u2014 hooks are NOT delegating to it; check its logs`
+  };
+}
+
+// packages/plugin-core/src/cli/doctor.ts
+init_companion_client();
 
 // packages/plugin-core/src/plugin-install.ts
 import { promises as fs4 } from "node:fs";
 import { existsSync as existsSync2 } from "node:fs";
-import path6 from "node:path";
-import os5 from "node:os";
+import path7 from "node:path";
+import os6 from "node:os";
 var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
 var MEMLIN_MARKETPLACE_KEY = "memlin-ai";
 function defaultUserSettingsPaths() {
-  const claudeDir = path6.join(os5.homedir(), ".claude");
-  return { claudeDir, settingsFile: path6.join(claudeDir, "settings.json") };
+  const claudeDir = path7.join(os6.homedir(), ".claude");
+  return { claudeDir, settingsFile: path7.join(claudeDir, "settings.json") };
 }
 async function readClaudeUserSettings(paths) {
   const p = paths ?? defaultUserSettingsPaths();
@@ -1015,9 +1256,9 @@ function inspectUserScopePlugin(settings) {
 
 // packages/plugin-core/src/cli/doctor.ts
 var NET_TIMEOUT_MS = 5e3;
-var CONFIG_DIR2 = path7.join(os6.homedir(), ".config", "memlin");
-var CONFIG_FILE2 = path7.join(CONFIG_DIR2, "config.json");
-var CLAUDE_DIR = path7.join(os6.homedir(), ".claude");
+var CONFIG_DIR2 = path8.join(os7.homedir(), ".config", "memlin");
+var CONFIG_FILE2 = path8.join(CONFIG_DIR2, "config.json");
+var CLAUDE_DIR = path8.join(os7.homedir(), ".claude");
 async function probeUrl(url) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), NET_TIMEOUT_MS);
@@ -1060,7 +1301,7 @@ async function probeMcp(url) {
 async function probeWritable(dir) {
   try {
     await fs5.mkdir(dir, { recursive: true });
-    const probe = path7.join(dir, `.memlin-doctor-${Date.now()}.tmp`);
+    const probe = path8.join(dir, `.memlin-doctor-${Date.now()}.tmp`);
     await fs5.writeFile(probe, "ok", "utf8");
     await fs5.unlink(probe);
     return { ok: true };
@@ -1161,6 +1402,20 @@ async function main() {
       const paths = defaultUserSettingsPaths();
       const settings = await readClaudeUserSettings(paths);
       return evaluatePluginPresence(inspectUserScopePlugin(settings), paths.settingsFile);
+    })
+  );
+  results.push(
+    await runCheck("Companion app", async () => {
+      const status = await companionStatus();
+      return evaluateCompanion(
+        status ? {
+          daemon_version: status.daemon_version,
+          auth_state: status.auth.state,
+          sync_mode: status.sync.mode,
+          last_delta_at: status.sync.last_delta_at
+        } : null,
+        Date.now()
+      );
     })
   );
   let nameWidth = 0;

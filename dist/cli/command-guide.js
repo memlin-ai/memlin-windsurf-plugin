@@ -7631,7 +7631,13 @@ var AGENT_KINDS = [
   // AGENTS.md. No lifecycle-hook surface yet — MCP + rules today. See
   // packages/adapters/src/antigravity.ts.
   "antigravity",
-  "mcp"
+  "mcp",
+  // Memlin Companion — the installable desktop tray app (apps/companion).
+  // A per-user background daemon (packages/companion-core) that keeps the
+  // token fresh, auto-links workspaces, and syncs plans continuously; other
+  // agents on the machine delegate to it over a local socket. One install
+  // per device, so agent_installations dedup by device name works as-is.
+  "companion"
 ];
 var MEMBER_ROLES = ["owner", "admin", "member", "viewer"];
 var ACCOUNT_TIERS = ["free", "starter", "pro", "team", "enterprise"];
@@ -8211,13 +8217,19 @@ var VSCodeHost = class extends BaseHost {
     super("vscode", path.join(os.homedir(), ".config", "memlin"));
   }
 };
+var CompanionHost = class extends BaseHost {
+  constructor() {
+    super("companion", path.join(os.homedir(), ".config", "memlin"));
+  }
+};
 var HOSTS = {
   "claude-code": () => new ClaudeCodeHost(),
   cursor: () => new CursorHost(),
   codex: () => new CodexHost(),
   windsurf: () => new WindsurfHost(),
   antigravity: () => new AntigravityHost(),
-  vscode: () => new VSCodeHost()
+  vscode: () => new VSCodeHost(),
+  companion: () => new CompanionHost()
 };
 function resolveHost() {
   const envHost = process.env.MEMLIN_HOST ?? (process.env.CURSOR_AGENT ? "cursor" : "claude-code");

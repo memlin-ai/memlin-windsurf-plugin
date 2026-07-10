@@ -12,6 +12,9 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
   if (typeof require !== "undefined") return require.apply(this, arguments);
   throw Error('Dynamic require of "' + x + '" is not supported');
 });
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __commonJS = (cb, mod) => function __require2() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
@@ -3519,10 +3522,117 @@ var require_gray_matter = __commonJS({
   }
 });
 
+// packages/plugin-core/src/companion-client.ts
+import http from "node:http";
+import os6 from "node:os";
+import path5 from "node:path";
+function companionSocketPath(env = process.env) {
+  const override = env[COMPANION_SOCKET_ENV];
+  if (override) return override;
+  if (process.platform === "win32") {
+    return `\\\\.\\pipe\\memlin-companion-${os6.userInfo().username}`;
+  }
+  return path5.join(os6.homedir(), ".config", "memlin", "run", "companion.sock");
+}
+function companionDisabled(env = process.env) {
+  const off = env[NO_COMPANION_ENV];
+  if (off === "1" || off === "true" || off === "yes") return true;
+  return env[IS_COMPANION_ENV] === "1";
+}
+async function companionRequest(method, body, opts = {}) {
+  const env = opts.env ?? process.env;
+  if (companionDisabled(env)) return null;
+  if (Date.now() < socketDeadUntil) return null;
+  const timeoutMs = opts.timeoutMs ?? CALL_TIMEOUTS[method] ?? DEFAULT_CALL_TIMEOUT_MS;
+  const payload = JSON.stringify(body ?? {});
+  return new Promise((resolve) => {
+    let settled = false;
+    const fail = (markDead) => {
+      if (settled) return;
+      settled = true;
+      if (markDead) socketDeadUntil = Date.now() + SOCKET_DEAD_TTL_MS;
+      resolve(null);
+    };
+    const req = http.request(
+      {
+        socketPath: companionSocketPath(env),
+        path: `/v1/${method}`,
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(payload),
+          "memlin-client-protocol": String(COMPANION_PROTOCOL)
+        },
+        // Overall call budget; the connect phase gets its own tighter cap
+        // below via the socket timeout before the connection exists.
+        timeout: timeoutMs
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          if (settled) return;
+          settled = true;
+          if (res.statusCode !== 200) return resolve(null);
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+          } catch {
+            resolve(null);
+          }
+        });
+        res.on("error", () => fail(false));
+      }
+    );
+    const connectTimer = setTimeout(() => {
+      req.destroy();
+      fail(true);
+    }, CONNECT_TIMEOUT_MS);
+    connectTimer.unref?.();
+    req.on("socket", (socket) => {
+      socket.once("connect", () => clearTimeout(connectTimer));
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      fail(false);
+    });
+    req.on("error", () => fail(true));
+    req.end(payload);
+  });
+}
+async function companionStatus() {
+  const status = await companionRequest("status.get", {});
+  if (!status) return null;
+  if (status.protocol < MIN_COMPANION_PROTOCOL || status.protocol > MAX_COMPANION_PROTOCOL) {
+    return null;
+  }
+  return status;
+}
+var COMPANION_PROTOCOL, MIN_COMPANION_PROTOCOL, MAX_COMPANION_PROTOCOL, NO_COMPANION_ENV, IS_COMPANION_ENV, COMPANION_SOCKET_ENV, CONNECT_TIMEOUT_MS, DEFAULT_CALL_TIMEOUT_MS, CALL_TIMEOUTS, socketDeadUntil, SOCKET_DEAD_TTL_MS;
+var init_companion_client = __esm({
+  "packages/plugin-core/src/companion-client.ts"() {
+    "use strict";
+    COMPANION_PROTOCOL = 1;
+    MIN_COMPANION_PROTOCOL = 1;
+    MAX_COMPANION_PROTOCOL = 1;
+    NO_COMPANION_ENV = "MEMLIN_NO_DAEMON";
+    IS_COMPANION_ENV = "MEMLIN_DAEMON";
+    COMPANION_SOCKET_ENV = "MEMLIN_COMPANION_SOCKET";
+    CONNECT_TIMEOUT_MS = 150;
+    DEFAULT_CALL_TIMEOUT_MS = 1e3;
+    CALL_TIMEOUTS = {
+      "workspace.resolve": 2e3,
+      "sync.now": 5e3,
+      "login.start": 1e4
+    };
+    socketDeadUntil = 0;
+    SOCKET_DEAD_TTL_MS = 5e3;
+  }
+});
+
 // packages/plugin-core/src/cli/login.ts
 import { promises as fs4, writeSync } from "node:fs";
-import path5 from "node:path";
-import os6 from "node:os";
+import path6 from "node:path";
+import os7 from "node:os";
 
 // packages/plugin-core/src/auth.ts
 import { promises as fs } from "node:fs";
@@ -3631,7 +3741,11 @@ var AGENT_EXPECTED_CAPABILITIES = {
   openclaw: ["mcp", "rules", "resolve"],
   antigravity: ["mcp", "cli", "hooks", "commands", "rules", "sync", "scribe", "resolve"],
   mcp: ["mcp", "resolve"],
-  "claude-ai": ["mcp", "resolve"]
+  "claude-ai": ["mcp", "resolve"],
+  // Companion daemon (apps/companion): background token keeper + realtime
+  // plan sync + local IPC socket other agents delegate to. No hooks/commands
+  // of its own.
+  companion: ["cli", "sync", "realtime", "resolve"]
 };
 
 // packages/plugin-core/src/host.ts
@@ -3681,13 +3795,19 @@ var VSCodeHost = class extends BaseHost {
     super("vscode", path2.join(os2.homedir(), ".config", "memlin"));
   }
 };
+var CompanionHost = class extends BaseHost {
+  constructor() {
+    super("companion", path2.join(os2.homedir(), ".config", "memlin"));
+  }
+};
 var HOSTS = {
   "claude-code": () => new ClaudeCodeHost(),
   cursor: () => new CursorHost(),
   codex: () => new CodexHost(),
   windsurf: () => new WindsurfHost(),
   antigravity: () => new AntigravityHost(),
-  vscode: () => new VSCodeHost()
+  vscode: () => new VSCodeHost(),
+  companion: () => new CompanionHost()
 };
 function resolveHost() {
   const envHost = process.env.MEMLIN_HOST ?? (process.env.CURSOR_AGENT ? "cursor" : "claude-code");
@@ -3763,6 +3883,17 @@ var MemlinApiClient = class {
   /** GET /me — identity + account list. No account header sent (this is the discovery call). */
   async me() {
     return this.request("GET", "/me", void 0, { includeAccount: false });
+  }
+  /**
+   * GET /realtime/config — Supabase connection info for the caller's
+   * effective account. The client config file is deliberately
+   * backend-agnostic (no Supabase URL / anon key), so Realtime subscribers
+   * — the Companion daemon (packages/companion-core) — bootstrap the
+   * connection from here. Dedicated-instance (paid org) accounts get THEIR
+   * instance's values, which is why this rides normal account-header auth.
+   */
+  async getRealtimeConfig(opts = {}) {
+    return this.request("GET", "/realtime/config", void 0, { accountId: opts.accountId });
   }
   /**
    * POST /roles/assign — set a member's functional roles (backend, sre,
@@ -4828,8 +4959,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path6, errorMaps, issueData } = params;
-  const fullPath = [...path6, ...issueData.path || []];
+  const { data, path: path7, errorMaps, issueData } = params;
+  const fullPath = [...path7, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -4945,11 +5076,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path6, key) {
+  constructor(parent, value, path7, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path6;
+    this._path = path7;
     this._key = key;
   }
   get path() {
@@ -8463,7 +8594,13 @@ var AGENT_KINDS = [
   // AGENTS.md. No lifecycle-hook surface yet — MCP + rules today. See
   // packages/adapters/src/antigravity.ts.
   "antigravity",
-  "mcp"
+  "mcp",
+  // Memlin Companion — the installable desktop tray app (apps/companion).
+  // A per-user background daemon (packages/companion-core) that keeps the
+  // token fresh, auto-links workspaces, and syncs plans continuously; other
+  // agents on the machine delegate to it over a local socket. One install
+  // per device, so agent_installations dedup by device name works as-is.
+  "companion"
 ];
 var MEMBER_ROLES = ["owner", "admin", "member", "viewer"];
 var ACCOUNT_TIERS = ["free", "starter", "pro", "team", "enterprise"];
@@ -9020,8 +9157,9 @@ function printCommandGuide(opts = {}) {
 }
 
 // packages/plugin-core/src/cli/login.ts
-var CONFIG_DIR = path5.join(os6.homedir(), ".config", "memlin");
-var CONFIG_FILE = path5.join(CONFIG_DIR, "config.json");
+init_companion_client();
+var CONFIG_DIR = path6.join(os7.homedir(), ".config", "memlin");
+var CONFIG_FILE = path6.join(CONFIG_DIR, "config.json");
 function parseLoginArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -9158,6 +9296,13 @@ async function main() {
   } else {
     console.log(`  ! couldn't enable Memlin plugin user-wide: ${pluginInstall.detail}`);
     console.log(`    Run \`/plugin install memlin@memlin-ai\` in any workspace to enable manually.`);
+  }
+  const companion = await companionStatus().catch(() => null);
+  if (!companion) {
+    console.log("");
+    console.log("  Optional: the Memlin Companion app keeps this machine signed in,");
+    console.log("  links new repos automatically, and syncs plans in the background.");
+    console.log("  Download: https://memlin.ai/download");
   }
   console.log("");
   console.log("  Run `memlin pull` to fetch your memory, skills, and goals.");

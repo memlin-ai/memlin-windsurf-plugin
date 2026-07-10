@@ -55,6 +55,7 @@ async function writeState(state) {
   await fs.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
   await fs.rename(tmp, STATE_FILE);
 }
+var LOCK_DIR = `${STATE_FILE}.lock`;
 
 // packages/plugin-core/dist/continuity.js
 var CONTINUITY_WINDOW_MS = 10 * 60 * 1e3;

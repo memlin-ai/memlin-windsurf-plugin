@@ -3237,8 +3237,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path11) {
-      let input = path11;
+    function removeDotSegments(path12) {
+      let input = path12;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3490,8 +3490,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path11, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path11 && path11 !== "/" ? path11 : void 0;
+        const [path12, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -3550,7 +3550,7 @@ var require_schemes = __commonJS({
       urnComponent.nss = (uuidComponent.uuid || "").toLowerCase();
       return urnComponent;
     }
-    var http = (
+    var http2 = (
       /** @type {SchemeHandler} */
       {
         scheme: "http",
@@ -3563,7 +3563,7 @@ var require_schemes = __commonJS({
       /** @type {SchemeHandler} */
       {
         scheme: "https",
-        domainHost: http.domainHost,
+        domainHost: http2.domainHost,
         parse: httpParse,
         serialize: httpSerialize
       }
@@ -3607,7 +3607,7 @@ var require_schemes = __commonJS({
     var SCHEMES = (
       /** @type {Record<SchemeName, SchemeHandler>} */
       {
-        http,
+        http: http2,
         https,
         ws,
         wss,
@@ -7326,13 +7326,13 @@ function __disposeResources(env) {
   }
   return next();
 }
-function __rewriteRelativeImportExtension(path11, preserveJsx) {
-  if (typeof path11 === "string" && /^\.\.?\//.test(path11)) {
-    return path11.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function(m2, tsx, d2, ext, cm) {
+function __rewriteRelativeImportExtension(path12, preserveJsx) {
+  if (typeof path12 === "string" && /^\.\.?\//.test(path12)) {
+    return path12.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function(m2, tsx, d2, ext, cm) {
       return tsx ? preserveJsx ? ".jsx" : ".js" : d2 && (!ext || !cm) ? m2 : d2 + ext + "." + cm.toLowerCase() + "js";
     });
   }
-  return path11;
+  return path12;
 }
 var extendStatics, __assign, __createBinding, __setModuleDefault, ownKeys, _SuppressedError, tslib_es6_default;
 var init_tslib_es6 = __esm({
@@ -20630,14 +20630,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path11 = url.path;
-      if (path11.length === 0) {
+      const path12 = url.path;
+      if (path12.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path11.length === 1 && isNormalizedWindowsDriveLetter(path11[0])) {
+      if (url.scheme === "file" && path12.length === 1 && isNormalizedWindowsDriveLetter(path12[0])) {
         return;
       }
-      path11.pop();
+      path12.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -21676,7 +21676,7 @@ var require_lib2 = __commonJS({
       return ex && typeof ex === "object" && "default" in ex ? ex["default"] : ex;
     }
     var Stream2 = _interopDefault(__require("stream"));
-    var http = _interopDefault(__require("http"));
+    var http2 = _interopDefault(__require("http"));
     var Url = _interopDefault(__require("url"));
     var whatwgUrl = _interopDefault(require_public_api());
     var https = _interopDefault(__require("https"));
@@ -22416,7 +22416,7 @@ var require_lib2 = __commonJS({
       return headers;
     }
     var INTERNALS$1 = /* @__PURE__ */ Symbol("Response internals");
-    var STATUS_CODES = http.STATUS_CODES;
+    var STATUS_CODES = http2.STATUS_CODES;
     var Response3 = class _Response {
       constructor() {
         let body = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : null;
@@ -22669,7 +22669,7 @@ var require_lib2 = __commonJS({
       return new fetch3.Promise(function(resolve, reject) {
         const request = new Request3(url, opts);
         const options2 = getNodeRequestOptions(request);
-        const send = (options2.protocol === "https:" ? https : http).request;
+        const send = (options2.protocol === "https:" ? https : http2).request;
         const signal = request.signal;
         let response = null;
         const abort = function abort2() {
@@ -26218,14 +26218,14 @@ __export(fileFromPath_exports, {
 });
 import { statSync, createReadStream, promises as fs } from "fs";
 import { basename } from "path";
-function createFileFromPath(path11, { mtimeMs, size }, filenameOrOptions, options2 = {}) {
+function createFileFromPath(path12, { mtimeMs, size }, filenameOrOptions, options2 = {}) {
   let filename;
   if (isPlainObject_default2(filenameOrOptions)) {
     [options2, filename] = [filenameOrOptions, void 0];
   } else {
     filename = filenameOrOptions;
   }
-  const file = new FileFromPath({ path: path11, size, lastModified: mtimeMs });
+  const file = new FileFromPath({ path: path12, size, lastModified: mtimeMs });
   if (!filename) {
     filename = file.name;
   }
@@ -26234,13 +26234,13 @@ function createFileFromPath(path11, { mtimeMs, size }, filenameOrOptions, option
     lastModified: file.lastModified
   });
 }
-function fileFromPathSync(path11, filenameOrOptions, options2 = {}) {
-  const stats = statSync(path11);
-  return createFileFromPath(path11, stats, filenameOrOptions, options2);
+function fileFromPathSync(path12, filenameOrOptions, options2 = {}) {
+  const stats = statSync(path12);
+  return createFileFromPath(path12, stats, filenameOrOptions, options2);
 }
-async function fileFromPath2(path11, filenameOrOptions, options2) {
-  const stats = await fs.stat(path11);
-  return createFileFromPath(path11, stats, filenameOrOptions, options2);
+async function fileFromPath2(path12, filenameOrOptions, options2) {
+  const stats = await fs.stat(path12);
+  return createFileFromPath(path12, stats, filenameOrOptions, options2);
 }
 var import_node_domexception, __classPrivateFieldSet5, __classPrivateFieldGet6, _FileFromPath_path, _FileFromPath_start, MESSAGE, FileFromPath;
 var init_fileFromPath = __esm({
@@ -31241,11 +31241,179 @@ var require_diff_match_patch = __commonJS({
   }
 });
 
+// packages/plugin-core/dist/companion-client.js
+var companion_client_exports = {};
+__export(companion_client_exports, {
+  COMPANION_PROTOCOL: () => COMPANION_PROTOCOL,
+  COMPANION_SOCKET_ENV: () => COMPANION_SOCKET_ENV,
+  IS_COMPANION_ENV: () => IS_COMPANION_ENV,
+  MAX_COMPANION_PROTOCOL: () => MAX_COMPANION_PROTOCOL,
+  MIN_COMPANION_PROTOCOL: () => MIN_COMPANION_PROTOCOL,
+  NO_COMPANION_ENV: () => NO_COMPANION_ENV,
+  USE_COMPANION_ENV: () => USE_COMPANION_ENV,
+  companionDelegationEnabled: () => companionDelegationEnabled,
+  companionForDelegation: () => companionForDelegation,
+  companionGetToken: () => companionGetToken,
+  companionReportSession: () => companionReportSession,
+  companionRequest: () => companionRequest,
+  companionResolveWorkspace: () => companionResolveWorkspace,
+  companionRunDir: () => companionRunDir,
+  companionSocketPath: () => companionSocketPath,
+  companionStatus: () => companionStatus,
+  companionSyncNow: () => companionSyncNow,
+  isCompanionHealthyForDelegation: () => isCompanionHealthyForDelegation,
+  resetCompanionClientCache: () => resetCompanionClientCache
+});
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+function companionSocketPath(env = process.env) {
+  const override = env[COMPANION_SOCKET_ENV];
+  if (override) return override;
+  if (process.platform === "win32") {
+    return `\\\\.\\pipe\\memlin-companion-${os.userInfo().username}`;
+  }
+  return path.join(os.homedir(), ".config", "memlin", "run", "companion.sock");
+}
+function companionRunDir() {
+  return path.join(os.homedir(), ".config", "memlin", "run");
+}
+function companionDisabled(env = process.env) {
+  const off = env[NO_COMPANION_ENV];
+  if (off === "1" || off === "true" || off === "yes") return true;
+  return env[IS_COMPANION_ENV] === "1";
+}
+async function companionRequest(method, body, opts = {}) {
+  const env = opts.env ?? process.env;
+  if (companionDisabled(env)) return null;
+  if (Date.now() < socketDeadUntil) return null;
+  const timeoutMs = opts.timeoutMs ?? CALL_TIMEOUTS[method] ?? DEFAULT_CALL_TIMEOUT_MS;
+  const payload = JSON.stringify(body ?? {});
+  return new Promise((resolve) => {
+    let settled = false;
+    const fail = (markDead) => {
+      if (settled) return;
+      settled = true;
+      if (markDead) socketDeadUntil = Date.now() + SOCKET_DEAD_TTL_MS;
+      resolve(null);
+    };
+    const req = http.request(
+      {
+        socketPath: companionSocketPath(env),
+        path: `/v1/${method}`,
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(payload),
+          "memlin-client-protocol": String(COMPANION_PROTOCOL)
+        },
+        // Overall call budget; the connect phase gets its own tighter cap
+        // below via the socket timeout before the connection exists.
+        timeout: timeoutMs
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c2) => chunks.push(c2));
+        res.on("end", () => {
+          if (settled) return;
+          settled = true;
+          if (res.statusCode !== 200) return resolve(null);
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+          } catch {
+            resolve(null);
+          }
+        });
+        res.on("error", () => fail(false));
+      }
+    );
+    const connectTimer = setTimeout(() => {
+      req.destroy();
+      fail(true);
+    }, CONNECT_TIMEOUT_MS);
+    connectTimer.unref?.();
+    req.on("socket", (socket) => {
+      socket.once("connect", () => clearTimeout(connectTimer));
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      fail(false);
+    });
+    req.on("error", () => fail(true));
+    req.end(payload);
+  });
+}
+async function companionStatus() {
+  const status = await companionRequest("status.get", {});
+  if (!status) return null;
+  if (status.protocol < MIN_COMPANION_PROTOCOL || status.protocol > MAX_COMPANION_PROTOCOL) {
+    return null;
+  }
+  return status;
+}
+async function companionGetToken() {
+  const token = await companionRequest("token.get", {});
+  if (!token || token.expires_at <= Date.now() + 6e4) return null;
+  return token;
+}
+async function companionResolveWorkspace(cwd) {
+  return companionRequest("workspace.resolve", { cwd });
+}
+async function companionSyncNow(req) {
+  return companionRequest("sync.now", req);
+}
+async function companionReportSession(req) {
+  return (await companionRequest("session.report", req))?.registered ?? false;
+}
+function isCompanionHealthyForDelegation(status) {
+  if (!status) return false;
+  if (status.auth.state !== "ok") return false;
+  if (status.sync.mode === "realtime") return true;
+  if (status.sync.mode !== "polling") return false;
+  if (!status.sync.last_delta_at) return false;
+  const age = Date.now() - Date.parse(status.sync.last_delta_at);
+  return Number.isFinite(age) && age < 5 * 6e4;
+}
+function companionDelegationEnabled(env = process.env) {
+  const v2 = env[USE_COMPANION_ENV];
+  return v2 === "1" || v2 === "true" || v2 === "yes";
+}
+async function companionForDelegation() {
+  if (!companionDelegationEnabled()) return null;
+  const status = await companionStatus();
+  return isCompanionHealthyForDelegation(status) ? status : null;
+}
+function resetCompanionClientCache() {
+  socketDeadUntil = 0;
+}
+var COMPANION_PROTOCOL, MIN_COMPANION_PROTOCOL, MAX_COMPANION_PROTOCOL, NO_COMPANION_ENV, IS_COMPANION_ENV, COMPANION_SOCKET_ENV, CONNECT_TIMEOUT_MS, DEFAULT_CALL_TIMEOUT_MS, CALL_TIMEOUTS, socketDeadUntil, SOCKET_DEAD_TTL_MS, USE_COMPANION_ENV;
+var init_companion_client = __esm({
+  "packages/plugin-core/dist/companion-client.js"() {
+    "use strict";
+    COMPANION_PROTOCOL = 1;
+    MIN_COMPANION_PROTOCOL = 1;
+    MAX_COMPANION_PROTOCOL = 1;
+    NO_COMPANION_ENV = "MEMLIN_NO_DAEMON";
+    IS_COMPANION_ENV = "MEMLIN_DAEMON";
+    COMPANION_SOCKET_ENV = "MEMLIN_COMPANION_SOCKET";
+    CONNECT_TIMEOUT_MS = 150;
+    DEFAULT_CALL_TIMEOUT_MS = 1e3;
+    CALL_TIMEOUTS = {
+      "workspace.resolve": 2e3,
+      "sync.now": 5e3,
+      "login.start": 1e4
+    };
+    socketDeadUntil = 0;
+    SOCKET_DEAD_TTL_MS = 5e3;
+    USE_COMPANION_ENV = "MEMLIN_USE_DAEMON";
+  }
+});
+
 // apps/mcp-server/src/index.ts
 import { promises as fs7 } from "node:fs";
 import { execSync as execSync4 } from "node:child_process";
-import path10 from "node:path";
-import os7 from "node:os";
+import path11 from "node:path";
+import os8 from "node:os";
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
@@ -31725,8 +31893,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path11, errorMaps, issueData } = params;
-  const fullPath = [...path11, ...issueData.path || []];
+  const { data, path: path12, errorMaps, issueData } = params;
+  const fullPath = [...path12, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -31842,11 +32010,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path11, key) {
+  constructor(parent, value, path12, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path11;
+    this._path = path12;
     this._key = key;
   }
   get path() {
@@ -35483,10 +35651,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path11) {
-  if (!path11)
+function getElementAtPath(obj, path12) {
+  if (!path12)
     return obj;
-  return path11.reduce((acc, key) => acc?.[key], obj);
+  return path12.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -35806,11 +35974,11 @@ function aborted(x2, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path11, issues) {
+function prefixIssues(path12, issues) {
   return issues.map((iss) => {
     var _a2;
     (_a2 = iss).path ?? (_a2.path = []);
-    iss.path.unshift(path11);
+    iss.path.unshift(path12);
     return iss;
   });
 }
@@ -47352,8 +47520,8 @@ var IcebergError = class extends Error {
     return this.status === 419;
   }
 };
-function buildUrl(baseUrl, path11, query) {
-  const url = new URL(path11, baseUrl);
+function buildUrl(baseUrl, path12, query) {
+  const url = new URL(path12, baseUrl);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== void 0) {
@@ -47383,12 +47551,12 @@ function createFetchClient(options2) {
   return {
     async request({
       method,
-      path: path11,
+      path: path12,
       query,
       body,
       headers
     }) {
-      const url = buildUrl(options2.baseUrl, path11, query);
+      const url = buildUrl(options2.baseUrl, path12, query);
       const authHeaders2 = await buildAuthHeaders(options2.auth);
       const res = await fetchFn(url, {
         method,
@@ -48236,7 +48404,7 @@ var StorageFileApi = class extends BaseApiClient {
   * @param path The relative file path. Should be of the format `folder/subfolder/filename.png`. The bucket must already exist before attempting to upload.
   * @param fileBody The body of the file to be stored in the bucket.
   */
-  async uploadOrUpdate(method, path11, fileBody, fileOptions) {
+  async uploadOrUpdate(method, path12, fileBody, fileOptions) {
     var _this = this;
     return _this.handleOperation(async () => {
       let body;
@@ -48260,7 +48428,7 @@ var StorageFileApi = class extends BaseApiClient {
         if ((typeof ReadableStream !== "undefined" && body instanceof ReadableStream || body && typeof body === "object" && "pipe" in body && typeof body.pipe === "function") && !options2.duplex) options2.duplex = "half";
       }
       if (fileOptions === null || fileOptions === void 0 ? void 0 : fileOptions.headers) for (const [key, value] of Object.entries(fileOptions.headers)) headers = setHeader(headers, key, value);
-      const cleanPath = _this._removeEmptyFolders(path11);
+      const cleanPath = _this._removeEmptyFolders(path12);
       const _path = _this._getFinalPath(cleanPath);
       const data = await (method == "PUT" ? put : post)(_this.fetch, `${_this.url}/object/${_path}`, body, _objectSpread22({ headers }, (options2 === null || options2 === void 0 ? void 0 : options2.duplex) ? { duplex: options2.duplex } : {}));
       return {
@@ -48322,8 +48490,8 @@ var StorageFileApi = class extends BaseApiClient {
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   * - For React Native, using either `Blob`, `File` or `FormData` does not work as intended. Upload file using `ArrayBuffer` from base64 file data instead, see example below.
   */
-  async upload(path11, fileBody, fileOptions) {
-    return this.uploadOrUpdate("POST", path11, fileBody, fileOptions);
+  async upload(path12, fileBody, fileOptions) {
+    return this.uploadOrUpdate("POST", path12, fileBody, fileOptions);
   }
   /**
   * Upload a file with a token generated from `createSignedUploadUrl`.
@@ -48363,9 +48531,9 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: none
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  async uploadToSignedUrl(path11, token, fileBody, fileOptions) {
+  async uploadToSignedUrl(path12, token, fileBody, fileOptions) {
     var _this3 = this;
-    const cleanPath = _this3._removeEmptyFolders(path11);
+    const cleanPath = _this3._removeEmptyFolders(path12);
     const _path = _this3._getFinalPath(cleanPath);
     const url = new URL(_this3.url + `/object/upload/sign/${_path}`);
     url.searchParams.set("token", token);
@@ -48434,10 +48602,10 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: `insert`
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  async createSignedUploadUrl(path11, options2) {
+  async createSignedUploadUrl(path12, options2) {
     var _this4 = this;
     return _this4.handleOperation(async () => {
-      let _path = _this4._getFinalPath(path11);
+      let _path = _this4._getFinalPath(path12);
       const headers = _objectSpread22({}, _this4.headers);
       if (options2 === null || options2 === void 0 ? void 0 : options2.upsert) headers["x-upsert"] = "true";
       const data = await post(_this4.fetch, `${_this4.url}/object/upload/sign/${_path}`, {}, { headers });
@@ -48446,7 +48614,7 @@ var StorageFileApi = class extends BaseApiClient {
       if (!token) throw new StorageError("No token returned by API");
       return {
         signedUrl: url.toString(),
-        path: path11,
+        path: path12,
         token
       };
     });
@@ -48506,8 +48674,8 @@ var StorageFileApi = class extends BaseApiClient {
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   * - For React Native, using either `Blob`, `File` or `FormData` does not work as intended. Update file using `ArrayBuffer` from base64 file data instead, see example below.
   */
-  async update(path11, fileBody, fileOptions) {
-    return this.uploadOrUpdate("PUT", path11, fileBody, fileOptions);
+  async update(path12, fileBody, fileOptions) {
+    return this.uploadOrUpdate("PUT", path12, fileBody, fileOptions);
   }
   /**
   * Moves an existing file to a new path in the same bucket.
@@ -48658,10 +48826,10 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: `select`
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  async createSignedUrl(path11, expiresIn, options2) {
+  async createSignedUrl(path12, expiresIn, options2) {
     var _this8 = this;
     return _this8.handleOperation(async () => {
-      let _path = _this8._getFinalPath(path11);
+      let _path = _this8._getFinalPath(path12);
       const hasTransform = typeof (options2 === null || options2 === void 0 ? void 0 : options2.transform) === "object" && options2.transform !== null && Object.keys(options2.transform).length > 0;
       let data = await post(_this8.fetch, `${_this8.url}/object/sign/${_path}`, _objectSpread22({ expiresIn }, hasTransform ? { transform: options2.transform } : {}), { headers: _this8.headers });
       const query = new URLSearchParams();
@@ -48797,13 +48965,13 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: `select`
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  download(path11, options2, parameters) {
+  download(path12, options2, parameters) {
     const renderPath = typeof (options2 === null || options2 === void 0 ? void 0 : options2.transform) === "object" && options2.transform !== null && Object.keys(options2.transform).length > 0 ? "render/image/authenticated" : "object";
     const query = new URLSearchParams();
     if (options2 === null || options2 === void 0 ? void 0 : options2.transform) this.applyTransformOptsToQuery(query, options2.transform);
     if ((options2 === null || options2 === void 0 ? void 0 : options2.cacheNonce) != null) query.set("cacheNonce", String(options2.cacheNonce));
     const queryString = query.toString();
-    const _path = this._getFinalPath(path11);
+    const _path = this._getFinalPath(path12);
     const downloadFn = () => get(this.fetch, `${this.url}/${renderPath}/${_path}${queryString ? `?${queryString}` : ""}`, {
       headers: this.headers,
       noResolveJson: true
@@ -48834,9 +49002,9 @@ var StorageFileApi = class extends BaseApiClient {
   * }
   * ```
   */
-  async info(path11) {
+  async info(path12) {
     var _this10 = this;
-    const _path = _this10._getFinalPath(path11);
+    const _path = _this10._getFinalPath(path12);
     return _this10.handleOperation(async () => {
       return recursiveToCamel(await get(_this10.fetch, `${_this10.url}/object/info/${_path}`, { headers: _this10.headers }));
     });
@@ -48857,9 +49025,9 @@ var StorageFileApi = class extends BaseApiClient {
   *   .exists('folder/avatar1.png')
   * ```
   */
-  async exists(path11) {
+  async exists(path12) {
     var _this11 = this;
-    const _path = _this11._getFinalPath(path11);
+    const _path = _this11._getFinalPath(path12);
     try {
       await head(_this11.fetch, `${_this11.url}/object/${_path}`, { headers: _this11.headers });
       return {
@@ -48938,8 +49106,8 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: none
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  getPublicUrl(path11, options2) {
-    const _path = this._getFinalPath(path11);
+  getPublicUrl(path12, options2) {
+    const _path = this._getFinalPath(path12);
     const query = new URLSearchParams();
     if (options2 === null || options2 === void 0 ? void 0 : options2.download) query.set("download", options2.download === true ? "" : options2.download);
     if (options2 === null || options2 === void 0 ? void 0 : options2.transform) this.applyTransformOptsToQuery(query, options2.transform);
@@ -49078,10 +49246,10 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: `select`
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  async list(path11, options2, parameters) {
+  async list(path12, options2, parameters) {
     var _this13 = this;
     return _this13.handleOperation(async () => {
-      const body = _objectSpread22(_objectSpread22(_objectSpread22({}, DEFAULT_SEARCH_OPTIONS), options2), {}, { prefix: path11 || "" });
+      const body = _objectSpread22(_objectSpread22(_objectSpread22({}, DEFAULT_SEARCH_OPTIONS), options2), {}, { prefix: path12 || "" });
       return await post(_this13.fetch, `${_this13.url}/object/list/${_this13.bucketId}`, body, { headers: _this13.headers }, parameters);
     });
   }
@@ -49146,11 +49314,11 @@ var StorageFileApi = class extends BaseApiClient {
     if (typeof Buffer !== "undefined") return Buffer.from(data).toString("base64");
     return btoa(data);
   }
-  _getFinalPath(path11) {
-    return `${this.bucketId}/${path11.replace(/^\/+/, "")}`;
+  _getFinalPath(path12) {
+    return `${this.bucketId}/${path12.replace(/^\/+/, "")}`;
   }
-  _removeEmptyFolders(path11) {
-    return path11.replace(/^\/|\/$/g, "").replace(/\/+/g, "/");
+  _removeEmptyFolders(path12) {
+    return path12.replace(/^\/|\/$/g, "").replace(/\/+/g, "/");
   }
   /** Modifies the `query`, appending values the from `transform` */
   applyTransformOptsToQuery(query, transform2) {
@@ -51806,13 +51974,13 @@ var MultipartBody = class {
 // node_modules/.pnpm/openai@4.104.0_ws@8.20.1_zod@3.25.76/node_modules/openai/_shims/node-runtime.mjs
 import { ReadableStream as ReadableStream4 } from "node:stream/web";
 var fileFromPathWarned = false;
-async function fileFromPath3(path11, ...args) {
+async function fileFromPath3(path12, ...args) {
   const { fileFromPath: _fileFromPath } = await Promise.resolve().then(() => (init_fileFromPath(), fileFromPath_exports));
   if (!fileFromPathWarned) {
-    console.warn(`fileFromPath is deprecated; use fs.createReadStream(${JSON.stringify(path11)}) instead`);
+    console.warn(`fileFromPath is deprecated; use fs.createReadStream(${JSON.stringify(path12)}) instead`);
     fileFromPathWarned = true;
   }
-  return await _fileFromPath(path11, ...args);
+  return await _fileFromPath(path12, ...args);
 }
 var defaultHttpAgent = new import_agentkeepalive.default({ keepAlive: true, timeout: 5 * 60 * 1e3 });
 var defaultHttpsAgent = new import_agentkeepalive.default.HttpsAgent({ keepAlive: true, timeout: 5 * 60 * 1e3 });
@@ -52596,29 +52764,29 @@ var APIClient = class {
   defaultIdempotencyKey() {
     return `stainless-node-retry-${uuid4()}`;
   }
-  get(path11, opts) {
-    return this.methodRequest("get", path11, opts);
+  get(path12, opts) {
+    return this.methodRequest("get", path12, opts);
   }
-  post(path11, opts) {
-    return this.methodRequest("post", path11, opts);
+  post(path12, opts) {
+    return this.methodRequest("post", path12, opts);
   }
-  patch(path11, opts) {
-    return this.methodRequest("patch", path11, opts);
+  patch(path12, opts) {
+    return this.methodRequest("patch", path12, opts);
   }
-  put(path11, opts) {
-    return this.methodRequest("put", path11, opts);
+  put(path12, opts) {
+    return this.methodRequest("put", path12, opts);
   }
-  delete(path11, opts) {
-    return this.methodRequest("delete", path11, opts);
+  delete(path12, opts) {
+    return this.methodRequest("delete", path12, opts);
   }
-  methodRequest(method, path11, opts) {
+  methodRequest(method, path12, opts) {
     return this.request(Promise.resolve(opts).then(async (opts2) => {
       const body = opts2 && isBlobLike(opts2?.body) ? new DataView(await opts2.body.arrayBuffer()) : opts2?.body instanceof DataView ? opts2.body : opts2?.body instanceof ArrayBuffer ? new DataView(opts2.body) : opts2 && ArrayBuffer.isView(opts2?.body) ? new DataView(opts2.body.buffer) : opts2?.body;
-      return { method, path: path11, ...opts2, body };
+      return { method, path: path12, ...opts2, body };
     }));
   }
-  getAPIList(path11, Page2, opts) {
-    return this.requestAPIList(Page2, { method: "get", path: path11, ...opts });
+  getAPIList(path12, Page2, opts) {
+    return this.requestAPIList(Page2, { method: "get", path: path12, ...opts });
   }
   calculateContentLength(body) {
     if (typeof body === "string") {
@@ -52637,10 +52805,10 @@ var APIClient = class {
   }
   buildRequest(inputOptions, { retryCount = 0 } = {}) {
     const options2 = { ...inputOptions };
-    const { method, path: path11, query, headers = {} } = options2;
+    const { method, path: path12, query, headers = {} } = options2;
     const body = ArrayBuffer.isView(options2.body) || options2.__binaryRequest && typeof options2.body === "string" ? options2.body : isMultipartBody(options2.body) ? options2.body.body : options2.body ? JSON.stringify(options2.body, null, 2) : null;
     const contentLength = this.calculateContentLength(body);
-    const url = this.buildURL(path11, query);
+    const url = this.buildURL(path12, query);
     if ("timeout" in options2)
       validatePositiveInteger("timeout", options2.timeout);
     options2.timeout = options2.timeout ?? this.timeout;
@@ -52756,8 +52924,8 @@ var APIClient = class {
     const request = this.makeRequest(options2, null);
     return new PagePromise(this, request, Page2);
   }
-  buildURL(path11, query) {
-    const url = isAbsoluteURL(path11) ? new URL(path11) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path11.startsWith("/") ? path11.slice(1) : path11));
+  buildURL(path12, query) {
+    const url = isAbsoluteURL(path12) ? new URL(path12) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path12.startsWith("/") ? path12.slice(1) : path12));
     const defaultQuery = this.defaultQuery();
     if (!isEmptyObj(defaultQuery)) {
       query = { ...defaultQuery, ...query };
@@ -57742,7 +57910,13 @@ var AGENT_KINDS = [
   // AGENTS.md. No lifecycle-hook surface yet — MCP + rules today. See
   // packages/adapters/src/antigravity.ts.
   "antigravity",
-  "mcp"
+  "mcp",
+  // Memlin Companion — the installable desktop tray app (apps/companion).
+  // A per-user background daemon (packages/companion-core) that keeps the
+  // token fresh, auto-links workspaces, and syncs plans continuously; other
+  // agents on the machine delegate to it over a local socket. One install
+  // per device, so agent_installations dedup by device name works as-is.
+  "companion"
 ];
 var MEMBER_ROLES = ["owner", "admin", "member", "viewer"];
 var ACCOUNT_TIERS = ["free", "starter", "pro", "team", "enterprise"];
@@ -58473,8 +58647,8 @@ function validateActionInput(input, schema) {
   return { valid: errors.length === 0, errors };
 }
 function renderPromptTemplate(template, input) {
-  return template.replace(/\{\{\s*input\.([a-zA-Z0-9_.]+)\s*\}\}/g, (_match, path11) => {
-    const parts = String(path11).split(".");
+  return template.replace(/\{\{\s*input\.([a-zA-Z0-9_.]+)\s*\}\}/g, (_match, path12) => {
+    const parts = String(path12).split(".");
     let cur = input;
     for (const p2 of parts) {
       if (cur && typeof cur === "object" && p2 in cur) {
@@ -64395,10 +64569,10 @@ async function assembleBrandGuidelines(ctx, args) {
       ["primary_dark", logos.primary_dark?.storage_path],
       ["favicon", logos.favicon?.storage_path]
     ];
-    for (const [slot, path11] of slots) {
-      if (!path11) continue;
+    for (const [slot, path12] of slots) {
+      if (!path12) continue;
       try {
-        const { data, error: error2 } = await ctx.supabase.storage.from("brand-guidelines-assets").createSignedUrl(path11, BRAND_GUIDELINES_LOGO_SIGNED_URL_TTL_SECONDS);
+        const { data, error: error2 } = await ctx.supabase.storage.from("brand-guidelines-assets").createSignedUrl(path12, BRAND_GUIDELINES_LOGO_SIGNED_URL_TTL_SECONDS);
         if (error2) {
           console.warn(`[resolver] brand-guidelines: sign ${slot} failed: ${error2.message}`);
         } else if (data?.signedUrl) {
@@ -65462,10 +65636,10 @@ function renderBundleText(result, task) {
   return lines.join("\n");
 }
 function renderCitation(it2) {
-  const path11 = it2.citation?.path;
+  const path12 = it2.citation?.path;
   const v2 = it2.citation?.version_number;
-  if (path11 && v2 != null) return `\u2014 \`${path11}\` v${v2}`;
-  if (path11) return `\u2014 \`${path11}\``;
+  if (path12 && v2 != null) return `\u2014 \`${path12}\` v${v2}`;
+  if (path12) return `\u2014 \`${path12}\``;
   return "";
 }
 
@@ -65822,24 +65996,24 @@ function withResolverDefaults(ctx, args) {
 
 // packages/plugin-core/dist/pre-tool-use-handler.js
 import { execSync as execSync3 } from "node:child_process";
-import path7 from "node:path";
+import path8 from "node:path";
 
 // packages/plugin-core/dist/client.js
 import { promises as fs4 } from "node:fs";
-import path4 from "node:path";
-import os4 from "node:os";
+import path5 from "node:path";
+import os5 from "node:os";
 
 // packages/plugin-core/dist/auth.js
 import { promises as fs2 } from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import path2 from "node:path";
+import os2 from "node:os";
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
 var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
 function tokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path.join(os.homedir(), ".config", "memlin", "token.json");
+  return process.env.MEMLIN_TOKEN_FILE || path2.join(os2.homedir(), ".config", "memlin", "token.json");
 }
 async function readPersistedToken() {
   try {
@@ -65851,8 +66025,8 @@ async function readPersistedToken() {
 }
 async function writePersistedToken(t2) {
   const file = tokenFilePath();
-  await fs2.mkdir(path.dirname(file), { recursive: true });
-  const tmp = path.join(path.dirname(file), `token.json.tmp-${process.pid}`);
+  await fs2.mkdir(path2.dirname(file), { recursive: true });
+  const tmp = path2.join(path2.dirname(file), `token.json.tmp-${process.pid}`);
   await fs2.writeFile(tmp, JSON.stringify(t2, null, 2), { mode: 384 });
   await fs2.chmod(tmp, 384).catch(() => {
   });
@@ -65877,19 +66051,31 @@ async function refreshAccessToken(refreshToken) {
   return toPersisted(json, refreshToken);
 }
 var refreshInFlight = null;
+var DEFAULT_FRESHNESS_MARGIN_MS = 6e4;
 async function getValidAccessToken() {
+  return ensureFreshToken(DEFAULT_FRESHNESS_MARGIN_MS);
+}
+async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS) {
   const persisted = await readPersistedToken();
   if (!persisted) throw new Error("not signed in \u2014 run `memlin login`");
-  if (Date.now() < persisted.expires_at - 6e4) return persisted.access_token;
+  if (Date.now() < persisted.expires_at - marginMs) return persisted.access_token;
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = doRefresh(persisted).finally(() => {
+  refreshInFlight = doRefresh(persisted, marginMs).finally(() => {
     refreshInFlight = null;
   });
   return refreshInFlight;
 }
-async function doRefresh(stale) {
+async function doRefresh(stale, marginMs) {
   const latest = await readPersistedToken();
-  if (latest && Date.now() < latest.expires_at - 6e4) return latest.access_token;
+  if (latest && Date.now() < latest.expires_at - marginMs) return latest.access_token;
+  try {
+    const { companionGetToken: companionGetToken2 } = await Promise.resolve().then(() => (init_companion_client(), companion_client_exports));
+    const fromDaemon = await companionGetToken2();
+    if (fromDaemon && Date.now() < fromDaemon.expires_at - marginMs) {
+      return fromDaemon.access_token;
+    }
+  } catch {
+  }
   const refreshToken = latest?.refresh_token ?? stale.refresh_token;
   if (!refreshToken) {
     throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
@@ -65925,7 +66111,7 @@ function requireClientId() {
 
 // packages/plugin-core/dist/memlin-api-client.js
 import { readFileSync } from "node:fs";
-import os3 from "node:os";
+import os4 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -65948,7 +66134,11 @@ var AGENT_EXPECTED_CAPABILITIES = {
   openclaw: ["mcp", "rules", "resolve"],
   antigravity: ["mcp", "cli", "hooks", "commands", "rules", "sync", "scribe", "resolve"],
   mcp: ["mcp", "resolve"],
-  "claude-ai": ["mcp", "resolve"]
+  "claude-ai": ["mcp", "resolve"],
+  // Companion daemon (apps/companion): background token keeper + realtime
+  // plan sync + local IPC socket other agents delegate to. No hooks/commands
+  // of its own.
+  companion: ["cli", "sync", "realtime", "resolve"]
 };
 var PROVIDER_HOSTS2 = [
   "github.com",
@@ -66000,8 +66190,8 @@ async function withTimeout(promise, ms, fallback) {
 }
 
 // packages/plugin-core/dist/host.js
-import os2 from "node:os";
-import path2 from "node:path";
+import os3 from "node:os";
+import path3 from "node:path";
 var BaseHost = class {
   constructor(kind2, home) {
     this.kind = kind2;
@@ -66013,37 +66203,42 @@ var BaseHost = class {
     return this.home;
   }
   plansDir() {
-    return path2.join(this.home, "plans");
+    return path3.join(this.home, "plans");
   }
 };
 var ClaudeCodeHost = class extends BaseHost {
   constructor() {
-    super("claude-code", path2.join(os2.homedir(), ".claude"));
+    super("claude-code", path3.join(os3.homedir(), ".claude"));
   }
 };
 var CursorHost = class extends BaseHost {
   constructor() {
-    super("cursor", path2.join(os2.homedir(), ".config", "memlin"));
+    super("cursor", path3.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var CodexHost = class extends BaseHost {
   constructor() {
-    super("codex", path2.join(os2.homedir(), ".config", "memlin"));
+    super("codex", path3.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var WindsurfHost = class extends BaseHost {
   constructor() {
-    super("windsurf", path2.join(os2.homedir(), ".config", "memlin"));
+    super("windsurf", path3.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var AntigravityHost = class extends BaseHost {
   constructor() {
-    super("antigravity", path2.join(os2.homedir(), ".config", "memlin"));
+    super("antigravity", path3.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var VSCodeHost = class extends BaseHost {
   constructor() {
-    super("vscode", path2.join(os2.homedir(), ".config", "memlin"));
+    super("vscode", path3.join(os3.homedir(), ".config", "memlin"));
+  }
+};
+var CompanionHost = class extends BaseHost {
+  constructor() {
+    super("companion", path3.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var HOSTS = {
@@ -66052,7 +66247,8 @@ var HOSTS = {
   codex: () => new CodexHost(),
   windsurf: () => new WindsurfHost(),
   antigravity: () => new AntigravityHost(),
-  vscode: () => new VSCodeHost()
+  vscode: () => new VSCodeHost(),
+  companion: () => new CompanionHost()
 };
 function resolveHost() {
   const envHost = process.env.MEMLIN_HOST ?? (process.env.CURSOR_AGENT ? "cursor" : "claude-code");
@@ -66063,7 +66259,7 @@ function resolveHost() {
 // packages/plugin-core/dist/memlin-api-client.js
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os3.hostname() || "unknown";
+  return process.env.MEMLIN_AGENT_DEVICE || os4.hostname() || "unknown";
 }
 var cachedAgentVersion = null;
 function agentVersion() {
@@ -66128,6 +66324,17 @@ var MemlinApiClient = class {
   /** GET /me — identity + account list. No account header sent (this is the discovery call). */
   async me() {
     return this.request("GET", "/me", void 0, { includeAccount: false });
+  }
+  /**
+   * GET /realtime/config — Supabase connection info for the caller's
+   * effective account. The client config file is deliberately
+   * backend-agnostic (no Supabase URL / anon key), so Realtime subscribers
+   * — the Companion daemon (packages/companion-core) — bootstrap the
+   * connection from here. Dedicated-instance (paid org) accounts get THEIR
+   * instance's values, which is why this rides normal account-header auth.
+   */
+  async getRealtimeConfig(opts = {}) {
+    return this.request("GET", "/realtime/config", void 0, { accountId: opts.accountId });
   }
   /**
    * POST /roles/assign — set a member's functional roles (backend, sre,
@@ -66537,13 +66744,13 @@ function resolveApiUrl() {
 
 // packages/plugin-core/dist/workspace-binding.js
 import { promises as fs3 } from "node:fs";
-import path3 from "node:path";
+import path4 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
 var WORKSPACE_BINDING_FILE = "config.json";
 async function findWorkspaceBinding(startDir) {
-  let dir = path3.resolve(startDir);
+  let dir = path4.resolve(startDir);
   for (let i2 = 0; i2 < 64; i2++) {
-    const candidate = path3.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
+    const candidate = path4.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
     try {
       const raw = await fs3.readFile(candidate, "utf8");
       const parsed = JSON.parse(raw);
@@ -66559,7 +66766,7 @@ async function findWorkspaceBinding(startDir) {
       }
     } catch {
     }
-    const parent = path3.dirname(dir);
+    const parent = path4.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
@@ -66567,9 +66774,9 @@ async function findWorkspaceBinding(startDir) {
 }
 
 // packages/plugin-core/dist/client.js
-var CONFIG_DIR = path4.join(os4.homedir(), ".config", "memlin");
-var CONFIG_FILE = path4.join(CONFIG_DIR, "config.json");
-var TOKEN_FILE = path4.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path5.join(os5.homedir(), ".config", "memlin");
+var CONFIG_FILE = path5.join(CONFIG_DIR, "config.json");
+var TOKEN_FILE = path5.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
     const raw = await fs4.readFile(CONFIG_FILE, "utf8");
@@ -66622,9 +66829,9 @@ function log(msg) {
 // packages/plugin-core/dist/project-resolver.js
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import path5 from "node:path";
+import path6 from "node:path";
 async function resolveProject(api, cwd, configProjectId) {
-  const absCwd = path5.resolve(cwd);
+  const absCwd = path6.resolve(cwd);
   const remotes = detectGitRemotes(cwd);
   const hasGitRemote = remotes.length > 0;
   try {
@@ -66683,8 +66890,8 @@ function detectGitRemotes(cwd) {
         continue;
       }
       scanned++;
-      const child = path5.join(cwd, entry.name);
-      if (!existsSync(path5.join(child, ".git"))) continue;
+      const child = path6.join(cwd, entry.name);
+      if (!existsSync(path6.join(child, ".git"))) continue;
       const remote = readGitRemote(child);
       if (remote && !out.includes(remote)) out.push(remote);
     }
@@ -66695,8 +66902,8 @@ function detectGitRemotes(cwd) {
 
 // packages/plugin-core/dist/edit-activity.js
 import { execSync as execSync2 } from "node:child_process";
-import path6 from "node:path";
-import os5 from "node:os";
+import path7 from "node:path";
+import os6 from "node:os";
 var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 function editedPathsFromHook(toolName, toolInput) {
   if (!toolName || !EDIT_TOOLS.has(toolName) || !toolInput) return [];
@@ -66712,12 +66919,12 @@ function repoRelativePath(absPath, cwd) {
       timeout: 250
     }).trim();
     if (top) {
-      const rel = path6.relative(top, absPath);
-      if (rel && !rel.startsWith("..") && !path6.isAbsolute(rel)) return rel;
+      const rel = path7.relative(top, absPath);
+      if (rel && !rel.startsWith("..") && !path7.isAbsolute(rel)) return rel;
     }
   } catch {
   }
-  return path6.basename(absPath);
+  return path7.basename(absPath);
 }
 
 // packages/plugin-core/dist/pre-tool-use-handler.js
@@ -66878,7 +67085,7 @@ async function evaluateEditCollision(ctx, payload, projectId, projectAccountId) 
   if (rawPaths.length === 0) return null;
   const cwd = payload.cwd ?? process.cwd();
   const relPaths = [
-    ...new Set(rawPaths.map((p2) => repoRelativePath(path7.resolve(cwd, p2), cwd)))
+    ...new Set(rawPaths.map((p2) => repoRelativePath(path8.resolve(cwd, p2), cwd)))
   ];
   if (relPaths.length === 0) return null;
   let res;
@@ -66995,10 +67202,10 @@ async function runPreToolUseHandler(payload) {
 
 // packages/plugin-core/dist/state.js
 import { promises as fs5 } from "node:fs";
-import path8 from "node:path";
-import os6 from "node:os";
+import path9 from "node:path";
+import os7 from "node:os";
 import crypto2 from "node:crypto";
-var STATE_FILE = path8.join(os6.homedir(), ".config", "memlin", "state.json");
+var STATE_FILE = path9.join(os7.homedir(), ".config", "memlin", "state.json");
 var EMPTY = { documents: {} };
 async function readState() {
   try {
@@ -67008,6 +67215,7 @@ async function readState() {
     return { ...EMPTY };
   }
 }
+var LOCK_DIR = `${STATE_FILE}.lock`;
 function hash(content) {
   return crypto2.createHash("sha256").update(content).digest("hex");
 }
@@ -67031,15 +67239,15 @@ function diffStates(prev, current) {
 // packages/plugin-core/dist/local-scan.js
 import { promises as fs6 } from "node:fs";
 import { existsSync as existsSync2 } from "node:fs";
-import path9 from "node:path";
+import path10 from "node:path";
 async function scanLocal(opts = {}) {
   const out = [];
   const root = opts.rootOverride ?? resolveHost().homeDir();
-  const memDir = path9.join(root, "memory");
+  const memDir = path10.join(root, "memory");
   if (existsSync2(memDir)) {
     for (const file of await fs6.readdir(memDir)) {
       if (!file.endsWith(".md") || file === "MEMORY.md") continue;
-      const abs = path9.join(memDir, file);
+      const abs = path10.join(memDir, file);
       const content = await fs6.readFile(abs, "utf8");
       out.push({
         path: `memory/${file}`,
@@ -67050,12 +67258,12 @@ async function scanLocal(opts = {}) {
       });
     }
   }
-  const skillsDir = path9.join(root, "skills");
+  const skillsDir = path10.join(root, "skills");
   if (existsSync2(skillsDir)) {
     const entries = await fs6.readdir(skillsDir, { withFileTypes: true });
     for (const e2 of entries) {
       if (!e2.isDirectory()) continue;
-      const skillMd = path9.join(skillsDir, e2.name, "SKILL.md");
+      const skillMd = path10.join(skillsDir, e2.name, "SKILL.md");
       if (!existsSync2(skillMd)) continue;
       const content = await fs6.readFile(skillMd, "utf8");
       out.push({
@@ -67067,11 +67275,11 @@ async function scanLocal(opts = {}) {
       });
     }
   }
-  const goalsDir = path9.join(root, "goals");
+  const goalsDir = path10.join(root, "goals");
   if (existsSync2(goalsDir)) {
     for (const file of await fs6.readdir(goalsDir)) {
       if (!file.endsWith(".md")) continue;
-      const abs = path9.join(goalsDir, file);
+      const abs = path10.join(goalsDir, file);
       const content = await fs6.readFile(abs, "utf8");
       out.push({
         path: `goals/${file}`,
@@ -67082,11 +67290,11 @@ async function scanLocal(opts = {}) {
       });
     }
   }
-  const schemasDir = path9.join(root, "schemas");
+  const schemasDir = path10.join(root, "schemas");
   if (existsSync2(schemasDir)) {
     for (const file of await fs6.readdir(schemasDir)) {
       if (!file.endsWith(".json")) continue;
-      const abs = path9.join(schemasDir, file);
+      const abs = path10.join(schemasDir, file);
       const content = await fs6.readFile(abs, "utf8");
       out.push({
         path: `schemas/${file}`,
@@ -67102,7 +67310,7 @@ async function scanLocal(opts = {}) {
     if (existsSync2(plansDir)) {
       for (const file of await fs6.readdir(plansDir)) {
         if (!file.endsWith(".md")) continue;
-        const abs = path9.join(plansDir, file);
+        const abs = path10.join(plansDir, file);
         const content = await fs6.readFile(abs, "utf8");
         out.push({
           path: `plans/${file}`,
@@ -67119,7 +67327,7 @@ async function scanLocal(opts = {}) {
     for (const [relPath, meta] of Object.entries(opts.trackedDocs)) {
       if (seen.has(relPath)) continue;
       if (relPath.startsWith("plans/")) continue;
-      const abs = path9.join(root, relPath);
+      const abs = path10.join(root, relPath);
       if (!existsSync2(abs)) continue;
       const content = await fs6.readFile(abs, "utf8");
       out.push({
@@ -67135,13 +67343,13 @@ async function scanLocal(opts = {}) {
 }
 function filterAbsentOnDisk(paths, rootOverride) {
   const root = rootOverride ?? resolveHost().homeDir();
-  return paths.filter((p2) => !existsSync2(path9.join(root, p2)));
+  return paths.filter((p2) => !existsSync2(path10.join(root, p2)));
 }
 
 // apps/mcp-server/src/index.ts
 var MEMLIN_PROD_SUPABASE_URL = "https://nsvqnmvummyxbzupxytl.supabase.co";
 var MEMLIN_PROD_SUPABASE_ANON_KEY = "sb_publishable_EDSbENKAPxGmvigUHqiKOg_l06zoSXG";
-var CONFIG_FILE2 = path10.join(os7.homedir(), ".config", "memlin", "config.json");
+var CONFIG_FILE2 = path11.join(os8.homedir(), ".config", "memlin", "config.json");
 async function readPersistedConfig() {
   try {
     const raw = await fs7.readFile(CONFIG_FILE2, "utf8");
@@ -67193,7 +67401,7 @@ function runtimeCwd() {
     "INIT_CWD"
   ]) {
     const value = process.env[key]?.trim();
-    if (value && path10.isAbsolute(value)) return path10.resolve(value);
+    if (value && path11.isAbsolute(value)) return path11.resolve(value);
   }
   return process.cwd();
 }
@@ -67268,7 +67476,7 @@ function agentCapabilities2() {
   return process.env.MEMLIN_AGENT_CAPABILITIES || "mcp,cli,hooks,rules,scribe,resolve";
 }
 function agentDevice2() {
-  return process.env.MEMLIN_AGENT_DEVICE || os7.hostname() || "unknown device";
+  return process.env.MEMLIN_AGENT_DEVICE || os8.hostname() || "unknown device";
 }
 function agentHeaders(accessToken, accountId) {
   return {
