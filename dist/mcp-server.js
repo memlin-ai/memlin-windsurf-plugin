@@ -62292,9 +62292,12 @@ var REDUNDANCY_COLLAPSE_KINDS = /* @__PURE__ */ new Set([
 ]);
 var DEDUPE_AUDIT_MAX_CLUSTERS = 20;
 var MARGINAL_CUTOFF_OFF = 0;
+var MARGINAL_CUTOFF_DEFAULT = 0.55;
+var FITNESS_BOOST_MIN_SIMILARITY = 0.5;
 var MARGINAL_CUTOFF_MAX = 0.95;
 var MARGINAL_CUTOFF_MIN_KEEP = 5;
 function resolveMarginalCutoff(raw) {
+  if (raw === void 0 || raw === null) return MARGINAL_CUTOFF_DEFAULT;
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return MARGINAL_CUTOFF_OFF;
   return Math.min(raw, MARGINAL_CUTOFF_MAX);
 }
@@ -63058,14 +63061,16 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   for (const { kind: kind2, rows } of kindResults) {
     const threshold = customThresholds?.[kind2] ?? KIND_THRESHOLDS[kind2];
     for (const r2 of rows) {
-      if (r2.similarity < threshold) {
+      const belowRank = r2.similarity < threshold;
+      const belowEvidence = typeof r2.cosine_sim === "number" ? r2.cosine_sim < threshold : false;
+      if (belowRank || belowEvidence) {
         omittedCandidates.push({
           id: r2.id,
           kind: kind2,
           title: r2.title,
           similarity: r2.similarity,
           reason: "below_threshold",
-          detail: `${kind2} similarity ${r2.similarity.toFixed(3)} missed threshold ${threshold.toFixed(3)}`,
+          detail: belowRank ? `${kind2} similarity ${r2.similarity.toFixed(3)} missed threshold ${threshold.toFixed(3)}` : `${kind2} cosine evidence ${r2.cosine_sim.toFixed(3)} missed threshold ${threshold.toFixed(3)} (rank score ${r2.similarity.toFixed(3)})`,
           path: r2.path
         });
         continue;
@@ -63474,9 +63479,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       c2.repo = componentRepoById.get(compId) ?? null;
     }
     if (activeComponentId && compId === activeComponentId) {
-      c2.score = (c2.similarity + ACTIVE_COMPONENT_BOOST) * KIND_WEIGHTS[c2.kind];
+      c2.score += ACTIVE_COMPONENT_BOOST * KIND_WEIGHTS[c2.kind];
     } else if (activeRepo && c2.repo === activeRepo) {
-      c2.score = (c2.similarity + SAME_REPO_BOOST) * KIND_WEIGHTS[c2.kind];
+      c2.score += SAME_REPO_BOOST * KIND_WEIGHTS[c2.kind];
     }
     if (activeRepo && c2.repo && c2.repo !== activeRepo && (c2.kind === "memory" || c2.kind === "skill")) {
       c2.score *= CROSS_REPO_DEMOTION;
@@ -63541,7 +63546,12 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     }
   }
   const memoryTypeMultiplier = (c2) => c2.kind === "memory" && c2.memory_type ? MEMORY_TYPE_WEIGHTS[c2.memory_type] : 1;
-  const effectiveScore = (c2) => c2.score * c2.decayMultiplier * (c2.fitnessMultiplier ?? 1) * memoryTypeMultiplier(c2);
+  const gatedFitness = (c2) => {
+    const f2 = c2.fitnessMultiplier ?? 1;
+    if (f2 <= 1) return f2;
+    return c2.similarity >= FITNESS_BOOST_MIN_SIMILARITY ? f2 : 1;
+  };
+  const effectiveScore = (c2) => c2.score * c2.decayMultiplier * gatedFitness(c2) * memoryTypeMultiplier(c2);
   const dedupeThresholdRaw = customThresholds?.dedupe;
   const dedupeThreshold = typeof dedupeThresholdRaw === "number" ? dedupeThresholdRaw >= 2 ? null : Math.max(dedupeThresholdRaw, REDUNDANCY_COLLAPSE_MIN) : REDUNDANCY_COLLAPSE_THRESHOLD;
   const dedupeClusters = [];
@@ -63904,8 +63914,26 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     void 0,
     () => attachWorkItemProposals(ctx, workInFlight)
   );
-  for (const d2 of pathDocs) included.push(d2);
-  const docPathMatches = pathDocs.length;
+  let docPathMatches = 0;
+  for (const d2 of pathDocs) {
+    const cost = estimateTokens(d2.body);
+    if (used + cost > maxTokens) {
+      truncated = true;
+      omittedCandidates.push({
+        id: d2.id,
+        kind: d2.kind,
+        title: d2.title,
+        similarity: d2.similarity,
+        reason: "budget_excluded",
+        detail: `path-matched doc: estimated ${cost} tokens would exceed budget ${maxTokens}`,
+        path: d2.citation.path
+      });
+      continue;
+    }
+    included.push(d2);
+    used += cost;
+    docPathMatches += 1;
+  }
   const pathRecallMs = Date.now() - pathRecallStartedAt;
   let floorIncludedId = null;
   if (included.length === 0) {
@@ -63973,17 +64001,23 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       const packKinds = ["skill", "decision", "schema"];
       const candidates2 = await ctx.packCandidates(queryVec ?? null, packKinds);
       if (Array.isArray(candidates2) && candidates2.length > 0) {
-        const PACK_MAX_TOKENS = Math.min(1200, Math.floor(maxTokens * 0.25));
+        const leftover = Math.max(0, maxTokens - used);
+        const PACK_MAX_TOKENS = Math.min(1200, Math.floor(maxTokens * 0.25), leftover);
         const localTitles = new Set(
           included.map((i2) => `${i2.kind}:${i2.title.trim().toLowerCase()}`)
         );
         let packTokens = 0;
         for (const c2 of candidates2) {
+          if (PACK_MAX_TOKENS <= 0) break;
           if (bundle.pack_context.length >= 8) break;
           if (localTitles.has(`${c2.kind}:${c2.title.trim().toLowerCase()}`)) continue;
           const tokens = estimateTokens(c2.body);
-          if (packTokens + tokens > PACK_MAX_TOKENS && bundle.pack_context.length > 0) break;
+          if (packTokens + tokens > PACK_MAX_TOKENS) {
+            if (bundle.pack_context.length > 0) break;
+            if (tokens > leftover) break;
+          }
           packTokens += tokens;
+          used += tokens;
           bundle.pack_context.push({
             id: c2.id,
             kind: packKinds.includes(c2.kind) ? c2.kind : "skill",
@@ -64031,7 +64065,10 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
           if (includedMemoryIds.has(id)) continue;
           const entities = Array.isArray(raw.entities) ? raw.entities.filter((e2) => typeof e2 === "string") : [];
           if (!args.entities || args.entities.length === 0) {
-            const hit = entities.some((e2) => taskLower.includes(` ${e2.toLowerCase()}`));
+            const hit = entities.some((e2) => {
+              const esc2 = e2.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              return new RegExp(`(?:^|\\W)${esc2}(?:\\W|$)`).test(taskLower);
+            });
             if (!hit) continue;
           }
           const body = typeof raw.content === "string" ? raw.content : "";
@@ -66264,7 +66301,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.25";
+  cachedAgentVersion = "0.1.26";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -67484,7 +67521,7 @@ function agentHeaders(accessToken, accountId) {
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.1.25",
+    "Memlin-Agent-Version": "0.1.26",
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -67690,7 +67727,7 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.1.25" },
+  { name: "memlin", version: "0.1.26" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
