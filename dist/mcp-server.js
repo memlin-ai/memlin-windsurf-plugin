@@ -59016,6 +59016,32 @@ function isEligibleForRecall(row, opts = {}) {
   return true;
 }
 
+// packages/shared/dist/authority.js
+var AUTHORITY_TIER = {
+  PLATFORM: 1,
+  REQUIRED_GOVERNANCE: 2,
+  CURRENT_INSTRUCTION: 3,
+  USER_CORRECTION: 4,
+  APPROVED_POLICY: 5,
+  HISTORICAL: 6
+};
+function authorityTier(input) {
+  if (input.requiredGovernance === true) return AUTHORITY_TIER.REQUIRED_GOVERNANCE;
+  if (input.kind === "memory" && (input.memoryType === "correction" || input.memoryType === "preference")) {
+    return AUTHORITY_TIER.USER_CORRECTION;
+  }
+  if (input.approved === true) return AUTHORITY_TIER.APPROVED_POLICY;
+  if (input.kind === "goal" || input.kind === "skill") return AUTHORITY_TIER.APPROVED_POLICY;
+  return AUTHORITY_TIER.HISTORICAL;
+}
+function byAuthorityThenScore(tierOf, scoreOf) {
+  return (a2, b2) => {
+    const t2 = tierOf(a2) - tierOf(b2);
+    if (t2 !== 0) return t2;
+    return scoreOf(b2) - scoreOf(a2);
+  };
+}
+
 // packages/shared/dist/skill-frontmatter.js
 var import_gray_matter2 = __toESM(require_gray_matter(), 1);
 
@@ -63170,6 +63196,12 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         const inherited = isProjectBrainInheritedDoc(projectId, c2, scopeRow);
         const inheritedDefault = meta?.default_for_projects === true || projectBrainPolicy.optionalChainIds.has(c2.id);
         const inheritedRequired = meta?.required_for_projects === true || projectBrainPolicy.requiredChainIds.has(c2.id);
+        c2.authorityTier = authorityTier({
+          kind: c2.kind,
+          requiredGovernance: inheritedRequired,
+          approved: status === "approved",
+          memoryType: c2.memory_type ?? null
+        });
         if (status === "archived") {
           omittedCandidates.push({
             id: c2.id,
@@ -63567,6 +63599,10 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     return c2.similarity >= FITNESS_BOOST_MIN_SIMILARITY ? f2 : 1;
   };
   const effectiveScore = (c2) => c2.score * c2.decayMultiplier * gatedFitness(c2) * memoryTypeMultiplier(c2);
+  const byPrecedence = byAuthorityThenScore(
+    (c2) => c2.authorityTier ?? AUTHORITY_TIER.HISTORICAL,
+    effectiveScore
+  );
   const dedupeThresholdRaw = customThresholds?.dedupe;
   const dedupeThreshold = typeof dedupeThresholdRaw === "number" ? dedupeThresholdRaw >= 2 ? null : Math.max(dedupeThresholdRaw, REDUNDANCY_COLLAPSE_MIN) : REDUNDANCY_COLLAPSE_THRESHOLD;
   const dedupeClusters = [];
@@ -63601,7 +63637,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         const byId = new Map(candidates.map((c2) => [c2.id, c2]));
         const claimed = /* @__PURE__ */ new Set();
         const dropInfo = /* @__PURE__ */ new Map();
-        const ranked = candidates.filter((c2) => neighbours.has(c2.id)).sort((a2, b2) => effectiveScore(b2) - effectiveScore(a2));
+        const ranked = candidates.filter((c2) => neighbours.has(c2.id)).sort(byPrecedence);
         for (const keeper of ranked) {
           if (claimed.has(keeper.id)) continue;
           claimed.add(keeper.id);
@@ -63657,11 +63693,11 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       );
     }
   }
-  const skillCands = candidates.filter((c2) => c2.kind === "skill").sort((a2, b2) => effectiveScore(b2) - effectiveScore(a2));
+  const skillCands = candidates.filter((c2) => c2.kind === "skill").sort(byPrecedence);
   const primarySkill = skillCands[0] ?? null;
   const budgetOrder = [];
   if (primarySkill) budgetOrder.push(primarySkill);
-  let rest = candidates.filter((c2) => !primarySkill || c2.id !== primarySkill.id).sort((a2, b2) => effectiveScore(b2) - effectiveScore(a2));
+  let rest = candidates.filter((c2) => !primarySkill || c2.id !== primarySkill.id).sort(byPrecedence);
   let marginalDroppedCount = 0;
   let marginalTokensSaved = 0;
   const marginalFraction = args.skip_marginal_cutoff ? MARGINAL_CUTOFF_OFF : resolveMarginalCutoff(args.marginal_cutoff ?? customThresholds?.marginal_cutoff);
@@ -63771,7 +63807,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       component_name: c2.componentName,
       repo: c2.repo ?? null,
       version_tag: versionTag,
-      collapsed_duplicates: c2.collapsedDuplicates?.length
+      collapsed_duplicates: c2.collapsedDuplicates?.length,
+      authority_tier: c2.authorityTier
     });
     used += cost;
   }
