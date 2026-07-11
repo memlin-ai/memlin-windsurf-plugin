@@ -109,7 +109,7 @@ var require_code = __commonJS({
     }
     exports2._ = _2;
     var plus = new _Code("+");
-    function str3(strs, ...args) {
+    function str4(strs, ...args) {
       const expr = [safeStringify(strs[0])];
       let i2 = 0;
       while (i2 < args.length) {
@@ -120,7 +120,7 @@ var require_code = __commonJS({
       optimize(expr);
       return new _Code(expr);
     }
-    exports2.str = str3;
+    exports2.str = str4;
     function addCodeArg(code, arg) {
       if (arg instanceof _Code)
         code.push(...arg._items);
@@ -163,7 +163,7 @@ var require_code = __commonJS({
       return;
     }
     function strConcat(c1, c2) {
-      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str3`${c1}${c2}`;
+      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str4`${c1}${c2}`;
     }
     exports2.strConcat = strConcat;
     function interpolate(x2) {
@@ -1125,22 +1125,22 @@ var require_util = __commonJS({
       return (0, codegen_1._)`${topSchemaRef}${schemaPath}${(0, codegen_1.getProperty)(keyword)}`;
     }
     exports2.schemaRefOrVal = schemaRefOrVal;
-    function unescapeFragment(str3) {
-      return unescapeJsonPointer(decodeURIComponent(str3));
+    function unescapeFragment(str4) {
+      return unescapeJsonPointer(decodeURIComponent(str4));
     }
     exports2.unescapeFragment = unescapeFragment;
-    function escapeFragment(str3) {
-      return encodeURIComponent(escapeJsonPointer(str3));
+    function escapeFragment(str4) {
+      return encodeURIComponent(escapeJsonPointer(str4));
     }
     exports2.escapeFragment = escapeFragment;
-    function escapeJsonPointer(str3) {
-      if (typeof str3 == "number")
-        return `${str3}`;
-      return str3.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPointer(str4) {
+      if (typeof str4 == "number")
+        return `${str4}`;
+      return str4.replace(/~/g, "~0").replace(/\//g, "~1");
     }
     exports2.escapeJsonPointer = escapeJsonPointer;
-    function unescapeJsonPointer(str3) {
-      return str3.replace(/~1/g, "/").replace(/~0/g, "~");
+    function unescapeJsonPointer(str4) {
+      return str4.replace(/~1/g, "/").replace(/~0/g, "~");
     }
     exports2.unescapeJsonPointer = unescapeJsonPointer;
     function eachItem(xs, f2) {
@@ -2165,8 +2165,8 @@ var require_json_schema_traverse = __commonJS({
         post2(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
       }
     }
-    function escapeJsonPtr(str3) {
-      return str3.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPtr(str4) {
+      return str4.replace(/~/g, "~0").replace(/\//g, "~1");
     }
   }
 });
@@ -3230,10 +3230,10 @@ var require_utils = __commonJS({
         return { host, isIPV6: false };
       }
     }
-    function findToken(str3, token) {
+    function findToken(str4, token) {
       let ind = 0;
-      for (let i2 = 0; i2 < str3.length; i2++) {
-        if (str3[i2] === token) ind++;
+      for (let i2 = 0; i2 < str4.length; i2++) {
+        if (str4[i2] === token) ind++;
       }
       return ind;
     }
@@ -3970,7 +3970,7 @@ var require_core = __commonJS({
     var util_1 = require_util();
     var $dataRefSchema = require_data();
     var uri_1 = require_uri();
-    var defaultRegExp = (str3, flags) => new RegExp(str3, flags);
+    var defaultRegExp = (str4, flags) => new RegExp(str4, flags);
     defaultRegExp.code = "new RegExp";
     var META_IGNORE_OPTIONS = ["removeAdditional", "useDefaults", "coerceTypes"];
     var EXT_SCOPE_NAMES = /* @__PURE__ */ new Set([
@@ -4765,16 +4765,16 @@ var require_ucs2length = __commonJS({
   "node_modules/.pnpm/ajv@8.20.0/node_modules/ajv/dist/runtime/ucs2length.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    function ucs2length(str3) {
-      const len = str3.length;
+    function ucs2length(str4) {
+      const len = str4.length;
       let length = 0;
       let pos = 0;
       let value;
       while (pos < len) {
         length++;
-        value = str3.charCodeAt(pos++);
+        value = str4.charCodeAt(pos++);
         if (value >= 55296 && value <= 56319 && pos < len) {
-          value = str3.charCodeAt(pos);
+          value = str4.charCodeAt(pos);
           if ((value & 64512) === 56320)
             pos++;
         }
@@ -6657,8 +6657,8 @@ var require_formats = __commonJS({
     }
     var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
     var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    function date3(str3) {
-      const matches = DATE.exec(str3);
+    function date3(str4) {
+      const matches = DATE.exec(str4);
       if (!matches)
         return false;
       const year = +matches[1];
@@ -6677,8 +6677,8 @@ var require_formats = __commonJS({
     }
     var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
     function getTime(strictTimeZone) {
-      return function time3(str3) {
-        const matches = TIME.exec(str3);
+      return function time3(str4) {
+        const matches = TIME.exec(str4);
         if (!matches)
           return false;
         const hr2 = +matches[1];
@@ -6724,8 +6724,8 @@ var require_formats = __commonJS({
     var DATE_TIME_SEPARATOR = /t|\s/i;
     function getDateTime(strictTimeZone) {
       const time3 = getTime(strictTimeZone);
-      return function date_time(str3) {
-        const dateTime = str3.split(DATE_TIME_SEPARATOR);
+      return function date_time(str4) {
+        const dateTime = str4.split(DATE_TIME_SEPARATOR);
         return dateTime.length === 2 && date3(dateTime[0]) && time3(dateTime[1]);
       };
     }
@@ -6750,13 +6750,13 @@ var require_formats = __commonJS({
     }
     var NOT_URI_FRAGMENT = /\/|:/;
     var URI = /^(?:[a-z][a-z0-9+\-.]*:)(?:\/?\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:]|%[0-9a-f]{2})*@)?(?:\[(?:(?:(?:(?:[0-9a-f]{1,4}:){6}|::(?:[0-9a-f]{1,4}:){5}|(?:[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){4}|(?:(?:[0-9a-f]{1,4}:){0,1}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){3}|(?:(?:[0-9a-f]{1,4}:){0,2}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){2}|(?:(?:[0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4})?::[0-9a-f]{1,4}:|(?:(?:[0-9a-f]{1,4}:){0,4}[0-9a-f]{1,4})?::)(?:[0-9a-f]{1,4}:[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))|(?:(?:[0-9a-f]{1,4}:){0,5}[0-9a-f]{1,4})?::[0-9a-f]{1,4}|(?:(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})?::)|[Vv][0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+)\]|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-z0-9\-._~!$&'()*+,;=]|%[0-9a-f]{2})*)(?::\d*)?(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*|\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)?|(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)(?:\?(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i;
-    function uri(str3) {
-      return NOT_URI_FRAGMENT.test(str3) && URI.test(str3);
+    function uri(str4) {
+      return NOT_URI_FRAGMENT.test(str4) && URI.test(str4);
     }
     var BYTE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/gm;
-    function byte(str3) {
+    function byte(str4) {
       BYTE.lastIndex = 0;
-      return BYTE.test(str3);
+      return BYTE.test(str4);
     }
     var MIN_INT32 = -(2 ** 31);
     var MAX_INT32 = 2 ** 31 - 1;
@@ -6770,11 +6770,11 @@ var require_formats = __commonJS({
       return true;
     }
     var Z_ANCHOR = /[^\\]\\Z/;
-    function regex(str3) {
-      if (Z_ANCHOR.test(str3))
+    function regex(str4) {
+      if (Z_ANCHOR.test(str4))
         return false;
       try {
-        new RegExp(str3);
+        new RegExp(str4);
         return true;
       } catch (e2) {
         return false;
@@ -12158,19 +12158,19 @@ var require_base64url = __commonJS({
         throw new Error(`Invalid Base64-URL character "${String.fromCharCode(charCode)}"`);
       }
     }
-    function stringToBase64URL(str3) {
+    function stringToBase64URL(str4) {
       const base642 = [];
       const emitter = (char) => {
         base642.push(char);
       };
       const state = { queue: 0, queuedBits: 0 };
-      stringToUTF8(str3, (byte) => {
+      stringToUTF8(str4, (byte) => {
         byteToBase64URL(byte, state, emitter);
       });
       byteToBase64URL(null, state, emitter);
       return base642.join("");
     }
-    function stringFromBase64URL(str3) {
+    function stringFromBase64URL(str4) {
       const conv = [];
       const utf8Emit = (codepoint) => {
         conv.push(String.fromCodePoint(codepoint));
@@ -12183,8 +12183,8 @@ var require_base64url = __commonJS({
       const byteEmit = (byte) => {
         stringFromUTF8(byte, utf8State, utf8Emit);
       };
-      for (let i2 = 0; i2 < str3.length; i2 += 1) {
-        byteFromBase64URL(str3.charCodeAt(i2), b64State, byteEmit);
+      for (let i2 = 0; i2 < str4.length; i2 += 1) {
+        byteFromBase64URL(str4.charCodeAt(i2), b64State, byteEmit);
       }
       return conv.join("");
     }
@@ -12210,12 +12210,12 @@ var require_base64url = __commonJS({
       }
       throw new Error(`Unrecognized Unicode codepoint: ${codepoint.toString(16)}`);
     }
-    function stringToUTF8(str3, emit) {
-      for (let i2 = 0; i2 < str3.length; i2 += 1) {
-        let codepoint = str3.charCodeAt(i2);
+    function stringToUTF8(str4, emit) {
+      for (let i2 = 0; i2 < str4.length; i2 += 1) {
+        let codepoint = str4.charCodeAt(i2);
         if (codepoint > 55295 && codepoint <= 56319) {
           const highSurrogate = (codepoint - 55296) * 1024 & 65535;
-          const lowSurrogate = str3.charCodeAt(i2 + 1) - 56320 & 65535;
+          const lowSurrogate = str4.charCodeAt(i2 + 1) - 56320 & 65535;
           codepoint = (lowSurrogate | highSurrogate) + 65536;
           i2 += 1;
         }
@@ -12255,20 +12255,20 @@ var require_base64url = __commonJS({
         }
       }
     }
-    function base64UrlToUint8Array(str3) {
+    function base64UrlToUint8Array(str4) {
       const result = [];
       const state = { queue: 0, queuedBits: 0 };
       const onByte = (byte) => {
         result.push(byte);
       };
-      for (let i2 = 0; i2 < str3.length; i2 += 1) {
-        byteFromBase64URL(str3.charCodeAt(i2), state, onByte);
+      for (let i2 = 0; i2 < str4.length; i2 += 1) {
+        byteFromBase64URL(str4.charCodeAt(i2), state, onByte);
       }
       return new Uint8Array(result);
     }
-    function stringToUint8Array(str3) {
+    function stringToUint8Array(str4) {
       const result = [];
-      stringToUTF8(str3, (byte) => result.push(byte));
+      stringToUTF8(str4, (byte) => result.push(byte));
       return new Uint8Array(result);
     }
     function bytesToBase64URL(bytes) {
@@ -12547,8 +12547,8 @@ var require_helpers = __commonJS({
       }
     }
     var UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-    function validateUUID(str3) {
-      if (!UUID_REGEX.test(str3)) {
+    function validateUUID(str4) {
+      if (!UUID_REGEX.test(str4)) {
         throw new Error("@supabase/auth-js: Expected parameter to be UUID but is not");
       }
     }
@@ -20089,8 +20089,8 @@ var require_tr46 = __commonJS({
       TRANSITIONAL: 0,
       NONTRANSITIONAL: 1
     };
-    function normalize(str3) {
-      return str3.split("\0").map(function(s2) {
+    function normalize(str4) {
+      return str4.split("\0").map(function(s2) {
         return s2.normalize("NFC");
       }).join("\0");
     }
@@ -20256,8 +20256,8 @@ var require_url_state_machine = __commonJS({
       wss: 443
     };
     var failure = /* @__PURE__ */ Symbol("failure");
-    function countSymbols(str3) {
-      return punycode.ucs2.decode(str3).length;
+    function countSymbols(str4) {
+      return punycode.ucs2.decode(str4).length;
     }
     function at2(input, idx) {
       const c2 = input[idx];
@@ -20315,14 +20315,14 @@ var require_url_state_machine = __commonJS({
     }
     function utf8PercentEncode(c2) {
       const buf = new Buffer(c2);
-      let str3 = "";
+      let str4 = "";
       for (let i2 = 0; i2 < buf.length; ++i2) {
-        str3 += percentEncode(buf[i2]);
+        str4 += percentEncode(buf[i2]);
       }
-      return str3;
+      return str4;
     }
-    function utf8PercentDecode(str3) {
-      const input = new Buffer(str3);
+    function utf8PercentDecode(str4) {
+      const input = new Buffer(str4);
       const output = [];
       for (let i2 = 0; i2 < input.length; ++i2) {
         if (input[i2] !== 37) {
@@ -22004,18 +22004,18 @@ var require_lib2 = __commonJS({
       }
       const ct2 = headers.get("content-type");
       let charset = "utf-8";
-      let res, str3;
+      let res, str4;
       if (ct2) {
         res = /charset=([^;]*)/i.exec(ct2);
       }
-      str3 = buffer.slice(0, 1024).toString();
-      if (!res && str3) {
-        res = /<meta.+?charset=(['"])(.+?)\1/i.exec(str3);
+      str4 = buffer.slice(0, 1024).toString();
+      if (!res && str4) {
+        res = /<meta.+?charset=(['"])(.+?)\1/i.exec(str4);
       }
-      if (!res && str3) {
-        res = /<meta[\s]+?http-equiv=(['"])content-type\1[\s]+?content=(['"])(.+?)\2/i.exec(str3);
+      if (!res && str4) {
+        res = /<meta[\s]+?http-equiv=(['"])content-type\1[\s]+?content=(['"])(.+?)\2/i.exec(str4);
         if (!res) {
-          res = /<meta[\s]+?content=(['"])(.+?)\1[\s]+?http-equiv=(['"])content-type\3/i.exec(str3);
+          res = /<meta[\s]+?content=(['"])(.+?)\1[\s]+?http-equiv=(['"])content-type\3/i.exec(str4);
           if (res) {
             res.pop();
           }
@@ -22024,8 +22024,8 @@ var require_lib2 = __commonJS({
           res = /charset=(.*)/i.exec(res.pop());
         }
       }
-      if (!res && str3) {
-        res = /<\?xml.+?encoding=(['"])(.+?)\1/i.exec(str3);
+      if (!res && str4) {
+        res = /<\?xml.+?encoding=(['"])(.+?)\1/i.exec(str4);
       }
       if (res) {
         charset = res.pop();
@@ -24989,13 +24989,13 @@ var require_ms = __commonJS({
         "val is not a non-empty string or a valid number. val=" + JSON.stringify(val)
       );
     };
-    function parse4(str3) {
-      str3 = String(str3);
-      if (str3.length > 100) {
+    function parse4(str4) {
+      str4 = String(str4);
+      if (str4.length > 100) {
         return;
       }
       var match = /^(-?(?:\d+)?\.?\d+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?$/i.exec(
-        str3
+        str4
       );
       if (!match) {
         return;
@@ -28940,11 +28940,11 @@ var require_dumper = __commonJS({
     function generateNextLine(state, level) {
       return "\n" + common.repeat(" ", state.indent * level);
     }
-    function testImplicitResolving(state, str3) {
+    function testImplicitResolving(state, str4) {
       var index, length, type;
       for (index = 0, length = state.implicitTypes.length; index < length; index += 1) {
         type = state.implicitTypes[index];
-        if (type.resolve(str3)) {
+        if (type.resolve(str4)) {
           return true;
         }
       }
@@ -29432,11 +29432,11 @@ var require_engines = __commonJS({
 var require_strip_bom_string = __commonJS({
   "node_modules/.pnpm/strip-bom-string@1.0.0/node_modules/strip-bom-string/index.js"(exports2, module2) {
     "use strict";
-    module2.exports = function(str3) {
-      if (typeof str3 === "string" && str3.charAt(0) === "\uFEFF") {
-        return str3.slice(1);
+    module2.exports = function(str4) {
+      if (typeof str4 === "string" && str4.charAt(0) === "\uFEFF") {
+        return str4.slice(1);
       }
-      return str3;
+      return str4;
     };
   }
 });
@@ -29474,9 +29474,9 @@ var require_utils3 = __commonJS({
     exports2.arrayify = function(val) {
       return val ? Array.isArray(val) ? val : [val] : [];
     };
-    exports2.startsWith = function(str3, substr, len) {
+    exports2.startsWith = function(str4, substr, len) {
       if (typeof len !== "number") len = substr.length;
-      return str3.slice(0, len) === substr;
+      return str4.slice(0, len) === substr;
     };
   }
 });
@@ -29555,7 +29555,7 @@ var require_stringify = __commonJS({
           }
         }
       }
-      const str3 = file.content;
+      const str4 = file.content;
       const opts = defaults2(options2);
       if (data == null) {
         if (!opts.data) return file;
@@ -29575,14 +29575,14 @@ var require_stringify = __commonJS({
         buf = newline(open) + newline(matter3) + newline(close);
       }
       if (typeof file.excerpt === "string" && file.excerpt !== "") {
-        if (str3.indexOf(file.excerpt.trim()) === -1) {
+        if (str4.indexOf(file.excerpt.trim()) === -1) {
           buf += newline(file.excerpt) + newline(close);
         }
       }
-      return buf + newline(str3);
+      return buf + newline(str4);
     };
-    function newline(str3) {
-      return str3.slice(-1) !== "\n" ? str3 + "\n" : str3;
+    function newline(str4) {
+      return str4.slice(-1) !== "\n" ? str4 + "\n" : str4;
     }
   }
 });
@@ -29654,13 +29654,13 @@ var require_parse = __commonJS({
     "use strict";
     var getEngine = require_engine();
     var defaults2 = require_defaults2();
-    module2.exports = function(language, str3, options2) {
+    module2.exports = function(language, str4, options2) {
       const opts = defaults2(options2);
       const engine = getEngine(language, opts);
       if (typeof engine.parse !== "function") {
         throw new TypeError('expected "' + language + '.parse" to be a function');
       }
-      return engine.parse(str3, opts);
+      return engine.parse(str4, opts);
     };
   }
 });
@@ -29698,30 +29698,30 @@ var require_gray_matter = __commonJS({
       const opts = defaults2(options2);
       const open = opts.delimiters[0];
       const close = "\n" + opts.delimiters[1];
-      let str3 = file.content;
+      let str4 = file.content;
       if (opts.language) {
         file.language = opts.language;
       }
       const openLen = open.length;
-      if (!utils.startsWith(str3, open, openLen)) {
+      if (!utils.startsWith(str4, open, openLen)) {
         excerpt(file, opts);
         return file;
       }
-      if (str3.charAt(openLen) === open.slice(-1)) {
+      if (str4.charAt(openLen) === open.slice(-1)) {
         return file;
       }
-      str3 = str3.slice(openLen);
-      const len = str3.length;
-      const language = matter3.language(str3, opts);
+      str4 = str4.slice(openLen);
+      const len = str4.length;
+      const language = matter3.language(str4, opts);
       if (language.name) {
         file.language = language.name;
-        str3 = str3.slice(language.raw.length);
+        str4 = str4.slice(language.raw.length);
       }
-      let closeIndex = str3.indexOf(close);
+      let closeIndex = str4.indexOf(close);
       if (closeIndex === -1) {
         closeIndex = len;
       }
-      file.matter = str3.slice(0, closeIndex);
+      file.matter = str4.slice(0, closeIndex);
       const block = file.matter.replace(/^\s*#[^\n]+/gm, "").trim();
       if (block === "") {
         file.isEmpty = true;
@@ -29733,7 +29733,7 @@ var require_gray_matter = __commonJS({
       if (closeIndex === len) {
         file.content = "";
       } else {
-        file.content = str3.slice(closeIndex + close.length);
+        file.content = str4.slice(closeIndex + close.length);
         if (file.content[0] === "\r") {
           file.content = file.content.slice(1);
         }
@@ -29753,21 +29753,21 @@ var require_gray_matter = __commonJS({
       return stringify2(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str3 = fs8.readFileSync(filepath, "utf8");
-      const file = matter3(str3, options2);
+      const str4 = fs8.readFileSync(filepath, "utf8");
+      const file = matter3(str4, options2);
       file.path = filepath;
       return file;
     };
-    matter3.test = function(str3, options2) {
-      return utils.startsWith(str3, defaults2(options2).delimiters[0]);
+    matter3.test = function(str4, options2) {
+      return utils.startsWith(str4, defaults2(options2).delimiters[0]);
     };
-    matter3.language = function(str3, options2) {
+    matter3.language = function(str4, options2) {
       const opts = defaults2(options2);
       const open = opts.delimiters[0];
-      if (matter3.test(str3)) {
-        str3 = str3.slice(open.length);
+      if (matter3.test(str4)) {
+        str4 = str4.slice(open.length);
       }
-      const language = str3.slice(0, str3.search(/\r?\n/));
+      const language = str4.slice(0, str4.search(/\r?\n/));
       return {
         raw: language,
         name: language ? language.trim() : ""
@@ -35669,14 +35669,14 @@ function promiseAllObject(promisesObj) {
 }
 function randomString(length = 10) {
   const chars = "abcdefghijklmnopqrstuvwxyz";
-  let str3 = "";
+  let str4 = "";
   for (let i2 = 0; i2 < length; i2++) {
-    str3 += chars[Math.floor(Math.random() * chars.length)];
+    str4 += chars[Math.floor(Math.random() * chars.length)];
   }
-  return str3;
+  return str4;
 }
-function esc(str3) {
-  return JSON.stringify(str3);
+function esc(str4) {
+  return JSON.stringify(str4);
 }
 var captureStackTrace = Error.captureStackTrace ? Error.captureStackTrace : (..._args) => {
 };
@@ -35764,8 +35764,8 @@ var getParsedType2 = (data) => {
 };
 var propertyKeyTypes = /* @__PURE__ */ new Set(["string", "number", "symbol"]);
 var primitiveTypes = /* @__PURE__ */ new Set(["string", "number", "bigint", "boolean", "symbol", "undefined"]);
-function escapeRegex(str3) {
-  return str3.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function escapeRegex(str4) {
+  return str4.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function clone(inst, def, params) {
   const cl = new inst._zod.constr(def ?? inst._zod.def);
@@ -51245,15 +51245,15 @@ var hex_table = (() => {
   return array2;
 })();
 var limit = 1024;
-var encode = (str3, _defaultEncoder, charset, _kind, format) => {
-  if (str3.length === 0) {
-    return str3;
+var encode = (str4, _defaultEncoder, charset, _kind, format) => {
+  if (str4.length === 0) {
+    return str4;
   }
-  let string3 = str3;
-  if (typeof str3 === "symbol") {
-    string3 = Symbol.prototype.toString.call(str3);
-  } else if (typeof str3 !== "string") {
-    string3 = String(str3);
+  let string3 = str4;
+  if (typeof str4 === "symbol") {
+    string3 = Symbol.prototype.toString.call(str4);
+  } else if (typeof str4 !== "string") {
+    string3 = String(str4);
   }
   if (charset === "iso-8859-1") {
     return escape(string3).replace(/%u[0-9a-f]{4}/gi, function($0) {
@@ -51815,8 +51815,8 @@ function isPlainObject4(value) {
 var isPlainObject_default = isPlainObject4;
 
 // node_modules/.pnpm/form-data-encoder@1.7.2/node_modules/form-data-encoder/lib/esm/util/normalizeValue.js
-var normalizeValue = (value) => String(value).replace(/\r|\n/g, (match, i2, str3) => {
-  if (match === "\r" && str3[i2 + 1] !== "\n" || match === "\n" && str3[i2 - 1] !== "\r") {
+var normalizeValue = (value) => String(value).replace(/\r|\n/g, (match, i2, str4) => {
+  if (match === "\r" && str4[i2 + 1] !== "\n" || match === "\n" && str4[i2 - 1] !== "\r") {
     return "\r\n";
   }
   return match;
@@ -52511,12 +52511,12 @@ var SSEDecoder = class {
     return null;
   }
 };
-function partition(str3, delimiter) {
-  const index = str3.indexOf(delimiter);
+function partition(str4, delimiter) {
+  const index = str4.indexOf(delimiter);
   if (index !== -1) {
-    return [str3.substring(0, index), delimiter, str3.substring(index + delimiter.length)];
+    return [str4.substring(0, index), delimiter, str4.substring(index + delimiter.length)];
   }
-  return [str3, "", ""];
+  return [str4, "", ""];
 }
 
 // node_modules/.pnpm/openai@4.104.0_ws@8.20.1_zod@3.25.76/node_modules/openai/uploads.mjs
@@ -59413,6 +59413,64 @@ var TOOLS = [
     }
   },
   {
+    name: "memlin_correct_memory",
+    description: "Correct stored memory as ONE atomic transaction. Modes: 'revise' (write a replacement head and retire every target with superseded_by lineage), 'revoke' (retire the targets, no replacement), 'ignore_once' (session-scoped bypass \u2014 records an audit event, changes NOTHING durable; 'bypass this once' and 'from now on' are different operations). Targets snapshot their prior lifecycle so memlin_correct_memory_undo restores them exactly. Pass claim_key to enforce one active head per claim. Capture is not correction: a correction is complete only when the old claim is deterministically revised, retired, or scoped out \u2014 this is that operation.",
+    annotations: { destructiveHint: false, idempotentHint: false },
+    inputSchema: {
+      type: "object",
+      required: ["mode", "target_document_ids"],
+      properties: {
+        mode: { type: "string", enum: ["revise", "revoke", "ignore_once"] },
+        target_document_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Documents being corrected \u2014 use the exact item ids from the resolver audit that surfaced them."
+        },
+        claim_key: {
+          type: "string",
+          description: "Optional stable claim identity; enforces at most one ACTIVE head per (account, claim_key)."
+        },
+        replacement: {
+          type: "object",
+          description: "revise only \u2014 the new head document.",
+          properties: {
+            title: { type: "string" },
+            content: { type: "string" },
+            kind: { type: "string", enum: ["memory", "decision"] },
+            scope: { type: "string", enum: ["personal", "project", "team"] },
+            project_id: { type: "string" },
+            metadata: { type: "object" }
+          }
+        },
+        source_audit_id: {
+          type: "string",
+          description: "The resolve audit id that surfaced the bad records \u2014 provenance for the correction."
+        },
+        user_quote: {
+          type: "string",
+          description: "The user's exact words that motivated this correction."
+        },
+        scope: { type: "string" },
+        session_id: { type: "string" }
+      }
+    }
+  },
+  {
+    name: "memlin_correct_memory_undo",
+    description: "Undo a correct_memory call: restores every retired target to its snapshotted prior lifecycle (exactly what it was \u2014 never assumed active) and archives the replacement head if the correction was a revise. One-shot per correction.",
+    annotations: { destructiveHint: false, idempotentHint: false },
+    inputSchema: {
+      type: "object",
+      required: ["correction_id"],
+      properties: {
+        correction_id: {
+          type: "string",
+          description: "The correction ledger id returned by memlin_correct_memory."
+        }
+      }
+    }
+  },
+  {
     name: "memlin_actions_list",
     description: "List callable actions in this workspace \u2014 name, description, input_schema, implementation type, and the invoke URL. Use to discover what server-side functions an agent can call (e.g. 'ask_claude', 'github.search_issues', 'tavily_search'). Returns approved actions only. Pair with memlin_actions_execute (preferred, in-process) or POST to the invoke_url.",
     annotations: { readOnlyHint: true, destructiveHint: false },
@@ -66014,6 +66072,87 @@ function parseUri(uri) {
   return { kind: m2[1], id: m2[2] };
 }
 
+// packages/mcp-tools/src/correct-memory.ts
+function str3(v2) {
+  return typeof v2 === "string" && v2.length > 0 ? v2 : null;
+}
+async function correctMemory(ctx, rawArgs) {
+  const args = rawArgs ?? {};
+  const mode = str3(args.mode);
+  if (mode !== "revise" && mode !== "revoke" && mode !== "ignore_once") {
+    throw new Error("mode must be 'revise', 'revoke', or 'ignore_once'");
+  }
+  const targetIds = Array.isArray(args.target_document_ids) ? args.target_document_ids.filter((t2) => typeof t2 === "string" && t2.length > 0) : [];
+  if (targetIds.length === 0) throw new Error("target_document_ids is required (non-empty)");
+  if (mode === "ignore_once") {
+    try {
+      await ctx.supabase.rpc("record_usage_event", {
+        p_account_id: ctx.accountId,
+        p_event_type: "correction.ignore_once",
+        p_units: 1,
+        p_user_id: ctx.userId ?? null,
+        p_metadata: {
+          target_document_ids: targetIds,
+          source_audit_id: str3(args.source_audit_id),
+          user_quote: str3(args.user_quote),
+          session_id: str3(args.session_id)
+        }
+      });
+    } catch {
+    }
+    return {
+      mode: "ignore_once",
+      session_scoped: true,
+      documents_changed: 0,
+      note: "No durable change \u2014 the records remain active for every other session. Use revise/revoke to change durable policy."
+    };
+  }
+  const repl = args.replacement ?? null;
+  if (mode === "revise" && (!repl || !str3(repl.title) || !str3(repl.content))) {
+    throw new Error("revise requires replacement { title, content }");
+  }
+  const { data, error: error2 } = await ctx.supabase.rpc("correct_memory", {
+    p_account_id: ctx.accountId,
+    p_mode: mode,
+    p_target_ids: targetIds,
+    p_claim_key: str3(args.claim_key),
+    p_replacement_title: repl ? str3(repl.title) : null,
+    p_replacement_content: repl ? str3(repl.content) : null,
+    p_replacement_kind: repl && str3(repl.kind) || "memory",
+    p_replacement_scope: repl && str3(repl.scope) || "project",
+    p_replacement_project_id: repl && str3(repl.project_id) || ctx.projectId || null,
+    p_replacement_metadata: repl && repl.metadata && typeof repl.metadata === "object" ? repl.metadata : {},
+    p_source_audit_id: str3(args.source_audit_id),
+    p_user_quote: str3(args.user_quote),
+    p_scope: str3(args.scope),
+    p_session_id: str3(args.session_id)
+  });
+  if (error2) throw new Error(`correct_memory failed: ${error2.message}`);
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    mode,
+    correction_id: row?.correction_id ?? null,
+    replacement_document_id: row?.replacement_document_id ?? null,
+    retired_count: row?.retired_count ?? 0,
+    undo_with: "memlin_correct_memory_undo"
+  };
+}
+async function correctMemoryUndo(ctx, rawArgs) {
+  const args = rawArgs ?? {};
+  const correctionId = str3(args.correction_id);
+  if (!correctionId) throw new Error("correction_id is required");
+  const { data, error: error2 } = await ctx.supabase.rpc("correct_memory_undo", {
+    p_account_id: ctx.accountId,
+    p_correction_id: correctionId
+  });
+  if (error2) throw new Error(`correct_memory_undo failed: ${error2.message}`);
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    restored_count: row?.restored_count ?? 0,
+    replacement_archived: row?.replacement_archived ?? false
+  };
+}
+
 // packages/mcp-tools/src/dispatch.ts
 async function callTool(ctx, name, args) {
   switch (name) {
@@ -66043,6 +66182,10 @@ async function callTool(ctx, name, args) {
       return mergeDocuments(ctx, args);
     case "memlin_set_document_status":
       return setDocumentStatus(ctx, args);
+    case "memlin_correct_memory":
+      return correctMemory(ctx, args);
+    case "memlin_correct_memory_undo":
+      return correctMemoryUndo(ctx, args);
     case "memlin_actions_list":
       return listActions(ctx, args);
     case "memlin_actions_execute":
