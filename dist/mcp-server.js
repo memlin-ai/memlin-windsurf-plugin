@@ -59005,6 +59005,17 @@ function isDeployTriggerCommand(command) {
   return DEPLOY_TRIGGER_CMD_RE.test(command);
 }
 
+// packages/shared/dist/recall-eligibility.js
+function isEligibleForRecall(row, opts = {}) {
+  if (row.status === "archived") return false;
+  const ms = typeof row.metadataStatus === "string" && row.metadataStatus ? row.metadataStatus : null;
+  if (ms && ms !== "active" && !(opts.includeBackground === true && ms === "background")) {
+    return false;
+  }
+  if ((row.kind === "goal" || row.kind === "skill") && row.status !== "approved") return false;
+  return true;
+}
+
 // packages/shared/dist/skill-frontmatter.js
 var import_gray_matter2 = __toESM(require_gray_matter(), 1);
 
@@ -63945,10 +63956,16 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     if (best) {
       try {
         const { data: row } = await ctx.supabase.from("documents").select(
-          `id, kind, title, path, updated_at,
+          `id, status, kind, title, path, updated_at, metadata,
              document_versions!documents_current_version_fk ( content, version_number, author_id )`
         ).eq("id", best.id).eq("account_id", ctx.accountId).eq("locked_to_owners", false).maybeSingle();
-        if (row) {
+        const floorMeta = (row?.metadata ?? {}).status;
+        const floorEligible = row != null && isEligibleForRecall({
+          status: row.status ?? null,
+          metadataStatus: floorMeta ?? null,
+          kind: best.kind
+        });
+        if (row && floorEligible) {
           const version4 = Array.isArray(row.document_versions) ? row.document_versions[0] : row.document_versions;
           const rawBody = version4?.content ?? "";
           included.push({
@@ -66305,7 +66322,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.26";
+  cachedAgentVersion = "0.1.27";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -67538,7 +67555,7 @@ function agentHeaders(accessToken, accountId) {
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.1.26",
+    "Memlin-Agent-Version": "0.1.27",
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -67744,7 +67761,7 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.1.26" },
+  { name: "memlin", version: "0.1.27" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
