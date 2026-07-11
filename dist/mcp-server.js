@@ -59000,6 +59000,10 @@ function isDeployCommand(command) {
   if (!command) return false;
   return DEPLOY_TOOL_RE.test(command) || DEPLOY_CMD_RE.test(command) || DEPLOY_TRIGGER_CMD_RE.test(command);
 }
+function isDeployTriggerCommand(command) {
+  if (!command) return false;
+  return DEPLOY_TRIGGER_CMD_RE.test(command);
+}
 
 // packages/shared/dist/skill-frontmatter.js
 var import_gray_matter2 = __toESM(require_gray_matter(), 1);
@@ -67071,6 +67075,13 @@ function deployGuardMode() {
   if (raw === "off" || raw === "warn" || raw === "block") return raw;
   return "warn";
 }
+function deployLeaseLivenessMin() {
+  const raw = Number(process.env.MEMLIN_DEPLOY_LEASE_LIVENESS_MIN);
+  return Number.isFinite(raw) && raw > 0 ? raw : 3;
+}
+function __isDeployLeaseOrphaned(minutesAgo, livenessMin = deployLeaseLivenessMin()) {
+  return typeof minutesAgo === "number" && minutesAgo > livenessMin;
+}
 function deployCommandOf(payload) {
   if (payload.tool_name !== "Bash") return null;
   const cmd = payload.tool_input?.command;
@@ -67100,6 +67111,12 @@ async function evaluateDeployGuard(ctx, payload, projectId, projectAccountId) {
     return null;
   }
   if (res.acquired !== false) return null;
+  if (isDeployTriggerCommand(res.holder_task) && __isDeployLeaseOrphaned(res.minutes_ago)) {
+    log(
+      `deploy-guard: trigger-command holder lease is ${res.minutes_ago}m old (> ${deployLeaseLivenessMin()}m liveness) \u2014 orphaned, not a live collision; allowing`
+    );
+    return null;
+  }
   const who = res.holder_session ? `agent ${res.holder_session.slice(0, 6)}` : "another agent";
   const ago = typeof res.minutes_ago === "number" ? `${res.minutes_ago}m ago` : "just now";
   const what = res.holder_task ? ` (task: ${String(res.holder_task).slice(0, 80)})` : "";
