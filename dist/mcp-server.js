@@ -63702,7 +63702,11 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         const byId = new Map(candidates.map((c2) => [c2.id, c2]));
         const claimed = /* @__PURE__ */ new Set();
         const dropInfo = /* @__PURE__ */ new Map();
-        const ranked = candidates.filter((c2) => neighbours.has(c2.id)).sort(byPrecedence);
+        const collapseTier = (c2) => {
+          const t2 = c2.authorityTier ?? AUTHORITY_TIER.HISTORICAL;
+          return t2 <= AUTHORITY_TIER.USER_CORRECTION ? t2 : AUTHORITY_TIER.HISTORICAL;
+        };
+        const ranked = candidates.filter((c2) => neighbours.has(c2.id)).sort(byAuthorityThenScore(collapseTier, effectiveScore));
         for (const keeper of ranked) {
           if (claimed.has(keeper.id)) continue;
           claimed.add(keeper.id);
@@ -66618,7 +66622,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.29";
+  cachedAgentVersion = "0.1.30";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -67851,7 +67855,7 @@ function agentHeaders(accessToken, accountId) {
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.1.29",
+    "Memlin-Agent-Version": "0.1.30",
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -68057,7 +68061,7 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.1.29" },
+  { name: "memlin", version: "0.1.30" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
