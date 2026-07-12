@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
+import { fileURLToPath as __ftp } from 'node:url'; import { dirname as __dn } from 'node:path';
+const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __esm = (fn, res) => function __init() {
@@ -579,6 +581,10 @@ var MemlinApiClient = class {
   /** POST /documents — create or update a document. */
   async writeDocument(input) {
     return this.request("POST", "/documents", input);
+  }
+  /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
+  async syncWorkspaceContract(input) {
+    return this.request("POST", "/workspace-contract/sync", input);
   }
   /** GET /documents/{id} — fetch one doc with body + metadata. */
   async getDocument(documentId) {

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
+import { fileURLToPath as __ftp } from 'node:url'; import { dirname as __dn } from 'node:path';
+const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -3932,7 +3934,7 @@ var HOSTS = {
   companion: () => new CompanionHost()
 };
 function resolveHost() {
-  const envHost = process.env.MEMLIN_HOST ?? (process.env.CURSOR_AGENT ? "cursor" : "claude-code");
+  const envHost = "windsurf";
   const make = HOSTS[envHost];
   return (make ?? HOSTS["claude-code"])();
 }
@@ -4090,6 +4092,10 @@ var MemlinApiClient = class {
   /** POST /documents — create or update a document. */
   async writeDocument(input) {
     return this.request("POST", "/documents", input);
+  }
+  /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
+  async syncWorkspaceContract(input) {
+    return this.request("POST", "/workspace-contract/sync", input);
   }
   /** GET /documents/{id} — fetch one doc with body + metadata. */
   async getDocument(documentId) {
@@ -10039,7 +10045,7 @@ async function main() {
   process.stdout.write(outString);
   const latencyMs = Date.now() - startedAt;
   const missedDeadline = deadlineMs !== null && latencyMs > deadlineMs;
-  const host = process.env.MEMLIN_HOST ?? "claude-code";
+  const host = "windsurf";
   const sessionId = process.env.MEMLIN_SESSION_ID ?? null;
   if (hookOutFile && outString.trim()) {
     try {

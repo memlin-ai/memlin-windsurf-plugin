@@ -1,4 +1,6 @@
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
+import { fileURLToPath as __ftp } from 'node:url'; import { dirname as __dn } from 'node:path';
+const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -8236,7 +8238,7 @@ var HOSTS = {
   companion: () => new CompanionHost()
 };
 function resolveHost() {
-  const envHost = process.env.MEMLIN_HOST ?? (process.env.CURSOR_AGENT ? "cursor" : "claude-code");
+  const envHost = "windsurf";
   const make = HOSTS[envHost];
   return (make ?? HOSTS["claude-code"])();
 }

@@ -1,41 +1,31 @@
 {
-  "version": 1,
-  "status": "provisional",
-  "note": "Windsurf hook event names may change; entrypoints are packaged to mirror Memlin's full adapter contract.",
   "hooks": {
-    "SessionStart": [
+    "pre_write_code": [
       {
-        "type": "command",
-        "command": "node ./dist/hooks/session-start.js",
-        "timeout": 10
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "type": "command",
-        "command": "node ./dist/hooks/user-prompt-submit.js",
-        "timeout": 10
-      }
-    ],
-    "PreToolUse": [
-      {
-        "type": "command",
         "command": "node ./dist/hooks/pre-tool-use.js",
-        "timeout": 5
+        "show_output": true
       }
     ],
-    "PostToolUse": [
+    "pre_run_command": [
       {
-        "type": "command",
-        "command": "node ./dist/hooks/post-tool-use.js",
-        "timeout": 10
+        "command": "node ./dist/hooks/pre-tool-use.js",
+        "show_output": true
       }
     ],
-    "Stop": [
+    "pre_mcp_tool_use": [
       {
-        "type": "command",
-        "command": "node ./dist/hooks/stop.js",
-        "timeout": 15
+        "command": "node ./dist/hooks/pre-tool-use.js",
+        "show_output": true
+      }
+    ],
+    "post_write_code": [
+      {
+        "command": "node ./dist/hooks/post-tool-use.js"
+      }
+    ],
+    "post_cascade_response_with_transcript": [
+      {
+        "command": "node ./dist/hooks/stop.js"
       }
     ]
   }

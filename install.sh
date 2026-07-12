@@ -14,7 +14,22 @@ echo "Memlin → Windsurf installer"
 echo "bundle: $BUNDLE_DIR"
 
 if ! command -v node >/dev/null 2>&1; then
-  echo "✗ 'node' is required (≥ 18). Install from https://nodejs.org" >&2
+  echo "✗ Node.js 20 or newer is required." >&2
+  echo "  Install it from https://nodejs.org, then rerun this installer." >&2
+  exit 1
+fi
+
+NODE_VERSION="$(node --version 2>/dev/null || true)"
+NODE_MAJOR="${NODE_VERSION#v}"
+NODE_MAJOR="${NODE_MAJOR%%.*}"
+if [[ ! "$NODE_MAJOR" =~ ^[0-9]+$ ]]; then
+  echo "✗ Node.js 20 or newer is required; found an unrecognized version: ${NODE_VERSION:-unknown}." >&2
+  echo "  Install it from https://nodejs.org, then rerun this installer." >&2
+  exit 1
+fi
+if (( 10#$NODE_MAJOR < 20 )); then
+  echo "✗ Node.js 20 or newer is required; found $NODE_VERSION." >&2
+  echo "  Install it from https://nodejs.org, then rerun this installer." >&2
   exit 1
 fi
 

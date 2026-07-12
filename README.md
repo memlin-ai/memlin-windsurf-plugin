@@ -7,13 +7,13 @@ manual scribe/sync commands.
 
 ## What it ships
 
-| File                            | Windsurf surface                          |
-| ------------------------------- | ----------------------------------------- |
+| File                            | Windsurf surface                           |
+| ------------------------------- | ------------------------------------------ |
 | `mcp_config.json`               | local stdio MCP server config (token.json) |
-| `dist/mcp-server.js`            | the bundled local MCP server (no OAuth)   |
-| `.windsurfrules`                | always-on Memlin resolver guidance        |
-| `hooks.json` + `src/hooks/*.ts` | lifecycle hook entrypoints                |
-| `package.json`                  | adapter version source for install health |
+| `dist/mcp-server.js`            | the bundled local MCP server (no OAuth)    |
+| `.windsurfrules`                | always-on Memlin resolver guidance         |
+| `hooks.json` + `src/hooks/*.ts` | documented Cascade lifecycle hooks         |
+| `package.json`                  | adapter version source for install health  |
 
 ## Capability coverage
 
@@ -23,10 +23,10 @@ manual scribe/sync commands.
 - **Commands:** via the `memlin` CLI (`memlin status`, `memlin sync`,
   `memlin ask`, `memlin scribe`, etc.).
 - **Sync:** via the `memlin` CLI.
-- **Scribe:** automatic through the packaged Stop hook when Windsurf runs the
-  hook contract; manual via `memlin scribe` otherwise.
-- **Hooks:** packaged as provisional SessionStart, UserPromptSubmit,
-  PostToolUse, and Stop entrypoints.
+- **Scribe:** automatic through `post_cascade_response_with_transcript`; manual
+  via `memlin scribe` otherwise.
+- **Hooks:** guardrails for writes, commands, and MCP calls; plan sync after
+  writes; and turn capture from Windsurf's documented Cascade hook events.
 
 ## Install
 
@@ -50,6 +50,6 @@ the `token.json` written by sign-in — no hosted `serverUrl`, no browser OAuth.
 From source (this monorepo): build hooks with
 `pnpm --filter @memlin/windsurf-plugin build`, then follow steps 2–6.
 
-The hooks mirror Claude Code, Cursor, and Codex behavior. If Windsurf changes
-event names or payload fields, the entrypoints should remain no-op safe until
-the manifest is updated.
+Windsurf does not provide a prompt hook that can inject model context, so the
+always-on rule tells Cascade to call `memlin_resolve_task` before non-trivial
+work. Hook entrypoints remain fail-open on malformed or future payloads.

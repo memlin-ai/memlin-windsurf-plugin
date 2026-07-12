@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
+import { fileURLToPath as __ftp } from 'node:url'; import { dirname as __dn } from 'node:path';
+const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -4105,6 +4107,10 @@ var MemlinApiClient = class {
   /** POST /documents — create or update a document. */
   async writeDocument(input) {
     return this.request("POST", "/documents", input);
+  }
+  /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
+  async syncWorkspaceContract(input) {
+    return this.request("POST", "/workspace-contract/sync", input);
   }
   /** GET /documents/{id} — fetch one doc with body + metadata. */
   async getDocument(documentId) {
@@ -9800,7 +9806,7 @@ async function main() {
   process.env.MEMLIN_HOST = "windsurf";
   const input = await readHookInput();
   await runStopHandler({
-    transcript_path: input?.transcript_path,
+    transcript_path: input?.tool_info?.transcript_path ?? input?.transcript_path,
     cwd: input?.cwd ?? input?.workspace_roots?.[0],
     session_id: input?.session_id ?? input?.conversation_id
   });

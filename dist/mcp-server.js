@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
+import { fileURLToPath as __ftp } from 'node:url'; import { dirname as __dn } from 'node:path';
+const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -67513,6 +67515,10 @@ var MemlinApiClient = class {
   async writeDocument(input) {
     return this.request("POST", "/documents", input);
   }
+  /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
+  async syncWorkspaceContract(input) {
+    return this.request("POST", "/workspace-contract/sync", input);
+  }
   /** GET /documents/{id} — fetch one doc with body + metadata. */
   async getDocument(documentId) {
     return this.request("GET", `/documents/${encodeURIComponent(documentId)}`);
@@ -68661,7 +68667,7 @@ function createToolContext(accessToken) {
 }
 var STATUS_TOOL = {
   name: "memlin_status",
-  description: 'Report the live Memlin plugin status for THIS workspace: auth (access-token presence, expiry, refresh state), the bound account and project, MCP routing/host, last sync, and pending local changes. Reads the same on-disk state the CLI and hooks use (~/.config/memlin/{token,config,state}.json). Use this to answer "is Memlin wired up and current?" \u2014 it is the in-editor replacement for a `memlin status` terminal command (no CLI is on PATH after a VSIX install). Returns a structured object plus a ready-to-relay `summary` string.',
+  description: 'Report the live Memlin plugin status for THIS workspace: auth (access-token presence, expiry, refresh state), the bound account and project, MCP routing/host, last sync, and pending local changes. Reads the same on-disk state the CLI and hooks use (~/.config/memlin/{token,config,state}.json). Use this to answer "is Memlin wired up and current?" \u2014 it is the in-editor replacement for a `memlin status` terminal command when the native Marketplace install has no CLI launcher on PATH. Returns a structured object plus a ready-to-relay `summary` string.',
   annotations: { readOnlyHint: true, destructiveHint: false },
   inputSchema: { type: "object", properties: {} }
 };

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
+import { fileURLToPath as __ftp } from 'node:url'; import { dirname as __dn } from 'node:path';
+const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
 
 // apps/windsurf-plugin/src/hooks/user-prompt-submit.ts
 import { promises as fs3 } from "node:fs";

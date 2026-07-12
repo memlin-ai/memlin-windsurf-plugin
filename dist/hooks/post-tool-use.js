@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
+import { fileURLToPath as __ftp } from 'node:url'; import { dirname as __dn } from 'node:path';
+const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
 
 // apps/windsurf-plugin/src/hooks/post-tool-use.ts
 import { spawn } from "node:child_process";
@@ -104,7 +106,7 @@ function readHookInput() {
 var HOOK_DIR = path2.dirname(fileURLToPath(import.meta.url));
 var PUSH_PLAN_BIN = path2.resolve(HOOK_DIR, "../cli/push-plan.js");
 function editedFile(input) {
-  return input?.file_path ?? input?.path ?? input?.tool_input?.file_path ?? input?.tool_input?.path ?? "";
+  return input?.tool_info?.file_path ?? input?.file_path ?? input?.path ?? input?.tool_input?.file_path ?? input?.tool_input?.path ?? "";
 }
 async function main() {
   process.env.MEMLIN_HOST = "windsurf";

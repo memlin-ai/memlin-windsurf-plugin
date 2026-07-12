@@ -19,6 +19,7 @@ const RUN = {
   scribe: () => import("./scribe.js"),
   inbox: () => import("./inbox.js"),
   handoffs: () => import("./handoffs.js"),
+  role: () => import("./role.js"),
   features: () => import("./features.js"),
   link: () => import("./link.js"),
   revert: () => import("./revert.js"),

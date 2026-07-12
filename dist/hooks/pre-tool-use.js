@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
+import { fileURLToPath as __ftp } from 'node:url'; import { dirname as __dn } from 'node:path';
+const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -8710,6 +8712,10 @@ var MemlinApiClient = class {
   async writeDocument(input) {
     return this.request("POST", "/documents", input);
   }
+  /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
+  async syncWorkspaceContract(input) {
+    return this.request("POST", "/workspace-contract/sync", input);
+  }
   /** GET /documents/{id} — fetch one doc with body + metadata. */
   async getDocument(documentId) {
     return this.request("GET", `/documents/${encodeURIComponent(documentId)}`);
@@ -9547,29 +9553,53 @@ function readHookInput() {
 function emitAllow() {
   exitClean(0);
 }
-function emit(decision, reason) {
-  const payload = {
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: decision,
-      permissionDecisionReason: reason
-    }
-  };
-  process.stdout.write(JSON.stringify(payload) + "\n");
+function emitBlock(reason) {
+  process.stderr.write(`${reason}
+`);
+  exitClean(2);
+}
+function emitAdvisory(reason) {
+  process.stderr.write(`${reason}
+`);
   exitClean(0);
+}
+function mappedTool(payload) {
+  const info = payload.tool_info ?? {};
+  if (payload.agent_action_name === "pre_write_code") {
+    return {
+      name: "Write",
+      input: { file_path: info.file_path, edits: info.edits },
+      cwd: process.cwd()
+    };
+  }
+  if (payload.agent_action_name === "pre_run_command") {
+    return {
+      name: "Bash",
+      input: { command: info.command_line },
+      cwd: info.cwd ?? process.cwd()
+    };
+  }
+  if (payload.agent_action_name === "pre_mcp_tool_use") {
+    return {
+      name: `mcp__${info.mcp_server_name ?? "unknown"}__${info.mcp_tool_name ?? "unknown"}`,
+      input: info.mcp_tool_arguments ?? {},
+      cwd: process.cwd()
+    };
+  }
+  return null;
 }
 async function main() {
   process.env.MEMLIN_HOST = "windsurf";
   const payload = await readHookInput() ?? {};
-  const toolName = payload.tool_name ?? payload.tool;
-  if (!toolName) return emitAllow();
+  const tool = mappedTool(payload);
+  if (!tool) return emitAllow();
   let verdict;
   try {
     verdict = await runPreToolUseHandler({
-      tool_name: toolName,
-      tool_input: payload.tool_input ?? {},
-      cwd: payload.cwd ?? payload.workspace_roots?.[0] ?? process.cwd(),
-      ...payload.session_id || payload.conversation_id ? { session_id: payload.session_id ?? payload.conversation_id ?? "" } : {}
+      tool_name: tool.name,
+      tool_input: tool.input,
+      cwd: tool.cwd,
+      ...payload.trajectory_id ? { session_id: payload.trajectory_id } : {}
     });
   } catch (err) {
     log(
@@ -9577,10 +9607,11 @@ async function main() {
     );
     return emitAllow();
   }
-  if (verdict.decision === "allow") return emitAllow();
-  const decision = verdict.decision === "block" ? "deny" : "ask";
   const idsSuffix = verdict.matched_decisions.length > 0 ? ` (matched ${verdict.matched_decisions.length} Memlin decision${verdict.matched_decisions.length === 1 ? "" : "s"})` : "";
-  return emit(decision, `${verdict.reason}${idsSuffix}`);
+  const reason = `${verdict.reason}${idsSuffix}`;
+  if (verdict.decision === "block") return emitBlock(reason);
+  if (verdict.decision === "ask") return emitAdvisory(reason);
+  return emitAllow();
 }
 void main();
 /*! Bundled license information:
