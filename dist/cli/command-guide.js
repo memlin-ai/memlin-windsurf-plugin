@@ -8003,7 +8003,7 @@ var MEMLIN_COMMANDS = [
     section: "Discovery",
     cmd: "ask",
     blurb: "ask your workspace anything",
-    details: "Run a natural-language question against your team's shared memory, skills, approved goals, and schemas. The resolver assembles a cited answer pulling from across documents \u2014 each citation shows a path and version so you can click through to the source."
+    details: "Run a natural-language question against your team's shared memory, skills, approved goals, schemas, and decisions. The resolver assembles a cited answer pulling from across documents \u2014 each citation shows a path and version so you can click through to the source."
   },
   {
     section: "",

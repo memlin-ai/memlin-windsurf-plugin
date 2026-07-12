@@ -57865,6 +57865,8 @@ var DOCUMENT_KINDS = [
 ];
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];
+var SEARCHABLE_KINDS = ["skill", "memory", "goal", "schema", "decision"];
+var GENERIC_AGENT_WRITABLE_KINDS = ["memory", "skill", "goal", "schema"];
 var DOCUMENT_STATUS_TRANSITIONS = {
   draft: ["in_review", "approved", "archived"],
   in_review: ["draft", "approved", "archived"],
@@ -59134,6 +59136,8 @@ var import_diff_match_patch = __toESM(require_diff_match_patch(), 1);
 var dmp = new import_diff_match_patch.default();
 
 // packages/mcp-tools/src/tools.ts
+var TOOL_SEARCHABLE_KINDS = ["skill", "memory", "goal", "schema", "decision"];
+var TOOL_GENERIC_WRITABLE_KINDS = ["memory", "skill", "goal", "schema"];
 var TOOLS = [
   {
     name: "memlin_read_memory",
@@ -59144,7 +59148,7 @@ var TOOLS = [
       properties: {
         kinds: {
           type: "array",
-          items: { type: "string", enum: ["memory", "skill", "goal", "schema"] }
+          items: { type: "string", enum: TOOL_SEARCHABLE_KINDS }
         },
         scopes: {
           type: "array",
@@ -59168,7 +59172,7 @@ var TOOLS = [
       properties: {
         document_id: { type: "string" },
         scope: { type: "string", enum: ["personal", "project", "team"] },
-        kind: { type: "string", enum: ["memory", "skill", "goal", "schema"] },
+        kind: { type: "string", enum: TOOL_GENERIC_WRITABLE_KINDS },
         title: { type: "string" },
         path: { type: "string" },
         content: { type: "string" },
@@ -59227,7 +59231,7 @@ var TOOLS = [
         query: { type: "string" },
         kinds: {
           type: "array",
-          items: { type: "string", enum: ["memory", "skill", "goal", "schema"] }
+          items: { type: "string", enum: TOOL_SEARCHABLE_KINDS }
         },
         limit: { type: "number", minimum: 1, maximum: 100 },
         project_id: { type: "string" },
@@ -59251,7 +59255,7 @@ var TOOLS = [
   },
   {
     name: "memlin_resolve_task",
-    description: "The Memlin resolver \u2014 one call returns a pre-assembled, scope-correct, citation-bearing context bundle for a specific engineering task. Use this BEFORE doing specialized work (code review, security audit, API design, debugging, etc.) instead of loading every skill and memory snippet into context. The server runs hybrid retrieval (semantic cosine + BM25) across skills, memory, approved goals, and schemas in parallel, applies per-kind similarity thresholds and a kind-priority weighting, enforces a token budget, and returns a single composed bundle with full provenance on every item. Apply the primary skill's framework; treat goals as constraints; validate against any schemas; use memory facts as ground truth. Always cite sources by path + version. In a host without a pre-task hook (e.g. Claude Desktop, or any plain MCP client), nothing resolves automatically \u2014 call this yourself at the start of any non-trivial task so you work from the team's context instead of guessing.",
+    description: "The Memlin resolver \u2014 one call returns a pre-assembled, scope-correct, citation-bearing context bundle for a specific engineering task. Use this BEFORE doing specialized work (code review, security audit, API design, debugging, etc.) instead of loading every skill and memory snippet into context. The server runs hybrid retrieval (semantic cosine + BM25) across skills, memory, approved goals, schemas, and decisions in parallel, applies per-kind similarity thresholds and a kind-priority weighting, enforces a token budget, and returns a single composed bundle with full provenance on every item. Apply the primary skill's framework; treat approved goals and required/pinned decisions as constraints; use other decisions as cited project context; validate against any schemas; use memory facts as ground truth. Always cite sources by path + version. In a host without a pre-task hook (e.g. Claude Desktop, or any plain MCP client), nothing resolves automatically \u2014 call this yourself at the start of any non-trivial task so you work from the team's context instead of guessing.",
     annotations: { readOnlyHint: true, destructiveHint: false },
     inputSchema: {
       type: "object",
@@ -59273,7 +59277,7 @@ var TOOLS = [
         },
         kinds: {
           type: "array",
-          items: { type: "string", enum: ["memory", "skill", "goal", "schema"] },
+          items: { type: "string", enum: TOOL_SEARCHABLE_KINDS },
           description: "Restrict the bundle to specific kinds. Default: all."
         },
         k_per_kind: {
@@ -61048,7 +61052,7 @@ function attachGoalProgress(doc) {
 var WriteArgs = external_exports.object({
   document_id: external_exports.string().uuid().nullable().optional(),
   scope: DocumentScopeSchema,
-  kind: DocumentKindSchema,
+  kind: external_exports.enum(GENERIC_AGENT_WRITABLE_KINDS),
   title: external_exports.string().min(1).max(256),
   path: external_exports.string().max(512).optional(),
   content: external_exports.string(),
@@ -61057,12 +61061,10 @@ var WriteArgs = external_exports.object({
   // Client-writable metadata. Whitelist enforced below — server-managed
   // fields (status, auto_promoted, proposed_by, embedding state, etc.)
   // can never be set from the wire even if they appear in this object.
-  // The only currently-allowed client-settable key is `enforce` for
-  // guardrail rules; new keys go through review before they land here.
+  // New keys go through review before they land here.
   metadata: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
 });
 var CLIENT_WRITABLE_METADATA_KEYS = /* @__PURE__ */ new Set([
-  "enforce",
   "allowed-tools",
   "model",
   "target-agents",
@@ -61094,10 +61096,13 @@ async function writeMemory(ctx, rawArgs) {
   const args = WriteArgs.parse(rawArgs);
   const projectId = args.project_id ?? ctx.projectId ?? null;
   if (args.document_id) {
-    const { data: existing, error: ownErr } = await ctx.supabase.from("documents").select("account_id").eq("id", args.document_id).maybeSingle();
+    const { data: existing, error: ownErr } = await ctx.supabase.from("documents").select("account_id, kind").eq("id", args.document_id).maybeSingle();
     if (ownErr) throw new Error(`write_memory: ${ownErr.message}`);
     if (!existing || existing.account_id !== ctx.accountId) {
       throw new Error("write_memory: document not found in this account");
+    }
+    if (existing.kind !== args.kind) {
+      throw new Error("write_memory: document kind mismatch");
     }
   }
   let embedding = null;
@@ -61441,7 +61446,7 @@ import { createHash } from "node:crypto";
 var SYSTEM_PROMPT = `You are a code-context relevance ranker.
 
 A developer's AI agent is about to work on a task. Below are candidate items
-the resolver pulled from the workspace's memory + skills + goals + schemas.
+the resolver pulled from the workspace's memory + skills + goals + schemas + decisions.
 Score each one on how directly useful it would be to the agent doing THIS
 task. Higher score = more directly applicable. Skills that exactly match
 the problem domain score highest; broad-context items score lower; items
@@ -62652,7 +62657,7 @@ var AssembleBundleArgs = external_exports.object({
   task: external_exports.string().min(1).max(4e3),
   project_id: external_exports.string().uuid().nullable().optional(),
   max_tokens: external_exports.number().int().min(256).max(32e3).optional(),
-  kinds: external_exports.array(DocumentKindSchema).optional(),
+  kinds: external_exports.array(external_exports.enum(SEARCHABLE_KINDS)).optional(),
   k_per_kind: external_exports.number().int().min(1).max(50).optional(),
   cwd: external_exports.string().max(4096).nullable().optional(),
   git_remote: external_exports.string().max(512).nullable().optional(),
@@ -62696,7 +62701,6 @@ var AssembleBundleArgs = external_exports.object({
    *  inferred by word-boundary matching thread entities in the task text. */
   entities: external_exports.array(external_exports.string().min(1).max(64)).max(16).optional()
 });
-var SEARCHABLE_KINDS = ["skill", "memory", "goal", "schema", "decision"];
 var BUDGET_MICRO_TOKENS = 1500;
 var BUDGET_STANDARD_TOKENS = 4e3;
 var BUDGET_DEEP_TOKENS = 8e3;
@@ -63483,7 +63487,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const governanceUserId = ctx.userId ?? null;
   const projectTeam = await getProjectTeamId(ctx, projectId);
   const teamId = projectTeam.teamId;
-  const requestedKinds = args.kinds ? args.kinds.filter((k2) => SEARCHABLE_KINDS.includes(k2)) : [...SEARCHABLE_KINDS];
+  const requestedKinds = args.kinds ? [...args.kinds] : [...SEARCHABLE_KINDS];
   const projectBrainPolicy = await loadProjectBrainPolicy(
     ctx,
     projectId,
@@ -66397,7 +66401,7 @@ function notFoundError(message) {
 var PROMPTS = [
   {
     name: "memlin-resolve",
-    description: "Load the right Memlin context for a task into this chat \u2014 the most relevant memory, skills, goals, schemas, and open threads, already scoped to your workspace. Use before non-trivial work. (No lifecycle hook here, so this is the one-click stand-in for resolve-before-work.)",
+    description: "Load the right Memlin context for a task into this chat \u2014 the most relevant memory, skills, goals, schemas, decisions, and open threads, already scoped to your workspace. Use before non-trivial work. (No lifecycle hook here, so this is the one-click stand-in for resolve-before-work.)",
     arguments: [
       {
         name: "task",
@@ -66585,11 +66589,21 @@ If that already looks like a document id (uuid), use it directly; otherwise call
 }
 function renderBundleText(result, task) {
   const b2 = result?.bundle;
+  const requiredCoreDegraded = b2?.required_core_status?.complete === false;
   const lines = [];
   lines.push(task ? `# Memlin context for: ${task}` : "# Memlin context");
   lines.push("");
   const sections = [];
   if (b2) {
+    if (requiredCoreDegraded) {
+      lines.push("## REQUIRED CONTEXT DEGRADED");
+      lines.push("");
+      lines.push(
+        "_Mandatory workspace context could not be fully verified. Do not infer missing policy; state this limitation and retry the resolve before making an authoritative claim._"
+      );
+      lines.push("");
+    }
+    if (b2.required_core?.length) sections.push(["Required core", b2.required_core]);
     if (b2.pinned?.length) sections.push(["Pinned directives", b2.pinned]);
     const skills = [b2.primary_skill, ...b2.supporting_skills ?? []].filter(
       (s2) => Boolean(s2)
@@ -66602,6 +66616,12 @@ function renderBundleText(result, task) {
     if (b2.open_threads?.length) sections.push(["Open threads", b2.open_threads]);
   }
   if (sections.length === 0) {
+    if (requiredCoreDegraded) {
+      lines.push(
+        "_No verified context can be delivered until mandatory workspace context is available. Retry the resolve or ask a workspace owner to repair the required-context policy._"
+      );
+      return lines.join("\n");
+    }
     lines.push(
       "_No matching workspace context for this task. Proceed from first principles, and capture anything durable with the memlin-capture prompt when you're done._"
     );
@@ -66623,7 +66643,7 @@ function renderBundleText(result, task) {
   }
   lines.push("---");
   lines.push(
-    "Treat the above as authoritative workspace context: memory facts are ground truth, apply any skill framework, honor goals as constraints, and cite what you use by path + version."
+    requiredCoreDegraded ? "Use the delivered items only as partial, cited context. This bundle is not authoritative until required workspace context verifies successfully." : "Treat the above as authoritative workspace context: memory facts are ground truth, apply any skill framework, honor approved goals and required/pinned decisions as constraints, use other decisions as cited project context, and cite what you use by path + version."
   );
   if (result?.token_budget?.truncated) {
     lines.push("");
@@ -67369,7 +67389,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.31";
+  cachedAgentVersion = "0.1.32";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -68606,7 +68626,7 @@ function agentHeaders(accessToken, accountId) {
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.1.31",
+    "Memlin-Agent-Version": "0.1.32",
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -68812,7 +68832,7 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.1.31" },
+  { name: "memlin", version: "0.1.32" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

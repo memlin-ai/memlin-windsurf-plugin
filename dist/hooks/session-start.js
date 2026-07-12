@@ -436,7 +436,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.31";
+  cachedAgentVersion = "0.1.32";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -1214,7 +1214,7 @@ async function main() {
   const note = [
     "Memlin is active for this workspace. Use memlin_resolve_task before",
     "non-trivial work to load this project\u2019s skills, memory, approved goals,",
-    "and schemas. Cite Memlin sources by path and version."
+    "schemas, and decisions. Cite Memlin sources by path and version."
   ].join(" ");
   const additionalContext = [hazardWarning, note, handoffContext].filter(Boolean).join("\n\n");
   process.stdout.write(

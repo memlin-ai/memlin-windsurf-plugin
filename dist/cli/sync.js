@@ -4304,7 +4304,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.31";
+  cachedAgentVersion = "0.1.32";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -9523,7 +9523,7 @@ async function ensureResolverSkill() {
 }
 var RESOLVER_SKILL_MD = `---
 name: Memlin
-description: Memlin auto-resolves project context (skills, memory, approved goals, schemas) into your prompt before you process it. This skill tells you how to *use* that context, and when to fall back to invoking memlin_resolve_task manually.
+description: Memlin auto-resolves project context (skills, memory, approved goals, schemas, decisions) into your prompt before you process it. This skill tells you how to *use* that context, and when to fall back to invoking memlin_resolve_task manually.
 examples:
   - "A <memlin-resolved-context> block is present \u2014 apply the primary skill's framework and cite memory facts by path + version."
   - "A resolved memory fact conflicts with your training data \u2014 treat the resolved fact as project ground truth."
@@ -9541,7 +9541,7 @@ The Memlin plugin's UserPromptSubmit hook auto-injects a \`<memlin-resolved-cont
 block into every non-trivial user prompt \u2014 *before* you see the prompt. The
 block contains the same scope-correct, citation-bearing bundle that
 \`memlin_resolve_task\` would return: top skills, memory, approved goals,
-schemas, kind-weighted and threshold-filtered to ~4k tokens.
+schemas, and decisions, kind-weighted and threshold-filtered to ~4k tokens.
 
 ## How to use the pre-resolved bundle
 
@@ -9551,7 +9551,8 @@ schemas, kind-weighted and threshold-filtered to ~4k tokens.
 2. **Apply the primary skill's framework** first. Use supporting skills for
    complementary perspectives. **Treat memory facts as project ground truth**
    (more authoritative than your training data when they conflict). **Honor
-   goals as constraints.** **Validate against any schemas.**
+   approved goals and required/pinned decisions as constraints.** Use other
+   decisions as cited project context. **Validate against any schemas.**
 3. **Cite your sources.** When stating a fact or following a constraint from
    the bundle, mention the source path + version. Example: "Per
    \`goals/auth-required.md\` v1, every new endpoint requires authn."
