@@ -61270,12 +61270,19 @@ async function searchRanked(ctx, args, limit2) {
     }
   }
   let q2 = ctx.supabase.from("documents").select(
-    `id, title, kind, scope, path, updated_at, created_at,
+    `id, status, title, kind, scope, path, updated_at, created_at, metadata,
        document_versions!documents_current_version_fk ( version_number, author_id )`
-  ).eq("account_id", ctx.accountId).ilike("title", `%${args.query}%`).limit(limit2);
+  ).eq("account_id", ctx.accountId).ilike("title", `%${args.query}%`).limit(Math.min(limit2 * 3, 100));
   if (args.kinds?.length) q2 = q2.in("kind", args.kinds);
   const { data } = await q2;
-  return (data ?? []).map((r2) => {
+  const eligibleRows = (data ?? []).filter(
+    (r2) => isEligibleForRecall({
+      status: r2.status ?? null,
+      metadataStatus: (r2.metadata ?? {}).status ?? null,
+      kind: r2.kind
+    })
+  ).slice(0, limit2);
+  return eligibleRows.map((r2) => {
     const v2 = Array.isArray(r2.document_versions) ? r2.document_versions[0] : r2.document_versions;
     return {
       id: r2.id,
@@ -63755,7 +63762,13 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const primarySkill = skillCands[0] ?? null;
   const budgetOrder = [];
   if (primarySkill) budgetOrder.push(primarySkill);
-  let rest = candidates.filter((c2) => !primarySkill || c2.id !== primarySkill.id).sort(byPrecedence);
+  const byScoreDesc = (a2, b2) => effectiveScore(b2) - effectiveScore(a2);
+  let rest = candidates.filter((c2) => !primarySkill || c2.id !== primarySkill.id).sort((a2, b2) => {
+    const aPriority = (a2.authorityTier ?? AUTHORITY_TIER.HISTORICAL) <= AUTHORITY_TIER.USER_CORRECTION;
+    const bPriority = (b2.authorityTier ?? AUTHORITY_TIER.HISTORICAL) <= AUTHORITY_TIER.USER_CORRECTION;
+    if (aPriority !== bPriority) return aPriority ? -1 : 1;
+    return byScoreDesc(a2, b2);
+  });
   let marginalDroppedCount = 0;
   let marginalTokensSaved = 0;
   const marginalFraction = args.skip_marginal_cutoff ? MARGINAL_CUTOFF_OFF : resolveMarginalCutoff(args.marginal_cutoff ?? customThresholds?.marginal_cutoff);
@@ -63765,7 +63778,14 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       const s2 = effectiveScore(c2);
       if (s2 > (kindTop.get(c2.kind) ?? -Infinity)) kindTop.set(c2.kind, s2);
     }
-    const protectedIds = new Set(rest.slice(0, MARGINAL_CUTOFF_MIN_KEEP).map((c2) => c2.id));
+    const protectedIds = new Set(
+      [...rest].sort(byScoreDesc).slice(0, MARGINAL_CUTOFF_MIN_KEEP).map((c2) => c2.id)
+    );
+    for (const c2 of rest) {
+      if ((c2.authorityTier ?? AUTHORITY_TIER.HISTORICAL) <= AUTHORITY_TIER.USER_CORRECTION) {
+        protectedIds.add(c2.id);
+      }
+    }
     const kept = [];
     for (const c2 of rest) {
       const ref = kindTop.get(c2.kind) ?? 0;
@@ -63869,6 +63889,15 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       authority_tier: c2.authorityTier
     });
     used += cost;
+  }
+  if (included.length > 1) {
+    const lead = primarySkill && included[0]?.id === primarySkill.id ? included.shift() : null;
+    included.sort((a2, b2) => {
+      const t2 = (a2.authority_tier ?? AUTHORITY_TIER.HISTORICAL) - (b2.authority_tier ?? AUTHORITY_TIER.HISTORICAL);
+      if (t2 !== 0) return t2;
+      return b2.similarity - a2.similarity;
+    });
+    if (lead) included.unshift(lead);
   }
   const feed = async (name, fallback, run) => {
     try {
@@ -64047,8 +64076,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const pathRecallMs = Date.now() - pathRecallStartedAt;
   let floorIncludedId = null;
   if (included.length === 0) {
-    const best = omittedCandidates.filter((o2) => o2.reason === "below_threshold" && o2.similarity >= RECALL_FLOOR).sort((a2, b2) => b2.similarity - a2.similarity)[0];
-    if (best) {
+    const floorCandidates = omittedCandidates.filter((o2) => o2.reason === "below_threshold" && o2.similarity >= RECALL_FLOOR).sort((a2, b2) => b2.similarity - a2.similarity).slice(0, 3);
+    for (const best of floorCandidates) {
+      if (floorIncludedId) break;
       try {
         const { data: row } = await ctx.supabase.from("documents").select(
           `id, status, kind, title, path, updated_at, metadata,
@@ -64084,7 +64114,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         }
       } catch (e2) {
         console.warn(
-          `[resolver] recall-floor fetch failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 bundle stays empty`
+          `[resolver] recall-floor fetch failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 trying next near-miss`
         );
       }
     }
@@ -64893,6 +64923,18 @@ async function resolveProposal(ctx, rawArgs) {
     }
   }).eq("id", args.proposal_id);
   if (error2) throw new Error(`resolve_proposal: accept failed: ${error2.message}`);
+  if (doc.kind === "goal" || doc.kind === "skill") {
+    try {
+      await ctx.supabase.from("documents").update({ status: "approved" }).eq("id", args.proposal_id).eq("account_id", ctx.accountId);
+    } catch (e2) {
+      console.warn(
+        `resolve_proposal: goal/skill approval stamp failed (doc stays draft): ${e2 instanceof Error ? e2.message : String(e2)}`
+      );
+    }
+  }
+  if (existing.directive_hold === true) {
+    await runHeldDirectiveSupersede(ctx, args.proposal_id, doc.kind, nowIso);
+  }
   if (doc.kind === "brand_guidelines") {
     try {
       await applyBrandPointer(
@@ -64909,6 +64951,58 @@ async function resolveProposal(ctx, rawArgs) {
     kind: doc.kind,
     title: doc.title
   };
+}
+var HELD_DIRECTIVE_SUPERSEDE_THRESHOLD = 0.86;
+async function runHeldDirectiveSupersede(ctx, acceptedId, kind2, nowIso) {
+  try {
+    const { data: row } = await ctx.supabase.from("documents").select("id, embedding, metadata").eq("id", acceptedId).eq("account_id", ctx.accountId).maybeSingle();
+    const embedding = row?.embedding ?? null;
+    let retired = 0;
+    if (embedding) {
+      const { data: hits, error: searchErr } = await ctx.supabase.rpc(
+        "search_documents_for_dedup",
+        {
+          p_account_id: ctx.accountId,
+          p_query_embedding: embedding,
+          p_kind: kind2,
+          p_limit: 5,
+          p_include_suppressors: false
+        }
+      );
+      if (!searchErr && Array.isArray(hits)) {
+        for (const hit of hits) {
+          if (hit.id === acceptedId) continue;
+          if (hit.similarity < HELD_DIRECTIVE_SUPERSEDE_THRESHOLD) continue;
+          if (hit.status && hit.status !== "active") continue;
+          const { data: hitRow } = await ctx.supabase.from("documents").select("metadata").eq("id", hit.id).eq("account_id", ctx.accountId).maybeSingle();
+          if (!hitRow) continue;
+          const hitMeta = hitRow.metadata ?? {};
+          const liveStatus = typeof hitMeta.status === "string" && hitMeta.status ? hitMeta.status : "active";
+          if (liveStatus !== "active") continue;
+          const { error: retireErr } = await ctx.supabase.from("documents").update({
+            metadata: {
+              ...hitMeta,
+              status: "rejected",
+              rejected_reason: "superseded_by_directive",
+              superseded_by: acceptedId,
+              superseded_at: nowIso
+            },
+            updated_at: nowIso
+          }).eq("id", hit.id).eq("account_id", ctx.accountId);
+          if (!retireErr) retired += 1;
+        }
+      }
+    }
+    const meta = row?.metadata ?? {};
+    delete meta.directive_hold;
+    await ctx.supabase.from("documents").update({
+      metadata: { ...meta, directive_verified_at: nowIso, directive_superseded_count: retired }
+    }).eq("id", acceptedId).eq("account_id", ctx.accountId);
+  } catch (e2) {
+    console.warn(
+      `resolve_proposal: held-directive supersede failed (stale docs stay live): ${e2 instanceof Error ? e2.message : String(e2)}`
+    );
+  }
 }
 async function applyMergeProposal(ctx, proposalId, doc, existing, actor, nowIso) {
   const merge2 = existing.merge ?? {};
@@ -66082,7 +66176,13 @@ async function correctMemory(ctx, rawArgs) {
   if (mode !== "revise" && mode !== "revoke" && mode !== "ignore_once") {
     throw new Error("mode must be 'revise', 'revoke', or 'ignore_once'");
   }
-  const targetIds = Array.isArray(args.target_document_ids) ? args.target_document_ids.filter((t2) => typeof t2 === "string" && t2.length > 0) : [];
+  const targetIds = Array.isArray(args.target_document_ids) ? [
+    ...new Set(
+      args.target_document_ids.filter(
+        (t2) => typeof t2 === "string" && t2.length > 0
+      )
+    )
+  ] : [];
   if (targetIds.length === 0) throw new Error("target_document_ids is required (non-empty)");
   if (mode === "ignore_once") {
     try {
@@ -66111,6 +66211,14 @@ async function correctMemory(ctx, rawArgs) {
   if (mode === "revise" && (!repl || !str3(repl.title) || !str3(repl.content))) {
     throw new Error("revise requires replacement { title, content }");
   }
+  let replacementEmbedding = null;
+  if (mode === "revise" && ctx.embed && repl) {
+    try {
+      replacementEmbedding = await ctx.embed(String(repl.content));
+    } catch {
+      replacementEmbedding = null;
+    }
+  }
   const { data, error: error2 } = await ctx.supabase.rpc("correct_memory", {
     p_account_id: ctx.accountId,
     p_mode: mode,
@@ -66121,11 +66229,19 @@ async function correctMemory(ctx, rawArgs) {
     p_replacement_kind: repl && str3(repl.kind) || "memory",
     p_replacement_scope: repl && str3(repl.scope) || "project",
     p_replacement_project_id: repl && str3(repl.project_id) || ctx.projectId || null,
-    p_replacement_metadata: repl && repl.metadata && typeof repl.metadata === "object" ? repl.metadata : {},
+    // Default memory-kind heads to memory_type 'correction' so the replacement
+    // carries USER_CORRECTION authority from birth — an unstamped head is born
+    // HISTORICAL (tier 6) and loses to the very doc it corrects. The RPC also
+    // defaults this server-side; explicit caller metadata still wins.
+    p_replacement_metadata: {
+      ...(repl && str3(repl.kind) || "memory") === "memory" ? { memory_type: "correction" } : {},
+      ...repl && repl.metadata && typeof repl.metadata === "object" ? repl.metadata : {}
+    },
     p_source_audit_id: str3(args.source_audit_id),
     p_user_quote: str3(args.user_quote),
     p_scope: str3(args.scope),
-    p_session_id: str3(args.session_id)
+    p_session_id: str3(args.session_id),
+    p_replacement_embedding: replacementEmbedding
   });
   if (error2) throw new Error(`correct_memory failed: ${error2.message}`);
   const row = Array.isArray(data) ? data[0] : data;
@@ -66502,7 +66618,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.28";
+  cachedAgentVersion = "0.1.29";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -67735,7 +67851,7 @@ function agentHeaders(accessToken, accountId) {
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.1.28",
+    "Memlin-Agent-Version": "0.1.29",
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -67941,7 +68057,7 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.1.28" },
+  { name: "memlin", version: "0.1.29" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
