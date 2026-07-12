@@ -7705,7 +7705,11 @@ var WriteDocumentInputSchema = external_exports.object({
   // Optional CRDT state from collaborative editors — base64-encoded Y.Doc
   // state-as-update. When present, restored on next load so reloads don't
   // lose in-flight collab edits.
-  yjs_state_b64: external_exports.string().nullable().optional()
+  yjs_state_b64: external_exports.string().nullable().optional(),
+  // Service-role automation may attribute a write to a specific account
+  // member. The database ignores this for non-service callers, preventing
+  // ordinary clients from spoofing authorship.
+  author_id: UUID.nullable().optional()
 });
 var DocumentPatchSchema = external_exports.object({
   document_id: UUID,

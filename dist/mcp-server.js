@@ -57992,7 +57992,11 @@ var WriteDocumentInputSchema = external_exports.object({
   // Optional CRDT state from collaborative editors — base64-encoded Y.Doc
   // state-as-update. When present, restored on next load so reloads don't
   // lose in-flight collab edits.
-  yjs_state_b64: external_exports.string().nullable().optional()
+  yjs_state_b64: external_exports.string().nullable().optional(),
+  // Service-role automation may attribute a write to a specific account
+  // member. The database ignores this for non-service callers, preventing
+  // ordinary clients from spoofing authorship.
+  author_id: UUID.nullable().optional()
 });
 var DocumentPatchSchema = external_exports.object({
   document_id: UUID,
@@ -61596,6 +61600,116 @@ function ageDaysSince(observedAt, nowMs) {
   if (Number.isNaN(then)) return 0;
   return Math.max(0, Math.floor((nowMs - then) / 864e5));
 }
+function isDirectResolverDocumentEligible(row, context, options2 = {}) {
+  if (row.account_id !== context.accountId) return false;
+  if (row.locked_to_owners !== false) return false;
+  const projectId = context.projectId ?? null;
+  if (row.scope === "personal") {
+    if (!context.userId || row.created_by !== context.userId) return false;
+  } else if (row.scope === "project") {
+    if (!projectId || row.project_id !== projectId) return false;
+  } else if (row.scope !== "team") {
+    return false;
+  }
+  const association = options2.projectAssociation ?? "scope";
+  if (association === "account-or-active-project") {
+    const rowProjectId = row.project_id;
+    if (rowProjectId !== null && rowProjectId !== void 0 && rowProjectId !== projectId) {
+      return false;
+    }
+  } else if (association === "active-project") {
+    if (!projectId || row.project_id !== projectId) return false;
+  }
+  const expectedKinds = Array.isArray(options2.expectedKind) ? options2.expectedKind : options2.expectedKind ? [options2.expectedKind] : null;
+  if (expectedKinds && (typeof row.kind !== "string" || !expectedKinds.includes(row.kind))) {
+    return false;
+  }
+  const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata) ? row.metadata : {};
+  const lifecycle = options2.lifecycle ?? "recall";
+  if (lifecycle === "sql-live") return row.status !== "archived";
+  if (lifecycle === "proposed") {
+    return row.status !== "archived" && metadata.status === "proposed";
+  }
+  if (typeof row.kind !== "string") return false;
+  return isEligibleForRecall({
+    status: typeof row.status === "string" ? row.status : null,
+    metadataStatus: typeof metadata.status === "string" ? metadata.status : null,
+    kind: row.kind
+  });
+}
+var AGENT_KIND_ALIASES = /* @__PURE__ */ new Map([
+  ["anthropic-claude-code", "claude-code"],
+  ["claude-code-cli", "claude-code"],
+  ["claudecode", "claude-code"],
+  ["codex-cli", "codex"],
+  ["openai-codex", "codex"],
+  ["gemini-cli", "gemini"],
+  ["vs-code", "vscode"],
+  ["visual-studio-code", "vscode"]
+]);
+function normalizeSkillAgentKind(value) {
+  const normalized = value.normalize("NFKC").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  return AGENT_KIND_ALIASES.get(normalized) ?? normalized;
+}
+function skillTargetAgents(metadata) {
+  const raw = metadata?.["target-agents"];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((value) => typeof value === "string").map((value) => value.trim()).filter(Boolean);
+}
+function isSkillTargetedToAgent(metadata, agentKind2) {
+  const targets = skillTargetAgents(metadata);
+  if (targets.length === 0 || !agentKind2?.trim()) return true;
+  const normalizedAgent = normalizeSkillAgentKind(agentKind2);
+  return targets.some((target) => {
+    if (target === "*") return true;
+    const normalizedTarget = normalizeSkillAgentKind(target);
+    return normalizedTarget === "all" || normalizedTarget === normalizedAgent;
+  });
+}
+function antiExampleText(value) {
+  if (typeof value === "string") return value.trim();
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const text = value.text;
+    return typeof text === "string" ? text.trim() : "";
+  }
+  return "";
+}
+function normalizedBehaviorText(value) {
+  return value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+}
+function matchingSkillAntiExample(task, metadata) {
+  const raw = metadata?.["anti-examples"];
+  if (!Array.isArray(raw)) return null;
+  const normalizedTask = normalizedBehaviorText(task);
+  if (!normalizedTask) return null;
+  const taskTokens2 = normalizedTask.split(" ");
+  const taskSet = new Set(taskTokens2);
+  for (const value of raw) {
+    const original = antiExampleText(value);
+    const normalizedCase = normalizedBehaviorText(original);
+    if (!normalizedCase) continue;
+    if (normalizedTask === normalizedCase) return original;
+    const caseTokens = normalizedCase.split(" ");
+    if (caseTokens.length >= 3 && ` ${normalizedTask} `.includes(` ${normalizedCase} `)) {
+      return original;
+    }
+    const meaningful = caseTokens.filter((token) => token.length >= 3);
+    if (meaningful.length < 5) continue;
+    const overlap = meaningful.filter((token) => taskSet.has(token)).length;
+    if (overlap / meaningful.length < 0.9 || overlap < 4) continue;
+    let sharedAdjacentPairs = 0;
+    for (let i2 = 0; i2 < caseTokens.length - 1; i2++) {
+      const pair = `${caseTokens[i2]} ${caseTokens[i2 + 1]}`;
+      if (` ${normalizedTask} `.includes(` ${pair} `)) sharedAdjacentPairs++;
+    }
+    if (sharedAdjacentPairs >= 2) return original;
+  }
+  return null;
+}
+function deterministicCanaryBucket(identityKey, skillId) {
+  const hex = createHash("sha256").update(`${identityKey}\0${skillId}`).digest("hex").slice(0, 13);
+  return Number.parseInt(hex, 16) / 4503599627370496;
+}
 var CONCURRENT_WINDOW_MS = 20 * 6e4;
 var CONCURRENT_MAX = 5;
 var DEPLOY_WINDOW_MS = 12 * 6e4;
@@ -62060,13 +62174,24 @@ async function assembleOpenPrPresence(ctx, projectId, ownSessionId, ownUserId) {
   }
   return entries;
 }
-async function attachWorkItemProposals(ctx, entries) {
+async function attachWorkItemProposals(ctx, entries, projectId = ctx.projectId ?? null) {
   const open = entries.filter((e2) => e2.state === "open").slice(0, 3);
   await Promise.all(
     open.map(async (entry) => {
       try {
-        const { data } = await ctx.supabase.from("documents").select("title, kind, metadata").eq("account_id", ctx.accountId).eq("metadata->>status", "proposed").eq("metadata->source_ref->>repo_full_name", entry.repo_full_name).eq("metadata->source_ref->>pr_number", String(entry.number)).limit(2);
-        const rows = data ?? [];
+        const { data } = await ctx.supabase.from("documents").select(
+          "id, account_id, created_by, locked_to_owners, scope, project_id, status, title, kind, metadata"
+        ).eq("account_id", ctx.accountId).eq("locked_to_owners", false).eq("metadata->>status", "proposed").eq("metadata->source_ref->>repo_full_name", entry.repo_full_name).eq("metadata->source_ref->>pr_number", String(entry.number)).limit(2);
+        const rows = (data ?? []).filter(
+          (row) => isDirectResolverDocumentEligible(
+            row,
+            { accountId: ctx.accountId, userId: ctx.userId, projectId },
+            {
+              lifecycle: "proposed",
+              projectAssociation: projectId ? "active-project" : "scope"
+            }
+          )
+        );
         if (rows.length > 0) {
           entry.proposals = rows.map((r2) => ({ title: r2.title.slice(0, 120), kind: r2.kind }));
         }
@@ -62075,7 +62200,7 @@ async function attachWorkItemProposals(ctx, entries) {
     })
   );
 }
-async function assembleDocsTouchingMyFiles(ctx, projectId, myDirs, excludeIds) {
+async function assembleDocsTouchingMyFiles(ctx, projectId, myDirs, excludeIds, applicability = {}) {
   if (myDirs.length === 0) return [];
   const { data, error: error2 } = await ctx.supabase.rpc("search_documents_by_paths", {
     p_account_id: ctx.accountId,
@@ -62091,11 +62216,61 @@ async function assembleDocsTouchingMyFiles(ctx, projectId, myDirs, excludeIds) {
     }
     return [];
   }
+  const pathRows = data;
+  const pathIds = [...new Set(pathRows.map((row) => row.id).filter(Boolean))];
+  if (pathIds.length === 0) return [];
+  const { data: visibilityRows, error: visibilityErr } = await ctx.supabase.from("documents").select(
+    "id, account_id, created_by, locked_to_owners, scope, project_id, status, kind, metadata"
+  ).eq("account_id", ctx.accountId).eq("locked_to_owners", false).in("id", pathIds);
+  if (visibilityErr) {
+    console.warn(
+      `[resolver] path-matched docs visibility fetch failed: ${visibilityErr.message} \u2014 dropping path matches`
+    );
+    return [];
+  }
+  const visibleRowById = /* @__PURE__ */ new Map();
+  for (const row of visibilityRows ?? []) {
+    if (isDirectResolverDocumentEligible(row, {
+      accountId: ctx.accountId,
+      userId: ctx.userId,
+      projectId
+    }) && typeof row.id === "string" && typeof row.kind === "string") {
+      visibleRowById.set(row.id, row);
+    }
+  }
   const items = [];
-  for (const r2 of data) {
+  for (const r2 of pathRows) {
     if (excludeIds.has(r2.id)) continue;
+    const visibility = visibleRowById.get(r2.id);
+    if (visibility?.kind !== r2.kind) continue;
     if (r2.kind !== "memory" && r2.kind !== "skill" && r2.kind !== "decision" && r2.kind !== "schema" && r2.kind !== "goal")
       continue;
+    const metadata = visibility.metadata && typeof visibility.metadata === "object" && !Array.isArray(visibility.metadata) ? visibility.metadata : {};
+    if (r2.kind === "skill" && !isSkillTargetedToAgent(metadata, applicability.agentKind)) {
+      applicability.onOmitted?.({
+        id: r2.id,
+        kind: "skill",
+        title: r2.title,
+        similarity: 0,
+        reason: "agent_target_mismatch",
+        detail: `path-matched skill targets [${skillTargetAgents(metadata).join(", ")}], not agent ${applicability.agentKind}`,
+        path: r2.path
+      });
+      continue;
+    }
+    const antiExample = r2.kind === "skill" && !applicability.requiredIds?.has(r2.id) && applicability.task ? matchingSkillAntiExample(applicability.task, metadata) : null;
+    if (antiExample) {
+      applicability.onOmitted?.({
+        id: r2.id,
+        kind: "skill",
+        title: r2.title,
+        similarity: 0,
+        reason: "anti_example_match",
+        detail: `path-matched task high-precision matched skill anti-example: ${antiExample.slice(0, 240)}`,
+        path: r2.path
+      });
+      continue;
+    }
     const rawBody = r2.body ?? "";
     items.push({
       id: r2.id,
@@ -62167,7 +62342,8 @@ function taskLooksBrandRelated(task) {
 }
 async function assembleClaimGuardrails(ctx, projectId) {
   let query = ctx.supabase.from("documents").select(
-    `id, kind, title, path, metadata, updated_at,
+    `id, account_id, created_by, locked_to_owners, scope, project_id, status,
+       kind, title, path, metadata, updated_at,
        document_versions!documents_current_version_fk ( content, version_number, author_id )`
   ).eq("account_id", ctx.accountId).eq("kind", "memory").not("metadata->>claim_guardrail", "is", null).eq("locked_to_owners", false).limit(50);
   if (projectId) query = query.or(`project_id.is.null,project_id.eq.${projectId}`);
@@ -62179,6 +62355,13 @@ async function assembleClaimGuardrails(ctx, projectId) {
   }
   const out = { approved: [], blocked: [], competitor_facts: [] };
   for (const row of data ?? []) {
+    if (!isDirectResolverDocumentEligible(
+      row,
+      { accountId: ctx.accountId, userId: ctx.userId, projectId },
+      { projectAssociation: "account-or-active-project", expectedKind: "memory" }
+    )) {
+      continue;
+    }
     const metadata = row.metadata ?? {};
     const guardrail = metadata.claim_guardrail;
     if (guardrail !== "approved" && guardrail !== "blocked" && guardrail !== "competitor_facts")
@@ -62205,9 +62388,10 @@ async function assembleClaimGuardrails(ctx, projectId) {
   }
   return out.approved.length || out.blocked.length || out.competitor_facts.length ? out : null;
 }
-async function assemblePinned(ctx, projectId) {
+async function assemblePinned(ctx, projectId, agentKind2 = null, onTargetMismatch) {
   let query = ctx.supabase.from("documents").select(
-    `id, kind, title, path, status, metadata, updated_at,
+    `id, account_id, created_by, locked_to_owners, scope, project_id, kind, title,
+       path, status, metadata, updated_at,
        document_versions!documents_current_version_fk ( content, version_number, author_id )`
   ).eq("account_id", ctx.accountId).eq("metadata->>pinned", "true").eq("locked_to_owners", false).limit(50);
   if (projectId) query = query.or(`project_id.is.null,project_id.eq.${projectId}`);
@@ -62220,9 +62404,21 @@ async function assemblePinned(ctx, projectId) {
   const out = [];
   for (const row of data ?? []) {
     const metadata = row.metadata ?? {};
-    if (row.status === "archived") continue;
-    const metaStatus = typeof metadata.status === "string" ? metadata.status : null;
-    if (metaStatus && metaStatus !== "active") continue;
+    if (metadata.pinned !== true) continue;
+    if (!isDirectResolverDocumentEligible(
+      row,
+      { accountId: ctx.accountId, userId: ctx.userId, projectId },
+      {
+        projectAssociation: "account-or-active-project",
+        expectedKind: ["skill", "memory", "goal", "schema", "decision"]
+      }
+    )) {
+      continue;
+    }
+    if (row.kind === "skill" && !isSkillTargetedToAgent(metadata, agentKind2)) {
+      onTargetMismatch?.(row, skillTargetAgents(metadata));
+      continue;
+    }
     const version4 = Array.isArray(row.document_versions) ? row.document_versions[0] : row.document_versions;
     out.push({
       id: row.id,
@@ -62240,8 +62436,196 @@ async function assemblePinned(ctx, projectId) {
       component_name: null
     });
   }
-  out.sort((a2, b2) => a2.citation.updated_at < b2.citation.updated_at ? 1 : -1);
+  out.sort((a2, b2) => {
+    const byUpdated = b2.citation.updated_at.localeCompare(a2.citation.updated_at);
+    return byUpdated !== 0 ? byUpdated : a2.id.localeCompare(b2.id);
+  });
   return out;
+}
+function buildDeliveredContextCounts(deliveredItems) {
+  const laneCount = (...lanes) => {
+    const accepted = new Set(lanes);
+    return deliveredItems.reduce(
+      (count, item) => count + (accepted.has(item.source_lane) ? 1 : 0),
+      0
+    );
+  };
+  return {
+    memory: laneCount("memory"),
+    skills: laneCount("primary_skill", "supporting_skill"),
+    goals: laneCount("goal"),
+    schemas: laneCount("schema"),
+    decisions: laneCount("decision"),
+    required: laneCount("required"),
+    pinned: laneCount("pinned"),
+    open_threads: laneCount("open_thread"),
+    pack_context: laneCount("pack_context"),
+    claim_guardrails: laneCount(
+      "claim_guardrail_approved",
+      "claim_guardrail_blocked",
+      "claim_guardrail_competitor_fact"
+    ),
+    total: deliveredItems.length
+  };
+}
+function deliveredInclusionReason(item, fallback) {
+  if (item.below_gate) return "recall_floor";
+  if (item.match_source === "paths") return "path_overlap";
+  return fallback;
+}
+function dedupeResolveBundleDocumentLanes(bundle) {
+  const seen = /* @__PURE__ */ new Set();
+  const keepFirst = (items) => items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+  bundle.required_core = keepFirst(bundle.required_core);
+  bundle.pinned = keepFirst(bundle.pinned);
+  bundle.open_threads = keepFirst(bundle.open_threads);
+  bundle.pack_context = keepFirst(bundle.pack_context);
+  if (bundle.claim_guardrails) {
+    bundle.claim_guardrails.approved = keepFirst(bundle.claim_guardrails.approved);
+    bundle.claim_guardrails.blocked = keepFirst(bundle.claim_guardrails.blocked);
+    bundle.claim_guardrails.competitor_facts = keepFirst(
+      bundle.claim_guardrails.competitor_facts
+    );
+    if (bundle.claim_guardrails.approved.length === 0 && bundle.claim_guardrails.blocked.length === 0 && bundle.claim_guardrails.competitor_facts.length === 0) {
+      bundle.claim_guardrails = null;
+    }
+  }
+  if (bundle.primary_skill) {
+    const [primary] = keepFirst([bundle.primary_skill]);
+    bundle.primary_skill = primary ?? null;
+  }
+  bundle.supporting_skills = keepFirst(bundle.supporting_skills);
+  bundle.goals = keepFirst(bundle.goals);
+  bundle.decisions = keepFirst(bundle.decisions);
+  bundle.schemas = keepFirst(bundle.schemas);
+  bundle.memory = keepFirst(bundle.memory);
+  return bundle;
+}
+function buildDeliveredItemSnapshots(bundle) {
+  const snapshots = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (items, laneFor, roleFor, reasonFor) => {
+    let laneRank = 0;
+    items.forEach((item) => {
+      if (seen.has(item.id)) return;
+      seen.add(item.id);
+      laneRank += 1;
+      snapshots.push({
+        document_id: item.id,
+        kind: item.kind,
+        title: item.title,
+        content: item.body,
+        source_lane: laneFor(item),
+        role: roleFor(item),
+        receipt_index: snapshots.length + 1,
+        lane_rank: laneRank,
+        inclusion_reason: reasonFor(item),
+        estimated_tokens: estimateTokens(item.body),
+        similarity: item.similarity,
+        version_number: item.citation.version_number,
+        ...item.version_tag ? { version_tag: item.version_tag } : {},
+        path: item.citation.path,
+        updated_at: item.citation.updated_at,
+        author_id: item.citation.author_id,
+        component_id: item.component_id,
+        component_name: item.component_name,
+        repo: item.repo ?? null,
+        ...item.below_gate ? { below_gate: true } : {},
+        ...item.match_source ? { match_source: item.match_source } : {},
+        ...item.overlap_paths ? { overlap_paths: item.overlap_paths } : {},
+        ...item.authority_tier !== void 0 ? { authority_tier: item.authority_tier } : {},
+        ...item.pack ? { pack: item.pack } : {},
+        ...item.thread ? { thread: item.thread } : {}
+      });
+    });
+  };
+  add(
+    bundle.required_core,
+    () => "required",
+    () => "required",
+    () => "governance_required"
+  );
+  add(
+    bundle.pinned,
+    () => "pinned",
+    () => "directive",
+    () => "force_included_pin"
+  );
+  add(
+    bundle.open_threads,
+    () => "open_thread",
+    () => "open_thread",
+    () => "entity_and_status_match"
+  );
+  add(
+    bundle.pack_context,
+    () => "pack_context",
+    () => "pack_context",
+    () => "subscribed_pack_retrieval"
+  );
+  if (bundle.claim_guardrails) {
+    add(
+      bundle.claim_guardrails.approved,
+      () => "claim_guardrail_approved",
+      () => "approved_claim",
+      () => "claim_guardrail_task_match"
+    );
+    add(
+      bundle.claim_guardrails.blocked,
+      () => "claim_guardrail_blocked",
+      () => "blocked_claim",
+      () => "claim_guardrail_task_match"
+    );
+    add(
+      bundle.claim_guardrails.competitor_facts,
+      () => "claim_guardrail_competitor_fact",
+      () => "competitor_fact",
+      () => "claim_guardrail_task_match"
+    );
+  }
+  if (bundle.primary_skill) {
+    add(
+      [bundle.primary_skill],
+      () => "primary_skill",
+      () => "primary",
+      (item) => deliveredInclusionReason(item, "ranked_primary_skill")
+    );
+  }
+  add(
+    bundle.supporting_skills,
+    () => "supporting_skill",
+    () => "supporting",
+    (item) => deliveredInclusionReason(item, "ranked_supporting_skill")
+  );
+  add(
+    bundle.goals,
+    () => "goal",
+    () => "goal",
+    (item) => deliveredInclusionReason(item, "ranked_retrieval")
+  );
+  add(
+    bundle.decisions,
+    () => "decision",
+    () => "decision",
+    (item) => deliveredInclusionReason(item, "ranked_retrieval")
+  );
+  add(
+    bundle.schemas,
+    () => "schema",
+    () => "schema",
+    (item) => deliveredInclusionReason(item, "ranked_retrieval")
+  );
+  add(
+    bundle.memory,
+    () => "memory",
+    () => "memory",
+    (item) => deliveredInclusionReason(item, "ranked_retrieval")
+  );
+  return snapshots;
 }
 var EmbeddingUnavailableError = class extends Error {
   code = "EMBEDDING_UNAVAILABLE";
@@ -62477,13 +62861,21 @@ async function loadFitnessMultipliers(ctx, candidateIds) {
     const auditToItems = /* @__PURE__ */ new Map();
     for (const inv of invocations) {
       const meta = inv.metadata;
+      const deliveredItems = meta?.delivered_items;
       const items = meta?.items;
       const itemIds = meta?.item_ids;
-      let ids = [];
-      if (Array.isArray(items)) {
-        ids = items.map((i2) => i2?.id).filter((id) => typeof id === "string");
-      } else if (Array.isArray(itemIds)) {
-        ids = itemIds.filter((id) => typeof id === "string");
+      const legacyIds = Array.isArray(items) ? items.map((i2) => i2?.id).filter((id) => typeof id === "string") : Array.isArray(itemIds) ? itemIds.filter((id) => typeof id === "string") : [];
+      let ids = legacyIds;
+      if (Array.isArray(deliveredItems)) {
+        ids = [
+          ...new Set(
+            deliveredItems.map((i2) => {
+              const row = i2;
+              return row?.document_id ?? row?.id;
+            }).filter((id) => typeof id === "string")
+          )
+        ];
+        if (deliveredItems.length > 0 && ids.length === 0) ids = legacyIds;
       }
       if (ids.length > 0) auditToItems.set(inv.id, ids);
     }
@@ -62494,8 +62886,17 @@ async function loadFitnessMultipliers(ctx, candidateIds) {
       const aid = meta?.audit_id;
       const val = meta?.outcome;
       if (typeof aid !== "string" || val !== "positive" && val !== "negative") continue;
-      const itemIds = auditToItems.get(aid);
-      if (!itemIds) continue;
+      const deliveredIds = auditToItems.get(aid);
+      if (!deliveredIds) continue;
+      const hasExplicitAttribution = meta !== null && Object.prototype.hasOwnProperty.call(meta, "applied_item_ids");
+      const deliveredSet = new Set(deliveredIds);
+      const itemIds = hasExplicitAttribution ? Array.isArray(meta?.applied_item_ids) ? [
+        ...new Set(
+          meta.applied_item_ids.filter(
+            (id) => typeof id === "string" && deliveredSet.has(id)
+          )
+        )
+      ] : [] : deliveredIds;
       for (const itemId of itemIds) {
         if (val === "positive") {
           posCounts.set(itemId, (posCounts.get(itemId) ?? 0) + 1);
@@ -62534,7 +62935,7 @@ async function hydrateCandidateBodies(ctx, candidateIds, functionBodyById, funct
     const { data: docRows, error: docErr } = await ctx.supabase.from("documents").select(
       `id, current_version_id, component_id, metadata,
          document_versions!documents_current_version_fk ( content )`
-    ).in("id", candidateIds);
+    ).eq("account_id", ctx.accountId).eq("locked_to_owners", false).in("id", candidateIds);
     if (docErr) {
       console.warn(
         `[resolver] body fetch failed: ${docErr.message} \u2014 proceeding with empty bodies`
@@ -62648,25 +63049,33 @@ function emptyProjectBrainPolicy() {
     inheritedDefaultIds: [],
     requiredIds: [],
     requiredChainIds: /* @__PURE__ */ new Set(),
-    optionalChainIds: /* @__PURE__ */ new Set()
+    optionalChainIds: /* @__PURE__ */ new Set(),
+    errors: []
   };
 }
 async function getProjectTeamId(ctx, projectId) {
-  if (!projectId) return null;
+  if (!projectId) return { teamId: null, error: null };
   const { data, error: error2 } = await ctx.supabase.from("projects").select("team_id").eq("id", projectId).maybeSingle();
-  if (error2 || !data) return null;
-  return (data.team_id ?? null) || null;
+  if (error2) {
+    return { teamId: null, error: `projects.team_id: ${error2.message}` };
+  }
+  return {
+    teamId: data ? (data.team_id ?? null) || null : null,
+    error: null
+  };
 }
 function isProjectBrainInheritedDoc(projectId, candidate, row) {
   if (!projectId) return false;
   if (candidate.kind !== "memory" && candidate.kind !== "skill") return false;
   return (row?.project_id ?? null) === null && (row?.scope === "team" || row?.scope === "personal");
 }
-async function loadProjectBrainPolicy(ctx, projectId, teamId = null, userId = null) {
+async function loadProjectBrainPolicy(ctx, projectId, teamId = null, userId = null, initialErrors = []) {
   const policy = emptyProjectBrainPolicy();
+  policy.errors.push(...initialErrors);
   if (projectId) {
     const { data, error: error2 } = await ctx.supabase.from("project_brain_overrides").select("source_document_id, action, replacement_document_id").eq("project_id", projectId);
     if (error2) {
+      policy.errors.push(`project_brain_overrides: ${error2.message}`);
       console.warn(
         `[resolver] project brain overrides fetch failed: ${error2.message} \u2014 proceeding without legacy overrides`
       );
@@ -62680,12 +63089,15 @@ async function loadProjectBrainPolicy(ctx, projectId, teamId = null, userId = nu
   if (teamId) teamIds.add(teamId);
   if (userId) {
     const { data: tm, error: tmErr } = await ctx.supabase.from("team_members").select("team_id").eq("user_id", userId);
-    if (!tmErr) {
+    if (tmErr) {
+      policy.errors.push(`team_members: ${tmErr.message}`);
+    } else {
       for (const r2 of tm ?? []) teamIds.add(r2.team_id);
     }
   }
   const { data: pols, error: polErr } = await ctx.supabase.from("governance_policies").select("governed_document_id, level, level_ref_id, requirement").eq("account_id", ctx.accountId).eq("active", true);
   if (polErr) {
+    policy.errors.push(`governance_policies: ${polErr.message}`);
     if (!/does not exist|relation|PGRST20\d/i.test(polErr.message)) {
       console.warn(`[resolver] governance_policies fetch failed: ${polErr.message}`);
     }
@@ -62707,6 +63119,7 @@ async function loadProjectBrainPolicy(ctx, projectId, teamId = null, userId = nu
     if (!ref) continue;
     const { data, error: error2 } = await ctx.supabase.from("governance_optouts").select("source_document_id, action, replacement_document_id").eq("account_id", ctx.accountId).eq("scope_level", lvl).eq("scope_ref_id", ref);
     if (error2) {
+      policy.errors.push(`governance_optouts.${lvl}: ${error2.message}`);
       if (!/does not exist|relation|PGRST20\d/i.test(error2.message)) {
         console.warn(`[resolver] governance_optouts (${lvl}) fetch failed: ${error2.message}`);
       }
@@ -62717,45 +63130,111 @@ async function loadProjectBrainPolicy(ctx, projectId, teamId = null, userId = nu
       policy.overridesBySource.set(row.source_document_id, row);
     }
   }
+  policy.errors = [...new Set(policy.errors)];
   return policy;
 }
-async function assembleRequiredGoverned(ctx, requiredChainIds) {
-  if (requiredChainIds.size === 0) return [];
-  const ids = [...requiredChainIds];
-  const { data, error: error2 } = await ctx.supabase.from("documents").select(
-    `id, kind, title, path, status, metadata, updated_at,
-       document_versions!documents_current_version_fk ( content, version_number, author_id )`
-  ).eq("account_id", ctx.accountId).in("id", ids);
-  if (error2) {
-    console.warn(`[resolver] required-governed fetch failed: ${error2.message}`);
-    return [];
+function directDocumentToResolvedItem(row) {
+  const version4 = Array.isArray(row.document_versions) ? row.document_versions[0] : row.document_versions;
+  return {
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    body: version4?.content ?? "",
+    similarity: 1,
+    citation: {
+      path: row.path ?? null,
+      version_number: version4?.version_number ?? 1,
+      updated_at: row.updated_at,
+      author_id: version4?.author_id ?? null
+    },
+    component_id: null,
+    component_name: null
+  };
+}
+async function assembleRequiredCore(ctx, requiredChainIds, projectId, policyErrors = [], agentKind2 = null) {
+  const governanceIds = [...requiredChainIds].sort();
+  const select = `id, account_id, created_by, locked_to_owners, scope, project_id, kind, title,
+       path, status, metadata, updated_at,
+       document_versions!documents_current_version_fk ( content, version_number, author_id )`;
+  const governedRead = governanceIds.length ? ctx.supabase.from("documents").select(select).eq("account_id", ctx.accountId).eq("locked_to_owners", false).in("id", governanceIds) : Promise.resolve({ data: [], error: null });
+  const overviewRead = projectId ? ctx.supabase.from("documents").select(select).eq("account_id", ctx.accountId).eq("locked_to_owners", false).eq("project_id", projectId).eq("metadata->>project_brain_role", "overview").limit(20) : Promise.resolve({ data: [], error: null });
+  const [governed, overviews] = await Promise.all([governedRead, overviewRead]);
+  const errors = [...policyErrors];
+  if (governed.error) {
+    errors.push(`required documents: ${governed.error.message}`);
+    console.warn(`[resolver] required-governed fetch failed: ${governed.error.message}`);
   }
-  const out = [];
-  for (const row of data ?? []) {
-    if (row.status === "archived") continue;
-    const metadata = row.metadata ?? {};
-    const metaStatus = typeof metadata.status === "string" ? metadata.status : null;
-    if (metaStatus && metaStatus !== "active") continue;
-    if (!SEARCHABLE_KINDS.includes(row.kind)) continue;
-    const version4 = Array.isArray(row.document_versions) ? row.document_versions[0] : row.document_versions;
-    out.push({
-      id: row.id,
-      kind: row.kind,
-      title: row.title,
-      body: version4?.content ?? "",
-      similarity: 1,
-      citation: {
-        path: row.path ?? null,
-        version_number: version4?.version_number ?? 1,
-        updated_at: row.updated_at,
-        author_id: version4?.author_id ?? null
-      },
-      component_id: null,
-      component_name: null
-    });
+  if (overviews.error) {
+    errors.push(`project overview: ${overviews.error.message}`);
+    console.warn(`[resolver] project-overview fetch failed: ${overviews.error.message}`);
   }
-  out.sort((a2, b2) => a2.citation.updated_at < b2.citation.updated_at ? 1 : -1);
-  return out;
+  const itemById = /* @__PURE__ */ new Map();
+  const expectedIds = [];
+  const expected = /* @__PURE__ */ new Set();
+  const expect = (id) => {
+    if (!expected.has(id)) {
+      expected.add(id);
+      expectedIds.push(id);
+    }
+  };
+  const overviewRows = (overviews.data ?? []).sort(
+    (a2, b2) => String(a2.id).localeCompare(String(b2.id))
+  );
+  for (const row of overviewRows) {
+    const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata) ? row.metadata : {};
+    if (metadata.project_brain_role !== "overview") continue;
+    if (!isDirectResolverDocumentEligible(
+      row,
+      { accountId: ctx.accountId, userId: ctx.userId, projectId },
+      { projectAssociation: "active-project", expectedKind: SEARCHABLE_KINDS }
+    )) {
+      continue;
+    }
+    const item = directDocumentToResolvedItem(row);
+    expect(item.id);
+    itemById.set(item.id, item);
+  }
+  for (const id of governanceIds) expect(id);
+  for (const row of governed.data ?? []) {
+    if (!expected.has(String(row.id))) continue;
+    if (!isDirectResolverDocumentEligible(
+      row,
+      { accountId: ctx.accountId, userId: ctx.userId, projectId },
+      {
+        projectAssociation: "account-or-active-project",
+        expectedKind: SEARCHABLE_KINDS
+      }
+    )) {
+      continue;
+    }
+    const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata) ? row.metadata : {};
+    if (row.kind === "skill" && !isSkillTargetedToAgent(metadata, agentKind2)) {
+      errors.push(
+        `required skill ${String(row.id)} targets [${skillTargetAgents(metadata).join(", ")}], not agent ${agentKind2}`
+      );
+      continue;
+    }
+    const item = directDocumentToResolvedItem(row);
+    itemById.set(item.id, item);
+  }
+  const items = expectedIds.flatMap((id) => {
+    const item = itemById.get(id);
+    return item ? [item] : [];
+  });
+  const deliveredIds = items.map((item) => item.id);
+  const delivered = new Set(deliveredIds);
+  const missingIds = expectedIds.filter((id) => !delivered.has(id));
+  const uniqueErrors = [...new Set(errors)];
+  return {
+    items,
+    status: {
+      complete: missingIds.length === 0 && uniqueErrors.length === 0,
+      expected_ids: expectedIds,
+      delivered_ids: deliveredIds,
+      missing_ids: missingIds,
+      errors: uniqueErrors
+    }
+  };
 }
 var ARCH_FUNCTION_CAP = 30;
 async function assembleArchitecture(ctx, projectId, component, componentNameById) {
@@ -62808,15 +63287,30 @@ async function assembleArchitecture(ctx, projectId, component, componentNameById
   }
   if (arch.data.length > 0) {
     const tableNames = [...new Set(arch.data.map((d2) => d2.table))];
-    const { data: schemaDocs, error: sErr } = await ctx.supabase.from("documents").select("id, title, path, metadata").eq("account_id", ctx.accountId).eq("project_id", projectId).eq("kind", "schema").eq("locked_to_owners", false).in("title", tableNames);
+    const { data: schemaDocs, error: sErr } = await ctx.supabase.from("documents").select(
+      "id, account_id, created_by, locked_to_owners, scope, project_id, status, kind, title, path, metadata"
+    ).eq("account_id", ctx.accountId).eq("project_id", projectId).eq("kind", "schema").eq("locked_to_owners", false).in("title", tableNames);
     if (sErr) {
       console.warn(`[resolver] architecture schema-doc fetch failed: ${sErr.message}`);
     } else {
       const byTable = /* @__PURE__ */ new Map();
       for (const d2 of schemaDocs ?? []) {
-        const ref = { id: d2.id, title: d2.title, path: d2.path };
+        if (!isDirectResolverDocumentEligible(
+          d2,
+          { accountId: ctx.accountId, userId: ctx.userId, projectId },
+          { projectAssociation: "active-project", expectedKind: "schema" }
+        )) {
+          continue;
+        }
+        if (typeof d2.id !== "string" || typeof d2.title !== "string") continue;
+        const ref = {
+          id: d2.id,
+          title: d2.title,
+          path: typeof d2.path === "string" ? d2.path : null
+        };
         byTable.set(d2.title, ref);
-        const objName = d2.metadata?.db_object_name;
+        const metadata = d2.metadata ?? {};
+        const objName = metadata.db_object_name;
         if (typeof objName === "string") byTable.set(objName, ref);
       }
       for (const item of arch.data) {
@@ -62985,9 +63479,16 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const kPerKind = args.k_per_kind ?? DEFAULT_K_PER_KIND;
   const projectId = args.project_id ?? ctx.projectId ?? null;
   const governanceUserId = ctx.userId ?? null;
-  const teamId = await getProjectTeamId(ctx, projectId);
+  const projectTeam = await getProjectTeamId(ctx, projectId);
+  const teamId = projectTeam.teamId;
   const requestedKinds = args.kinds ? args.kinds.filter((k2) => SEARCHABLE_KINDS.includes(k2)) : [...SEARCHABLE_KINDS];
-  const projectBrainPolicy = await loadProjectBrainPolicy(ctx, projectId, teamId, governanceUserId);
+  const projectBrainPolicy = await loadProjectBrainPolicy(
+    ctx,
+    projectId,
+    teamId,
+    governanceUserId,
+    projectTeam.error ? [projectTeam.error] : []
+  );
   let customThresholds = null;
   let thresholdsMode = "default";
   let brandContextMode = "always";
@@ -63093,16 +63594,21 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       const titleMatches = [];
       const titleNeedle = args.task.trim();
       if (titleNeedle.length >= 8) {
-        let q2 = ctx.supabase.from("documents").select(
-          `id, title, kind, scope, path, updated_at, created_at, metadata,
+        const q2 = ctx.supabase.from("documents").select(
+          `id, account_id, created_by, locked_to_owners, status, title, kind, scope,
+             project_id, path, updated_at, created_at, metadata,
              document_versions!documents_current_version_fk ( version_number, author_id )`
-        ).eq("account_id", ctx.accountId).eq("kind", kind2).ilike("title", `%${titleNeedle}%`).eq("locked_to_owners", false).limit(kPerKind);
-        if (projectId) q2 = q2.or(`scope.eq.team,project_id.eq.${projectId}`);
+        ).eq("account_id", ctx.accountId).eq("kind", kind2).ilike("title", `%${titleNeedle}%`).eq("locked_to_owners", false).limit(Math.min(50, kPerKind * 4));
         const { data: titleData, error: titleErr } = await q2;
         if (!titleErr) {
           for (const r2 of titleData ?? []) {
-            const metadata = r2.metadata ?? {};
-            if ((metadata.status ?? "active") !== "active") continue;
+            if (!isDirectResolverDocumentEligible(
+              r2,
+              { accountId: ctx.accountId, userId: ctx.userId, projectId },
+              { expectedKind: kind2 }
+            )) {
+              continue;
+            }
             const v2 = Array.isArray(r2.document_versions) ? r2.document_versions[0] : r2.document_versions;
             titleMatches.push({
               id: r2.id,
@@ -63116,6 +63622,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
               created_at: r2.created_at,
               author_id: v2?.author_id ?? null
             });
+            if (titleMatches.length >= kPerKind) break;
           }
         }
       }
@@ -63208,21 +63715,23 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const metadataById = /* @__PURE__ */ new Map();
   const approvedColumnIds = /* @__PURE__ */ new Set();
   if (candidateIdsNeedingStatus.length > 0) {
-    const { data: statusRows, error: statusErr } = await ctx.supabase.from("documents").select("id, status, metadata, project_id, scope").in("id", candidateIdsNeedingStatus);
+    const { data: statusRows, error: statusErr } = await ctx.supabase.from("documents").select(
+      "id, account_id, created_by, locked_to_owners, status, kind, metadata, project_id, scope"
+    ).eq("account_id", ctx.accountId).eq("locked_to_owners", false).in("id", candidateIdsNeedingStatus);
     if (statusErr) {
       console.warn(
-        `[resolver] status fetch failed: ${statusErr.message} \u2014 dropping goals/skills, keeping other kinds`
+        `[resolver] status/visibility fetch failed: ${statusErr.message} \u2014 dropping document candidates`
       );
       for (let i2 = candidates.length - 1; i2 >= 0; i2--) {
         const c2 = candidates[i2];
-        if (c2?.kind === "goal" || c2?.kind === "skill") {
+        if (c2 && !functionBodyById.has(c2.id)) {
           omittedCandidates.push({
             id: c2.id,
             kind: c2.kind,
             title: c2.title,
             similarity: c2.similarity,
             reason: "status_filtered",
-            detail: `${c2.kind} status could not be verified`,
+            detail: `${c2.kind} direct visibility/status could not be verified`,
             path: c2.citation.path
           });
           candidates.splice(i2, 1);
@@ -63231,7 +63740,19 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     } else {
       const statusById = /* @__PURE__ */ new Map();
       const scopeRowById = /* @__PURE__ */ new Map();
+      const candidateKindById = new Map(candidates.map((candidate) => [candidate.id, candidate.kind]));
       for (const r2 of statusRows ?? []) {
+        const expectedKind = candidateKindById.get(r2.id);
+        if (!expectedKind || ctx.serviceTokenId && !isDirectResolverDocumentEligible(
+          r2,
+          { accountId: ctx.accountId, userId: ctx.userId, projectId },
+          {
+            expectedKind,
+            projectAssociation: "account-or-active-project"
+          }
+        )) {
+          continue;
+        }
         statusById.set(r2.id, r2.status);
         metadataById.set(r2.id, r2.metadata);
         scopeRowById.set(r2.id, { project_id: r2.project_id, scope: r2.scope });
@@ -63239,6 +63760,19 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       for (let i2 = candidates.length - 1; i2 >= 0; i2--) {
         const c2 = candidates[i2];
         if (!c2) continue;
+        if (!functionBodyById.has(c2.id) && !statusById.has(c2.id)) {
+          omittedCandidates.push({
+            id: c2.id,
+            kind: c2.kind,
+            title: c2.title,
+            similarity: c2.similarity,
+            reason: "status_filtered",
+            detail: `${c2.kind} direct visibility/status could not be verified`,
+            path: c2.citation.path
+          });
+          candidates.splice(i2, 1);
+          continue;
+        }
         const status = statusById.get(c2.id) ?? null;
         const meta = metadataById.get(c2.id);
         const scopeRow = scopeRowById.get(c2.id);
@@ -63356,6 +63890,34 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
           candidates.splice(i2, 1);
           continue;
         }
+        if (c2.kind === "skill" && !isSkillTargetedToAgent(meta, audit.agentKind)) {
+          const targets = skillTargetAgents(meta);
+          omittedCandidates.push({
+            id: c2.id,
+            kind: c2.kind,
+            title: c2.title,
+            similarity: c2.similarity,
+            reason: "agent_target_mismatch",
+            detail: `skill targets [${targets.join(", ")}], not agent ${audit.agentKind}`,
+            path: c2.citation.path
+          });
+          candidates.splice(i2, 1);
+          continue;
+        }
+        const antiExample = c2.kind === "skill" && !inheritedRequired ? matchingSkillAntiExample(args.task, meta) : null;
+        if (antiExample) {
+          omittedCandidates.push({
+            id: c2.id,
+            kind: c2.kind,
+            title: c2.title,
+            similarity: c2.similarity,
+            reason: "anti_example_match",
+            detail: `task high-precision matched skill anti-example: ${antiExample.slice(0, 240)}`,
+            path: c2.citation.path
+          });
+          candidates.splice(i2, 1);
+          continue;
+        }
         if ((c2.kind === "memory" || c2.kind === "decision") && status === "approved") {
           approvedColumnIds.add(c2.id);
         }
@@ -63363,17 +63925,53 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       const replacementIds = projectBrainPolicy.overridePairs.map((p2) => p2.replacement_document_id).filter((id) => !candidates.some((c2) => c2.id === id));
       if (replacementIds.length > 0) {
         const { data: replacementRows, error: replacementErr } = await ctx.supabase.from("documents").select(
-          `id, title, kind, path, status, updated_at, created_at,
+          `id, account_id, created_by, locked_to_owners, scope, project_id, title,
+             kind, path, status, metadata, updated_at, created_at,
              document_versions!documents_current_version_fk ( version_number, author_id )`
-        ).eq("locked_to_owners", false).in("id", replacementIds);
+        ).eq("account_id", ctx.accountId).eq("locked_to_owners", false).in("id", replacementIds);
         if (replacementErr) {
           console.warn(
             `[resolver] project brain override replacement fetch failed: ${replacementErr.message}`
           );
         } else {
           for (const row of replacementRows ?? []) {
-            if (row.status === "archived") continue;
-            if (row.kind !== "memory" && row.kind !== "skill") continue;
+            if (!isDirectResolverDocumentEligible(
+              row,
+              { accountId: ctx.accountId, userId: ctx.userId, projectId },
+              {
+                projectAssociation: "account-or-active-project",
+                expectedKind: ["memory", "skill"]
+              }
+            )) {
+              continue;
+            }
+            if (row.kind === "skill" && !isSkillTargetedToAgent(row.metadata, audit.agentKind)) {
+              const targets = skillTargetAgents(row.metadata);
+              omittedCandidates.push({
+                id: row.id,
+                kind: row.kind,
+                title: row.title,
+                similarity: 1,
+                reason: "agent_target_mismatch",
+                detail: `override skill targets [${targets.join(", ")}], not agent ${audit.agentKind}`,
+                path: row.path
+              });
+              continue;
+            }
+            const replacementAnti = row.kind === "skill" && !projectBrainPolicy.requiredChainIds.has(row.id) ? matchingSkillAntiExample(args.task, row.metadata) : null;
+            if (replacementAnti) {
+              omittedCandidates.push({
+                id: row.id,
+                kind: row.kind,
+                title: row.title,
+                similarity: 1,
+                reason: "anti_example_match",
+                detail: `task high-precision matched override skill anti-example: ${replacementAnti.slice(0, 240)}`,
+                path: row.path
+              });
+              continue;
+            }
+            metadataById.set(row.id, row.metadata);
             const v2 = Array.isArray(row.document_versions) ? row.document_versions[0] : row.document_versions;
             candidates.push({
               id: row.id,
@@ -63633,28 +64231,63 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   }
   let pinnedItems = [];
   try {
-    pinnedItems = await assemblePinned(ctx, projectId);
+    pinnedItems = await assemblePinned(ctx, projectId, audit.agentKind ?? null, (row, targets) => {
+      omittedCandidates.push({
+        id: row.id,
+        kind: "skill",
+        title: row.title,
+        similarity: 1,
+        reason: "agent_target_mismatch",
+        detail: `pinned skill targets [${targets.join(", ")}], not agent ${audit.agentKind}`,
+        path: row.path ?? null
+      });
+    });
   } catch (e2) {
     console.warn(
       `[resolver] pinned assembly failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without pins`
     );
   }
+  let requiredCoreItems = [];
+  let requiredCoreStatus = {
+    complete: projectBrainPolicy.errors.length === 0,
+    expected_ids: [],
+    delivered_ids: [],
+    missing_ids: [],
+    errors: [...projectBrainPolicy.errors]
+  };
   try {
-    const requiredItems = await assembleRequiredGoverned(ctx, projectBrainPolicy.requiredChainIds);
-    if (requiredItems.length > 0) {
-      const have = new Set(pinnedItems.map((p2) => p2.id));
-      pinnedItems = [...requiredItems.filter((r2) => !have.has(r2.id)), ...pinnedItems];
-    }
-  } catch (e2) {
-    console.warn(
-      `[resolver] required-governed force-include failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding without it`
+    const required2 = await assembleRequiredCore(
+      ctx,
+      projectBrainPolicy.requiredChainIds,
+      projectId,
+      projectBrainPolicy.errors,
+      audit.agentKind ?? null
     );
+    requiredCoreItems = required2.items;
+    requiredCoreStatus = required2.status;
+  } catch (e2) {
+    const message = e2 instanceof Error ? e2.message : String(e2);
+    requiredCoreStatus = {
+      complete: false,
+      expected_ids: [...projectBrainPolicy.requiredChainIds].sort(),
+      delivered_ids: [],
+      missing_ids: [...projectBrainPolicy.requiredChainIds].sort(),
+      errors: [.../* @__PURE__ */ new Set([...projectBrainPolicy.errors, `required-core assembly: ${message}`])]
+    };
+    console.warn(`[resolver] required-core assembly failed: ${message}`);
   }
-  if (pinnedItems.length > 0) {
-    const pinnedIds = new Set(pinnedItems.map((p2) => p2.id));
+  const requiredCoreIds = new Set(requiredCoreItems.map((item) => item.id));
+  if (requiredCoreIds.size > 0) {
+    pinnedItems = pinnedItems.filter((item) => !requiredCoreIds.has(item.id));
+  }
+  if (pinnedItems.length > 0 || requiredCoreItems.length > 0) {
+    const alwaysOnIds = /* @__PURE__ */ new Set([
+      ...pinnedItems.map((item) => item.id),
+      ...requiredCoreItems.map((item) => item.id)
+    ]);
     for (let i2 = candidates.length - 1; i2 >= 0; i2--) {
       const c2 = candidates[i2];
-      if (c2 && pinnedIds.has(c2.id)) candidates.splice(i2, 1);
+      if (c2 && alwaysOnIds.has(c2.id)) candidates.splice(i2, 1);
     }
   }
   const memoryTypeMultiplier = (c2) => c2.kind === "memory" && c2.memory_type ? MEMORY_TYPE_WEIGHTS[c2.memory_type] : 1;
@@ -63815,14 +64448,23 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   budgetOrder.push(...rest);
   const included = [];
   const excluded = /* @__PURE__ */ new Set();
-  let used = 0;
-  let truncated = false;
+  const requiredCoreTokens = requiredCoreItems.reduce(
+    (total, item) => total + estimateTokens(item.body),
+    0
+  );
+  let used = requiredCoreTokens;
+  let truncated = requiredCoreTokens > maxTokens;
+  const canaryIdentity = audit.sessionId ? { source: "session_id", key: `session_id:${audit.sessionId}` } : audit.agentInstallationId ? {
+    source: "agent_installation_id",
+    key: `agent_installation_id:${audit.agentInstallationId}`
+  } : ctx.userId ? { source: "user_id", key: `user_id:${ctx.userId}` } : { source: "account_fallback", key: `account_fallback:${ctx.accountId}` };
+  const canaryRoutingAudit = [];
   const pinnedCap = Math.min(PINNED_MAX_TOKENS, Math.round(maxTokens * PINNED_BUDGET_FRACTION));
   const pinnedIncluded = [];
   let pinnedTokens = 0;
   for (const p2 of pinnedItems) {
     const cost = estimateTokens(p2.body);
-    if (pinnedIncluded.length > 0 && used + cost > pinnedCap) {
+    if (pinnedIncluded.length > 0 && pinnedTokens + cost > pinnedCap) {
       truncated = true;
       omittedCandidates.push({
         id: p2.id,
@@ -63846,16 +64488,27 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     let resolvedVersionNumber = c2.citation.version_number;
     let versionTag = "stable";
     if (c2.kind === "skill" && meta && meta.canary_version_id && typeof meta.canary_version_id === "string") {
-      const canaryRatio = typeof meta.canary_ratio === "number" ? meta.canary_ratio : 0.1;
-      const isCanaryRouting = Math.random() < canaryRatio;
-      if (isCanaryRouting) {
-        const canaryInfo = canaryContentMap.get(meta.canary_version_id);
-        if (canaryInfo) {
-          body = canaryInfo.content;
-          resolvedVersionNumber = canaryInfo.version_number;
-          versionTag = "canary";
-        }
+      const configuredRatio = typeof meta.canary_ratio === "number" && Number.isFinite(meta.canary_ratio) ? meta.canary_ratio : 0.1;
+      const canaryRatio = Math.max(0, Math.min(1, configuredRatio));
+      const bucket = deterministicCanaryBucket(canaryIdentity.key, c2.id);
+      const canaryInfo = canaryContentMap.get(meta.canary_version_id);
+      if (bucket < canaryRatio && canaryInfo) {
+        body = canaryInfo.content;
+        resolvedVersionNumber = canaryInfo.version_number;
+        versionTag = "canary";
       }
+      canaryRoutingAudit.push({
+        skill_id: c2.id,
+        identity_source: canaryIdentity.source,
+        bucket,
+        ratio: canaryRatio,
+        canary_version_id: meta.canary_version_id,
+        canary_available: Boolean(canaryInfo),
+        selected_version_tag: versionTag,
+        stable_version_number: c2.citation.version_number,
+        canary_version_number: canaryInfo?.version_number ?? null,
+        resolved_version_number: resolvedVersionNumber
+      });
     }
     const cost = estimateTokens(body);
     if (!isPrimary && used + cost > maxTokens) {
@@ -64048,14 +64701,29 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     feed(
       "path-matched docs assembly",
       [],
-      () => assembleDocsTouchingMyFiles(ctx, projectId, myDirs, new Set(included.map((i2) => i2.id)))
+      () => assembleDocsTouchingMyFiles(
+        ctx,
+        projectId,
+        myDirs,
+        /* @__PURE__ */ new Set([
+          ...included.map((item) => item.id),
+          ...requiredCoreItems.map((item) => item.id),
+          ...pinnedIncluded.map((item) => item.id)
+        ]),
+        {
+          task: args.task,
+          agentKind: audit.agentKind ?? null,
+          requiredIds: projectBrainPolicy.requiredChainIds,
+          onOmitted: (candidate) => omittedCandidates.push(candidate)
+        }
+      )
     )
   ]);
   const workInFlight = mergeWorkInFlight(semanticWorkInFlight, pathMatchedWork);
   await feed(
     "work-item proposals attach",
     void 0,
-    () => attachWorkItemProposals(ctx, workInFlight)
+    () => attachWorkItemProposals(ctx, workInFlight, projectId)
   );
   let docPathMatches = 0;
   for (const d2 of pathDocs) {
@@ -64079,22 +64747,40 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   }
   const pathRecallMs = Date.now() - pathRecallStartedAt;
   let floorIncludedId = null;
-  if (included.length === 0) {
+  if (included.length === 0 && requiredCoreItems.length === 0 && pinnedIncluded.length === 0) {
     const floorCandidates = omittedCandidates.filter((o2) => o2.reason === "below_threshold" && o2.similarity >= RECALL_FLOOR).sort((a2, b2) => b2.similarity - a2.similarity).slice(0, 3);
     for (const best of floorCandidates) {
       if (floorIncludedId) break;
       try {
         const { data: row } = await ctx.supabase.from("documents").select(
-          `id, status, kind, title, path, updated_at, metadata,
+          `id, account_id, created_by, locked_to_owners, scope, project_id, status,
+             kind, title, path, updated_at, metadata,
              document_versions!documents_current_version_fk ( content, version_number, author_id )`
         ).eq("id", best.id).eq("account_id", ctx.accountId).eq("locked_to_owners", false).maybeSingle();
-        const floorMeta = (row?.metadata ?? {}).status;
-        const floorEligible = row != null && isEligibleForRecall({
-          status: row.status ?? null,
-          metadataStatus: floorMeta ?? null,
-          kind: best.kind
-        });
+        const floorEligible = row != null && row.id === best.id && isDirectResolverDocumentEligible(
+          row,
+          { accountId: ctx.accountId, userId: ctx.userId, projectId },
+          { expectedKind: best.kind }
+        );
         if (row && floorEligible) {
+          const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata) ? row.metadata : {};
+          if (best.kind === "skill" && !isSkillTargetedToAgent(metadata, audit.agentKind)) {
+            omittedCandidates.push({
+              ...best,
+              reason: "agent_target_mismatch",
+              detail: `recall-floor skill targets [${skillTargetAgents(metadata).join(", ")}], not agent ${audit.agentKind}`
+            });
+            continue;
+          }
+          const antiExample = best.kind === "skill" && !projectBrainPolicy.requiredChainIds.has(best.id) ? matchingSkillAntiExample(args.task, metadata) : null;
+          if (antiExample) {
+            omittedCandidates.push({
+              ...best,
+              reason: "anti_example_match",
+              detail: `recall-floor task high-precision matched skill anti-example: ${antiExample.slice(0, 240)}`
+            });
+            continue;
+          }
           const version4 = Array.isArray(row.document_versions) ? row.document_versions[0] : row.document_versions;
           const rawBody = version4?.content ?? "";
           included.push({
@@ -64135,6 +64821,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     decisions: included.filter((i2) => i2.kind === "decision"),
     brand_guidelines: brandGuidelines,
     claim_guardrails: claimGuardrails,
+    required_core: requiredCoreItems,
+    required_core_status: requiredCoreStatus,
     pinned: pinnedIncluded,
     architecture,
     concurrent_work: concurrentWork,
@@ -64205,14 +64893,17 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       });
       if (!threadErr && Array.isArray(threadRows)) {
         const taskLower = ` ${args.task.toLowerCase()} `;
-        const includedMemoryIds = new Set(bundle.memory.map((m2) => m2.id));
+        const higherPriorityIds = /* @__PURE__ */ new Set([
+          ...bundle.required_core.map((item) => item.id),
+          ...bundle.pinned.map((item) => item.id)
+        ]);
         const OPEN_THREADS_MAX = 5;
         const OPEN_THREADS_MAX_TOKENS = 1e3;
         let threadTokens = 0;
         for (const raw of threadRows) {
           if (bundle.open_threads.length >= OPEN_THREADS_MAX) break;
           const id = raw.id;
-          if (includedMemoryIds.has(id)) continue;
+          if (higherPriorityIds.has(id)) continue;
           const entities = Array.isArray(raw.entities) ? raw.entities.filter((e2) => typeof e2 === "string") : [];
           if (!args.entities || args.entities.length === 0) {
             const hit = entities.some((e2) => {
@@ -64227,6 +64918,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
             break;
           }
           threadTokens += tokens;
+          higherPriorityIds.add(id);
           bundle.open_threads.push({
             id,
             kind: "memory",
@@ -64253,8 +64945,25 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     } catch {
     }
   }
+  dedupeResolveBundleDocumentLanes(bundle);
+  const deliveredSemanticIds = /* @__PURE__ */ new Set([
+    ...bundle.primary_skill ? [bundle.primary_skill.id] : [],
+    ...bundle.supporting_skills.map((item) => item.id),
+    ...bundle.goals.map((item) => item.id),
+    ...bundle.decisions.map((item) => item.id),
+    ...bundle.schemas.map((item) => item.id),
+    ...bundle.memory.map((item) => item.id)
+  ]);
+  const snapshottedSemanticIds = /* @__PURE__ */ new Set();
+  const uniqueIncluded = included.filter((item) => {
+    if (!deliveredSemanticIds.has(item.id) || snapshottedSemanticIds.has(item.id)) return false;
+    snapshottedSemanticIds.add(item.id);
+    return true;
+  });
+  included.splice(0, included.length, ...uniqueIncluded);
   const decisionItems = [
     ...bundle.decisions,
+    ...bundle.required_core.filter((item) => item.kind === "decision"),
     ...bundle.pinned.filter((p2) => p2.kind === "decision")
   ];
   if (decisionItems.length > 0) {
@@ -64316,6 +65025,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     ...bundle.memory,
     ...bundle.schemas,
     ...bundle.goals,
+    ...bundle.required_core,
     ...bundle.pinned
   ];
   const contractBearing = enrichableItems.filter((d2) => hasMemlinContract(d2.body));
@@ -64371,6 +65081,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const resolvedAt = (/* @__PURE__ */ new Date()).toISOString();
   let auditId = "";
   const taskEmbedding = queryVec ?? null;
+  const deliveredItems = buildDeliveredItemSnapshots(bundle);
+  used = deliveredItems.reduce((total, item) => total + item.estimated_tokens, 0);
+  if (used > maxTokens) truncated = true;
   const itemSnapshot = included.map((i2, idx) => ({
     id: i2.id,
     kind: i2.kind,
@@ -64388,15 +65101,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     // to keep pre-existing audit rows byte-identical in shape.
     ...approvedColumnIds.has(i2.id) ? { approved: true } : {}
   }));
-  const contextCounts = {
-    memory: bundle.memory.length,
-    skills: supportingSkills.length + (primary ? 1 : 0),
-    goals: bundle.goals.length,
-    schemas: bundle.schemas.length,
-    decisions: bundle.decisions.length,
-    pinned: bundle.pinned.length,
-    total: bundle.memory.length + supportingSkills.length + (primary ? 1 : 0) + bundle.goals.length + bundle.schemas.length + bundle.decisions.length + bundle.pinned.length
-  };
+  const contextCounts = buildDeliveredContextCounts(deliveredItems);
   const empty_context_reason = contextCounts.total > 0 ? null : omittedCandidates.length > 0 ? "all_candidates_filtered" : "no_candidates_found";
   const auditMetadata = {
     task: args.task,
@@ -64476,6 +65181,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     agent_kind: audit.agentKind ?? null,
     agent_installation_id: audit.agentInstallationId ?? null,
     session_id: audit.sessionId ?? null,
+    // Canonical delivery receipt. Unlike legacy `items`, this includes every
+    // document-bearing lane and snapshots the exact delivered content.
+    delivered_items: deliveredItems,
     // New: full per-item snapshot drives audit replay.
     items: itemSnapshot,
     // Kept for backwards compat with existing audit timeline / billing
@@ -64486,6 +65194,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     memory_ids: bundle.memory.map((i2) => i2.id),
     goal_ids: bundle.goals.map((i2) => i2.id),
     schema_ids: bundle.schemas.map((i2) => i2.id),
+    required_core_ids: bundle.required_core.map((i2) => i2.id),
+    required_core_status: bundle.required_core_status,
+    required_core_tokens: requiredCoreTokens,
     pinned_ids: bundle.pinned.map((i2) => i2.id),
     pinned_tokens: pinnedTokens,
     excluded_ids: [...excluded],
@@ -64503,6 +65214,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       overrides: projectBrainPolicy.overridePairs
     },
     omitted_candidates_count: omittedCandidates.length,
+    omitted_candidates: omittedCandidates.slice(0, 40),
     empty_context_reason,
     brand_guidelines_id: brandGuidelines?.brand_guidelines_id ?? null,
     brand_guidelines_source: brandGuidelines?.source ?? null,
@@ -64526,6 +65238,10 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     rerank_used: rerankAuditScores !== null,
     rerank_scores: rerankAuditScores,
     rerank_latency_ms: rerankLatencyMs,
+    // Sticky skill-canary decisions. Identity values are never persisted;
+    // only the identity source, deterministic bucket, clamped ratio, and exact
+    // selected version are recorded for replay/experiment analysis.
+    canary_routing: canaryRoutingAudit,
     // Non-null when rerank was attempted but did NOT drive ranking (empty /
     // partial / errored). Surfaces the fail-open guard in prod so a spike in
     // 'rerank_empty'/'rerank_partial' is visible rather than a silent quality
@@ -64680,7 +65396,7 @@ async function assembleBrandGuidelines(ctx, args) {
   const { accountId, projectId } = args;
   let parentId = null;
   if (projectId) {
-    const { data: proj, error: error2 } = await ctx.supabase.from("projects").select("brand_guidelines_id").eq("id", projectId).maybeSingle();
+    const { data: proj, error: error2 } = await ctx.supabase.from("projects").select("brand_guidelines_id").eq("id", projectId).eq("account_id", accountId).maybeSingle();
     if (error2) {
       console.warn(`[resolver] brand-guidelines: project lookup failed: ${error2.message}`);
     } else if (proj) {
@@ -64698,12 +65414,26 @@ async function assembleBrandGuidelines(ctx, args) {
   let overrideId = null;
   let surfaceId = null;
   if (projectId) {
-    const { data: ovrRows, error: error2 } = await ctx.supabase.from("documents").select("id, component_id, metadata, updated_at").eq("project_id", projectId).eq("kind", "brand_guidelines");
+    const { data: ovrRows, error: error2 } = await ctx.supabase.from("documents").select(
+      "id, account_id, created_by, locked_to_owners, scope, project_id, status, kind, component_id, metadata, updated_at"
+    ).eq("account_id", accountId).eq("project_id", projectId).eq("kind", "brand_guidelines").eq("locked_to_owners", false);
     if (error2) {
       console.warn(`[resolver] brand-guidelines: override lookup failed: ${error2.message}`);
     } else {
       const live = (ovrRows ?? []).filter((row) => {
-        const meta = row.metadata;
+        const directRow = row;
+        if (!isDirectResolverDocumentEligible(
+          directRow,
+          { accountId, userId: ctx.userId, projectId },
+          {
+            lifecycle: "sql-live",
+            projectAssociation: "active-project",
+            expectedKind: "brand_guidelines"
+          }
+        )) {
+          return false;
+        }
+        const meta = directRow.metadata;
         const status = typeof meta?.status === "string" ? meta.status : "active";
         return !BRAND_DEAD_STATUSES.has(status);
       });
@@ -64720,9 +65450,10 @@ async function assembleBrandGuidelines(ctx, args) {
   if (!parentId && !overrideId && !surfaceId) return null;
   const ids = [parentId, overrideId, surfaceId].filter((x2) => x2 !== null);
   const { data: docRows, error: docErr } = await ctx.supabase.from("documents").select(
-    `id, updated_at,
+    `id, account_id, created_by, locked_to_owners, scope, project_id, status, kind,
+       metadata, updated_at,
        document_versions!documents_current_version_fk ( content )`
-  ).in("id", ids);
+  ).eq("account_id", accountId).eq("locked_to_owners", false).in("id", ids);
   if (docErr) {
     console.warn(`[resolver] brand-guidelines: document fetch failed: ${docErr.message}`);
     return null;
@@ -64730,6 +65461,20 @@ async function assembleBrandGuidelines(ctx, args) {
   const contentById = /* @__PURE__ */ new Map();
   for (const row of docRows ?? []) {
     const r2 = row;
+    if (!isDirectResolverDocumentEligible(
+      r2,
+      { accountId, userId: ctx.userId, projectId },
+      {
+        lifecycle: "sql-live",
+        projectAssociation: "account-or-active-project",
+        expectedKind: "brand_guidelines"
+      }
+    )) {
+      continue;
+    }
+    const metadata = r2.metadata ?? {};
+    const metadataStatus = typeof metadata.status === "string" ? metadata.status : "active";
+    if (BRAND_DEAD_STATUSES.has(metadataStatus)) continue;
     const v2 = Array.isArray(r2.document_versions) ? r2.document_versions[0] : r2.document_versions;
     contentById.set(r2.id, {
       content: v2?.content ?? "",
@@ -66622,7 +67367,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.30";
+  cachedAgentVersion = "0.1.31";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -67855,7 +68600,7 @@ function agentHeaders(accessToken, accountId) {
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.1.30",
+    "Memlin-Agent-Version": "0.1.31",
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -68061,7 +68806,7 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.1.30" },
+  { name: "memlin", version: "0.1.31" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

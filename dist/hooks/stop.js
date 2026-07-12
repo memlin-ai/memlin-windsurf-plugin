@@ -3960,7 +3960,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.30";
+  cachedAgentVersion = "0.1.31";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -4522,6 +4522,134 @@ function log(msg) {
   }
 }
 
+// packages/plugin-core/dist/outcome-attribution.js
+function normalizeReference(value) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+function replayAttributionCandidates(replay) {
+  const rawDelivered = replay.delivered_items;
+  const delivered = Array.isArray(rawDelivered) ? rawDelivered.map((item) => {
+    if (!item || typeof item !== "object") return null;
+    const row = item;
+    if (typeof row.document_id !== "string" || typeof row.title !== "string" || typeof row.version_number !== "number") {
+      return null;
+    }
+    return {
+      id: row.document_id,
+      title: row.title,
+      path: typeof row.path === "string" ? row.path : null,
+      version_number: row.version_number
+    };
+  }).filter((item) => item !== null) : [];
+  const candidates = Array.isArray(rawDelivered) && (rawDelivered.length === 0 || delivered.length > 0) ? delivered : [...replay.pinned ?? [], ...replay.items ?? []].map((item) => ({
+    id: item.id,
+    title: item.title,
+    path: item.path,
+    version_number: item.version_number
+  }));
+  return [...new Map(candidates.map((candidate) => [candidate.id, candidate])).values()];
+}
+function addReferenceKey(index, key, documentId) {
+  if (!key) return;
+  const ids = index.get(key) ?? /* @__PURE__ */ new Set();
+  ids.add(documentId);
+  index.set(key, ids);
+}
+var NEGATED_REFERENCE = /(?:\b(?:did not|didn't|never|without)\b|\b(?:not used|not applied|not followed|ignored|skipped)\b)[^.!?;]{0,64}$/i;
+function unnegatedReferencePositions(message, reference) {
+  if (!reference) return [];
+  const positions = [];
+  let offset = 0;
+  while (offset < message.length) {
+    const index = message.indexOf(reference, offset);
+    if (index < 0) break;
+    const before = index > 0 ? message[index - 1] : "";
+    const afterIndex = index + reference.length;
+    const after = afterIndex < message.length ? message[afterIndex] : "";
+    const bounded = !/[\p{L}\p{N}]/u.test(before ?? "") && !/[\p{L}\p{N}]/u.test(after ?? "");
+    const prefix = message.slice(Math.max(0, index - 80), index);
+    const suffix = message.slice(afterIndex, Math.min(message.length, afterIndex + 32));
+    const negatedAfter = /^\s*(?:was|were)?\s*(?:not used|not applied|not followed|ignored|skipped)\b/i.test(suffix);
+    if (bounded && !NEGATED_REFERENCE.test(prefix) && !negatedAfter) positions.push(index);
+    offset = index + Math.max(1, reference.length);
+  }
+  return positions;
+}
+function versionMentionNear(message, referencePosition, referenceLength, versionNumber) {
+  const window2 = message.slice(
+    Math.max(0, referencePosition - 40),
+    Math.min(message.length, referencePosition + referenceLength + 40)
+  );
+  return new RegExp(`(?:\\bv\\s*${versionNumber}\\b|\\bversion\\s*${versionNumber}\\b)`, "i").test(
+    window2
+  );
+}
+function titleReferenceIsExplicit(message, position, length) {
+  const before = message.slice(Math.max(0, position - 64), position);
+  const after = message.slice(position + length, Math.min(message.length, position + length + 40));
+  const opening = message[position - 1] ?? "";
+  const closing = message[position + length] ?? "";
+  const delimited = opening === "`" && closing === "`" || opening === '"' && closing === '"' || opening === "'" && closing === "'" || opening === "[" && closing === "]" || before.endsWith("**") && after.startsWith("**");
+  const appliedPrefix = /\b(?:used?|applied|followed|per|according to|based on|cited|referenced|consulted|from)\b[^.!?;]{0,48}$/i.test(
+    before
+  );
+  const referentialSuffix = /^\s*(?:skill|memory|rule|decision|schema)?\s*(?:says|requires|recommends|guided|informed)\b/i.test(
+    after
+  );
+  return delimited || appliedPrefix || referentialSuffix;
+}
+function attributeAppliedItems(agentMessage, replay) {
+  const candidates = replayAttributionCandidates(replay);
+  const message = normalizeReference(agentMessage);
+  const pathIds = /* @__PURE__ */ new Map();
+  const pathVersionIds = /* @__PURE__ */ new Map();
+  const titleIds = /* @__PURE__ */ new Map();
+  const titleVersionIds = /* @__PURE__ */ new Map();
+  for (const candidate of candidates) {
+    const path8 = candidate.path ? normalizeReference(candidate.path.replace(/^\.\//, "")) : "";
+    const title = normalizeReference(candidate.title);
+    addReferenceKey(pathIds, path8, candidate.id);
+    if (path8) {
+      addReferenceKey(pathVersionIds, `${path8}\0${candidate.version_number}`, candidate.id);
+    }
+    addReferenceKey(titleIds, title, candidate.id);
+    if (title) {
+      addReferenceKey(titleVersionIds, `${title}\0${candidate.version_number}`, candidate.id);
+    }
+  }
+  const applied = [];
+  for (const candidate of candidates) {
+    const path8 = candidate.path ? normalizeReference(candidate.path.replace(/^\.\//, "")) : "";
+    const title = normalizeReference(candidate.title);
+    const pathPositions = unnegatedReferencePositions(message, path8);
+    const pathVersionKey = `${path8}\0${candidate.version_number}`;
+    const pathIsUnique = pathIds.get(path8)?.size === 1;
+    const pathVersionIsUnique = pathVersionIds.get(pathVersionKey)?.size === 1;
+    const pathMatch = pathPositions.length > 0 && (pathIsUnique || pathVersionIsUnique && pathPositions.some(
+      (position) => versionMentionNear(message, position, path8.length, candidate.version_number)
+    ));
+    const titlePositions = unnegatedReferencePositions(message, title);
+    const titleVersionKey = `${title}\0${candidate.version_number}`;
+    const titleIsUnique = titleIds.get(title)?.size === 1;
+    const titleVersionIsUnique = titleVersionIds.get(titleVersionKey)?.size === 1;
+    const titleMatch = titlePositions.some((position) => {
+      const versioned = versionMentionNear(
+        message,
+        position,
+        title.length,
+        candidate.version_number
+      );
+      if (versioned && titleVersionIsUnique) return true;
+      return titleIsUnique && titleReferenceIsExplicit(message, position, title.length);
+    });
+    if (pathMatch || titleMatch) applied.push(candidate.id);
+  }
+  return {
+    applied_item_ids: applied,
+    attribution_mode: applied.length > 0 ? "explicit_final_message" : "no_explicit_reference"
+  };
+}
+
 // packages/plugin-core/dist/state.js
 import { promises as fs4 } from "node:fs";
 import path6 from "node:path";
@@ -4544,6 +4672,12 @@ async function writeState(state) {
   await fs4.rename(tmp, STATE_FILE);
 }
 var LOCK_DIR = `${STATE_FILE}.lock`;
+function getLastResolveForSession(state, sessionId) {
+  if (sessionId) {
+    return state.last_resolves?.[sessionId] ?? (state.last_resolve?.session_id === sessionId ? state.last_resolve : void 0);
+  }
+  return state.last_resolve?.session_id ? void 0 : state.last_resolve;
+}
 
 // packages/plugin-core/dist/project-resolver.js
 import { execSync } from "node:child_process";
@@ -8855,7 +8989,11 @@ var WriteDocumentInputSchema = external_exports.object({
   // Optional CRDT state from collaborative editors — base64-encoded Y.Doc
   // state-as-update. When present, restored on next load so reloads don't
   // lose in-flight collab edits.
-  yjs_state_b64: external_exports.string().nullable().optional()
+  yjs_state_b64: external_exports.string().nullable().optional(),
+  // Service-role automation may attribute a write to a specific account
+  // member. The database ignores this for non-service callers, preventing
+  // ordinary clients from spoofing authorship.
+  author_id: UUID.nullable().optional()
 });
 var DocumentPatchSchema = external_exports.object({
   document_id: UUID,
@@ -9264,6 +9402,7 @@ var MEMORABLE_AGENT_PATTERNS = [
 ];
 var MIN_MEMORABLE_CHARS = 60;
 var TIMEOUT_MS = 8e3;
+var OUTCOME_ATTRIBUTION_TIMEOUT_MS = 2500;
 function flattenContent(c) {
   if (typeof c === "string") return c;
   return c.map((b) => b.type === "text" ? b.text ?? "" : "").join("");
@@ -9403,9 +9542,12 @@ async function maybeProposeMemory(ctx, payload) {
 }
 async function maybeRecordOutcome(ctx, payload) {
   const state = await readState();
-  if (!state.last_resolve || !state.last_resolve.audit_id) return;
+  const transcriptSessionId = payload.transcript_path?.split("/").pop()?.replace(/\.jsonl$/, "");
+  const sessionId = payload.session_id ?? transcriptSessionId ?? null;
+  const lastResolve = getLastResolveForSession(state, sessionId);
+  if (!isResolveEligibleForOutcome(lastResolve)) return;
   const cwd = payload.cwd ?? process.cwd();
-  if (cwd !== state.last_resolve.cwd) return;
+  if (cwd !== lastResolve.cwd) return;
   if (!payload.transcript_path) return;
   const exchange = await readLastExchange(payload.transcript_path);
   if (!exchange) return;
@@ -9413,19 +9555,39 @@ async function maybeRecordOutcome(ctx, payload) {
   const a = exchange.agent_message;
   const isNegative = classifyNegativeFeedback(u).isNegative || hasAgentApology(a);
   const outcome = isNegative ? "negative" : "positive";
+  let attribution = {
+    applied_item_ids: [],
+    attribution_mode: "replay_unavailable"
+  };
+  try {
+    const replay = await withTimeout(
+      ctx.api.replayAudit(lastResolve.audit_id),
+      OUTCOME_ATTRIBUTION_TIMEOUT_MS,
+      null
+    );
+    if (replay) attribution = attributeAppliedItems(a, replay);
+  } catch (err) {
+    log(
+      `outcome attribution replay failed for audit ${lastResolve.audit_id}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
   try {
     await ctx.api.writeUsageEvent({
       event_type: "resolve.outcome",
       metadata: {
-        audit_id: state.last_resolve.audit_id,
-        outcome
+        audit_id: lastResolve.audit_id,
+        outcome,
+        applied_item_ids: attribution.applied_item_ids,
+        attribution_mode: attribution.attribution_mode
       }
     });
-    log(`recorded resolve.outcome: ${outcome} for audit ${state.last_resolve.audit_id}`);
+    log(
+      `recorded resolve.outcome: ${outcome} for audit ${lastResolve.audit_id} (${attribution.attribution_mode}, ${attribution.applied_item_ids.length} applied)`
+    );
     if (outcome === "negative") {
       const gitRemote = readGitRemote2(cwd);
       log(
-        `resolver outcome is negative; capturing correction rule for audit ${state.last_resolve.audit_id}...`
+        `resolver outcome is negative; capturing correction rule for audit ${lastResolve.audit_id}...`
       );
       try {
         const propose = ctx.api.proposeMemory({
@@ -9433,16 +9595,15 @@ async function maybeRecordOutcome(ctx, payload) {
           agent_message: exchange.agent_message,
           cwd,
           git_remote: gitRemote,
-          negative_outcome_audit_id: state.last_resolve.audit_id
+          negative_outcome_audit_id: lastResolve.audit_id
         });
         const res = await withTimeout(propose, TIMEOUT_MS, { ok: false, proposed: 0 });
         if (res.correction_rule) {
-          const sessionId = payload.transcript_path?.split("/").pop()?.replace(/\.jsonl$/, "") ?? "session";
           const next = await readState();
           next.correction_notice = {
             rule_title: res.correction_rule.title,
             document_id: res.correction_rule.document_id,
-            session_id: sessionId,
+            session_id: sessionId ?? "session",
             at: Date.now()
           };
           await writeState(next);
@@ -9457,6 +9618,9 @@ async function maybeRecordOutcome(ctx, payload) {
   } catch (err) {
     log(`failed to record resolve.outcome: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+function isResolveEligibleForOutcome(lastResolve) {
+  return Boolean(lastResolve?.audit_id) && lastResolve?.delivered !== false;
 }
 var SCRIBE_MIN_INTERVAL_MS = 5 * 60 * 1e3;
 var SCRIBE_MIN_GROWTH_CHARS = 1500;
@@ -9637,7 +9801,8 @@ async function main() {
   const input = await readHookInput();
   await runStopHandler({
     transcript_path: input?.transcript_path,
-    cwd: input?.cwd ?? input?.workspace_roots?.[0]
+    cwd: input?.cwd ?? input?.workspace_roots?.[0],
+    session_id: input?.session_id ?? input?.conversation_id
   });
   process.stdout.write("{}");
 }

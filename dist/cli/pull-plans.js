@@ -430,7 +430,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.30";
+  cachedAgentVersion = "0.1.31";
   return cachedAgentVersion;
 }
 function agentCapabilities() {

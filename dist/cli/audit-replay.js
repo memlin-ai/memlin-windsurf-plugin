@@ -396,7 +396,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.30";
+  cachedAgentVersion = "0.1.31";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -1028,6 +1028,84 @@ function argvAsSlashArgs() {
   return parseSlashArgs(raw);
 }
 
+// packages/plugin-core/src/audit-replay-renderer.ts
+var CLASSIFIED_REPLAY_LANES = /* @__PURE__ */ new Set([
+  "primary_skill",
+  "supporting_skill",
+  "goal",
+  "decision",
+  "schema",
+  "memory",
+  "required",
+  "pinned"
+]);
+function auditReplaySourceLaneLabel(sourceLane) {
+  const labels = {
+    open_thread: "OPEN THREAD",
+    pack_context: "SUBSCRIBED PACK CONTEXT",
+    claim_guardrail_approved: "APPROVED CLAIM",
+    claim_guardrail_blocked: "BLOCKED CLAIM \u2014 DO NOT SAY",
+    claim_guardrail_competitor_fact: "COMPETITOR FACT"
+  };
+  return labels[sourceLane] ?? (sourceLane || "supplemental").replace(/_/g, " ").toUpperCase();
+}
+function receiptToReplayItem(item) {
+  return {
+    id: item.document_id,
+    kind: item.kind,
+    rank: item.lane_rank,
+    similarity: item.similarity,
+    version_number: item.version_number,
+    path: item.path,
+    role: item.kind,
+    component_id: item.component_id,
+    component_name: item.component_name,
+    title: item.title,
+    content: item.content,
+    author_id: item.author_id,
+    source_lane: item.source_lane,
+    delivery_role: item.role,
+    inclusion_reason: item.inclusion_reason,
+    estimated_tokens: item.estimated_tokens,
+    repo: item.repo,
+    drift: item.drift
+  };
+}
+function supplementalItemsForReplay(replay) {
+  if (Array.isArray(replay.supplemental_context)) return replay.supplemental_context;
+  if (!Array.isArray(replay.delivered_items)) return [];
+  return replay.delivered_items.filter((item) => !CLASSIFIED_REPLAY_LANES.has(item.source_lane)).map(receiptToReplayItem);
+}
+function driftVersion(item) {
+  if (!item.drift.drifted) return `v${item.version_number}`;
+  const head = item.drift.current_version_number;
+  return head == null ? `v${item.version_number} (drift)` : `v${item.version_number} (head is now v${head} \u2014 drift)`;
+}
+function renderAuditSupplementalContext(items) {
+  if (items.length === 0) return "";
+  const lines = [
+    "## SUPPLEMENTAL CONTEXT (exact receipt-only resolver lanes)",
+    "# Non-semantic context delivered by resolver feeds outside required core and user pins.",
+    ""
+  ];
+  for (const item of items) {
+    const sourceLane = item.source_lane ?? "supplemental";
+    lines.push(`### ${auditReplaySourceLaneLabel(sourceLane)}: ${item.title}`);
+    lines.push(
+      `# source-lane: ${sourceLane} \xB7 ${item.path ?? "(no path)"} \xB7 ${driftVersion(item)}`
+    );
+    if (item.inclusion_reason || item.delivery_role) {
+      lines.push(
+        `# delivery: ${item.inclusion_reason ?? "(unspecified)"}${item.delivery_role ? ` \xB7 role: ${item.delivery_role}` : ""}`
+      );
+    }
+    lines.push("");
+    lines.push(item.content.trimEnd());
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
 // packages/plugin-core/src/cli/audit-replay.ts
 function parseArgs(argv) {
   const positional = [];
@@ -1108,6 +1186,7 @@ async function main() {
     console.error(`memlin audit replay failed: ${msg}`);
     process.exit(1);
   }
+  const supplementalContext = supplementalItemsForReplay(replay);
   const out = [];
   out.push(`# Memlin Audit Replay \u2014 resolved ${replay.resolved_at}`);
   out.push(`# audit_id: ${replay.audit_id}`);
@@ -1136,6 +1215,14 @@ async function main() {
       '#   See per-item "head is now vN" annotations below.'
     );
   }
+  if (replay.required_core_status && !replay.required_core_status.complete) {
+    const required = replay.required_core_status;
+    out.push(
+      "# REQUIRED CORE DEGRADED \u2014 mandatory context was incomplete at resolve time.",
+      `#   missing: ${required.missing_ids.join(", ") || "(none listed)"}`,
+      ...required.errors.map((error) => `#   error: ${error}`)
+    );
+  }
   out.push("");
   if (replay.brand_guidelines) {
     const bg = replay.brand_guidelines;
@@ -1143,6 +1230,14 @@ async function main() {
     const cite = `brand-guidelines://${bg.id} \xB7 ${bg.updated_at_at_resolve ?? "(unknown)"}` + (bg.drifted ? ` \xB7 DRIFT (current updated_at: ${bg.current_updated_at})` : "");
     out.push(`# source: ${cite}`);
     out.push("");
+  }
+  if (replay.required_core && replay.required_core.length > 0) {
+    out.push("## REQUIRED CORE (mandatory at resolve time)");
+    out.push("# Governance-required context delivered regardless of similarity or token cap.");
+    out.push("");
+    for (const item of replay.required_core) {
+      out.push(renderItem(item));
+    }
   }
   if (replay.pinned && replay.pinned.length > 0) {
     out.push("## STANDING DIRECTIVES (pinned at resolve time)");
@@ -1152,7 +1247,10 @@ async function main() {
       out.push(renderItem(item));
     }
   }
-  if (replay.items.length === 0) {
+  if (supplementalContext.length > 0) {
+    out.push(renderAuditSupplementalContext(supplementalContext));
+  }
+  if (replay.items.length === 0 && (!replay.required_core || replay.required_core.length === 0) && (!replay.pinned || replay.pinned.length === 0) && supplementalContext.length === 0) {
     out.push("# (no items above threshold at resolve time)");
   } else {
     for (const item of replay.items) {

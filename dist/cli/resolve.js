@@ -3945,7 +3945,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.30";
+  cachedAgentVersion = "0.1.31";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -4601,6 +4601,7 @@ import path7 from "node:path";
 import os6 from "node:os";
 import crypto from "node:crypto";
 var STATE_FILE = path7.join(os6.homedir(), ".config", "memlin", "state.json");
+var MAX_LAST_RESOLVE_SESSIONS = 32;
 var EMPTY = { documents: {} };
 async function readState() {
   try {
@@ -4657,10 +4658,21 @@ async function updateState(mutate) {
     if (locked) await releaseStateLock();
   }
 }
+function cacheLastResolve(state, entry) {
+  state.last_resolve = entry;
+  if (!entry.session_id) return;
+  state.last_resolves ??= {};
+  state.last_resolves[entry.session_id] = entry;
+  const entries = Object.entries(state.last_resolves);
+  if (entries.length <= MAX_LAST_RESOLVE_SESSIONS) return;
+  entries.sort(([, a], [, b]) => b.resolved_at - a.resolved_at).slice(MAX_LAST_RESOLVE_SESSIONS).forEach(([sessionId]) => {
+    delete state.last_resolves?.[sessionId];
+  });
+}
 async function recordLastResolve(entry) {
   try {
     await updateState((state) => {
-      state.last_resolve = entry;
+      cacheLastResolve(state, entry);
     });
   } catch {
   }
@@ -4681,6 +4693,13 @@ async function writePendingBundle(bundle) {
   const tmp = `${file}.${process.pid}.tmp`;
   await fs5.writeFile(tmp, JSON.stringify(bundle), "utf8");
   await fs5.rename(tmp, file);
+}
+
+// packages/plugin-core/src/continuity.ts
+var CONTINUITY_WINDOW_MS = 10 * 60 * 1e3;
+function bundleHasContinuityContent(bundle) {
+  const claims = bundle.claim_guardrails;
+  return Boolean(bundle.primary_skill) || bundle.supporting_skills.length > 0 || bundle.memory.length > 0 || bundle.goals.length > 0 || bundle.schemas.length > 0 || (bundle.decisions?.length ?? 0) > 0 || (bundle.required_core?.length ?? 0) > 0 || (bundle.pinned?.length ?? 0) > 0 || (bundle.open_threads?.length ?? 0) > 0 || (bundle.pack_context?.length ?? 0) > 0 || (claims?.approved.length ?? 0) > 0 || (claims?.blocked.length ?? 0) > 0 || (claims?.competitor_facts.length ?? 0) > 0;
 }
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
@@ -8870,7 +8889,11 @@ var WriteDocumentInputSchema = external_exports.object({
   // Optional CRDT state from collaborative editors — base64-encoded Y.Doc
   // state-as-update. When present, restored on next load so reloads don't
   // lose in-flight collab edits.
-  yjs_state_b64: external_exports.string().nullable().optional()
+  yjs_state_b64: external_exports.string().nullable().optional(),
+  // Service-role automation may attribute a write to a specific account
+  // member. The database ignores this for non-service callers, preventing
+  // ordinary clients from spoofing authorship.
+  author_id: UUID.nullable().optional()
 });
 var DocumentPatchSchema = external_exports.object({
   document_id: UUID,
@@ -9330,6 +9353,81 @@ function renderPinned(items) {
   }
   return lines.join("\n");
 }
+function hasRequiredCoreLane(bundle) {
+  return (bundle.required_core?.length ?? 0) > 0 || (bundle.required_core_status?.expected_ids.length ?? 0) > 0 || bundle.required_core_status?.complete === false;
+}
+function renderRequiredCore(items, status) {
+  const lines = [];
+  lines.push("## REQUIRED CORE (mandatory governance-required context \u2014 obey these)");
+  lines.push("# Deterministically included by workspace governance, not selected by similarity");
+  lines.push("# and not equivalent to a user pin. These requirements outrank retrieved context.");
+  if (status) {
+    lines.push(
+      `# delivery receipt: ${status.delivered_ids.length}/${status.expected_ids.length} required item(s) delivered`
+    );
+  }
+  if (status?.complete === false) {
+    lines.push("# !!! REQUIRED CORE DEGRADED \u2014 MANDATORY GOVERNANCE CONTEXT IS INCOMPLETE !!!");
+    lines.push("# STOP: do not claim governance compliance or proceed as if the full core was read.");
+    lines.push(`# missing required IDs: ${status.missing_ids.join(", ") || "(none reported)"}`);
+    lines.push(`# resolver errors: ${status.errors.join(" | ") || "(none reported)"}`);
+    lines.push("# Re-resolve or surface this degraded state before governed work continues.");
+  }
+  lines.push("");
+  for (const item of items) {
+    lines.push(`### [${item.kind.toUpperCase()}] ${item.title}`);
+    lines.push(`# source: ${formatCitation(item)} \xB7 required-core \xB7 governance-required`);
+    lines.push("");
+    lines.push(item.body.trimEnd());
+    lines.push("");
+  }
+  if (items.length === 0) {
+    lines.push("# (no required-core documents were delivered)");
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+function renderRequiredCoreXml(items, status) {
+  const lines = [];
+  const complete = status ? String(status.complete) : "unknown";
+  const expected = status?.expected_ids.length ?? items.length;
+  const delivered = status?.delivered_ids.length ?? items.length;
+  lines.push(
+    `  <required_core mandatory="true" governance_required="true" complete="${complete}" expected_count="${expected}" delivered_count="${delivered}">`
+  );
+  if (status?.complete === false) {
+    lines.push('    <degraded_warning severity="critical">');
+    lines.push(
+      "      REQUIRED CORE DEGRADED: mandatory governance context is incomplete. Do not claim governance compliance or proceed as if the full core was read."
+    );
+    if (status.missing_ids.length > 0) {
+      lines.push("      <missing_ids>");
+      for (const id of status.missing_ids) lines.push(`        <id>${xmlText(id)}</id>`);
+      lines.push("      </missing_ids>");
+    } else {
+      lines.push('      <missing_ids none_reported="true" />');
+    }
+    if (status.errors.length > 0) {
+      lines.push("      <errors>");
+      for (const error of status.errors) lines.push(`        <error>${xmlText(error)}</error>`);
+      lines.push("      </errors>");
+    } else {
+      lines.push('      <errors none_reported="true" />');
+    }
+    lines.push("    </degraded_warning>");
+  }
+  for (const item of items) {
+    lines.push(
+      renderItemXml("required_item", item, {
+        kind: item.kind,
+        mandatory: "true",
+        inclusion: "governance-required"
+      })
+    );
+  }
+  lines.push("  </required_core>");
+  return lines;
+}
 function bundleSummary(r) {
   const b = r.bundle;
   const totalSkills = (b.primary_skill ? 1 : 0) + b.supporting_skills.length;
@@ -9342,6 +9440,15 @@ function bundleSummary(r) {
   pieces.push(`${b.schemas.length} ${b.schemas.length === 1 ? "schema" : "schemas"}`);
   const decisionCount = b.decisions?.length ?? 0;
   pieces.push(`${decisionCount} ${decisionCount === 1 ? "decision" : "decisions"}`);
+  const requiredCoreCount = b.required_core?.length ?? 0;
+  if (hasRequiredCoreLane(b)) {
+    const status = b.required_core_status;
+    const errorCount = status?.errors.length ?? 0;
+    const delivery = status?.complete === false ? ` (INCOMPLETE: ${status.missing_ids.length} missing, ${errorCount} ${errorCount === 1 ? "error" : "errors"})` : status?.complete === true ? " (complete)" : "";
+    pieces.push(
+      `${requiredCoreCount} required-core ${requiredCoreCount === 1 ? "item" : "items"}${delivery}`
+    );
+  }
   const pinnedCount = b.pinned?.length ?? 0;
   if (pinnedCount > 0) {
     pieces.push(`${pinnedCount} pinned`);
@@ -9380,6 +9487,9 @@ function truncateTask(task) {
 function xmlAttr(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 }
+function xmlText(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+}
 function attribution(e) {
   if (e.same_user) return "your other session \xB7 ";
   const bits = [];
@@ -9396,12 +9506,58 @@ function compileBundle(result, parsedTask, agent) {
     if (result.active_component) {
       out.push(`  <active_component name="${result.active_component.name}" boost="0.15" />`);
     }
+    if (hasRequiredCoreLane(b)) {
+      out.push(...renderRequiredCoreXml(b.required_core ?? [], b.required_core_status));
+    }
     if (b.pinned && b.pinned.length > 0) {
       out.push("  <standing_directives>");
       for (const item of b.pinned) {
         out.push(renderItemXml("directive", item, { kind: item.kind }));
       }
       out.push("  </standing_directives>");
+    }
+    const openThreads = b.open_threads ?? [];
+    if (openThreads.length > 0) {
+      out.push('  <open_threads recall="entity-and-status" similarity_bypass="true">');
+      for (const item of openThreads) {
+        out.push(
+          renderItemXml("open_thread", item, {
+            status: item.thread?.status ?? "open",
+            occurred_at: xmlAttr(item.thread?.occurred_at ?? ""),
+            entities: xmlAttr(item.thread?.entities.join(", ") ?? "")
+          })
+        );
+      }
+      out.push("  </open_threads>");
+    }
+    const packContext = b.pack_context ?? [];
+    if (packContext.length > 0) {
+      out.push('  <pack_context read_only="true" publisher_attributed="true">');
+      for (const item of packContext) {
+        out.push(
+          renderItemXml("pack_item", item, {
+            kind: item.kind,
+            pack_slug: xmlAttr(item.pack?.slug ?? ""),
+            pack_name: xmlAttr(item.pack?.name ?? ""),
+            pack_version: String(item.pack?.version ?? ""),
+            publisher: xmlAttr(item.pack?.publisher_name ?? "")
+          })
+        );
+      }
+      out.push("  </pack_context>");
+    }
+    if (b.claim_guardrails) {
+      out.push("  <claim_guardrails>");
+      for (const item of b.claim_guardrails.approved) {
+        out.push(renderItemXml("approved_claim", item));
+      }
+      for (const item of b.claim_guardrails.blocked) {
+        out.push(renderItemXml("blocked_claim", item, { prohibited: "true" }));
+      }
+      for (const item of b.claim_guardrails.competitor_facts) {
+        out.push(renderItemXml("competitor_fact", item));
+      }
+      out.push("  </claim_guardrails>");
     }
     if (b.architecture) {
       out.push("  <architecture>");
@@ -9505,6 +9661,9 @@ function compileBundle(result, parsedTask, agent) {
     out.push(tokenLine);
     out.push(`# ${READER_CONTRACT}`);
     out.push("");
+    if (hasRequiredCoreLane(b)) {
+      out.push(renderRequiredCore(b.required_core ?? [], b.required_core_status));
+    }
     if (b.pinned && b.pinned.length > 0) {
       out.push(renderPinned(b.pinned));
     }
@@ -9919,7 +10078,7 @@ async function main() {
     }
   }
   if (result.audit_id) {
-    const bundleHasContent = Boolean(result.bundle.primary_skill) || result.bundle.supporting_skills.length > 0 || result.bundle.memory.length > 0 || result.bundle.goals.length > 0 || result.bundle.schemas.length > 0 || (result.bundle.decisions?.length ?? 0) > 0 || (result.bundle.pinned?.length ?? 0) > 0;
+    const bundleHasContent = bundleHasContinuityContent(result.bundle);
     await recordLastResolve({
       task: parsed.task,
       audit_id: result.audit_id,
