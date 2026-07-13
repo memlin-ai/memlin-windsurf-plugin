@@ -1204,11 +1204,12 @@ function resolveApiUrl() {
 
 // packages/plugin-core/src/workspace-binding.ts
 import { randomUUID } from "node:crypto";
-import { promises as fs4 } from "node:fs";
+import { constants, promises as fs4 } from "node:fs";
 import path7 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
 var WORKSPACE_BINDING_FILE = "config.json";
-async function findWorkspaceBinding(startDir) {
+var GIT_POINTER_MAX_BYTES = 8 * 1024;
+async function walkForWorkspaceBinding(startDir) {
   let dir = path7.resolve(startDir);
   for (let i = 0; i < 64; i++) {
     const candidate = path7.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
@@ -1232,6 +1233,172 @@ async function findWorkspaceBinding(startDir) {
     dir = parent;
   }
   return null;
+}
+async function readSmallRegularFile(file) {
+  let before;
+  try {
+    before = await fs4.lstat(file);
+  } catch (error) {
+    return isFileNotFound(error) ? { kind: "missing" } : { kind: "invalid" };
+  }
+  try {
+    if (before.isSymbolicLink() || !before.isFile() || before.size > GIT_POINTER_MAX_BYTES) {
+      return { kind: "invalid" };
+    }
+    const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+    const handle = await fs4.open(file, constants.O_RDONLY | noFollow);
+    try {
+      const opened = await handle.stat();
+      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size || opened.size > GIT_POINTER_MAX_BYTES) {
+        return { kind: "invalid" };
+      }
+      const bytes = await handle.readFile();
+      const [after, afterPath] = await Promise.all([handle.stat(), fs4.lstat(file)]);
+      if (afterPath.isSymbolicLink() || !afterPath.isFile() || after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size || bytes.byteLength !== opened.size || bytes.includes(0)) {
+        return { kind: "invalid" };
+      }
+      return { kind: "ok", value: bytes.toString("utf8") };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return { kind: "invalid" };
+  }
+}
+function containedBy(parent, child) {
+  const relative = path7.relative(parent, child);
+  return relative === "" || relative !== ".." && !relative.startsWith(`..${path7.sep}`) && !path7.isAbsolute(relative);
+}
+async function canonicalSafeDirectory(candidate) {
+  try {
+    const before = await fs4.lstat(candidate);
+    if (before.isSymbolicLink() || !before.isDirectory()) return null;
+    await fs4.access(candidate, constants.R_OK | constants.X_OK);
+    const canonical = await fs4.realpath(candidate);
+    const after = await fs4.lstat(candidate);
+    if (after.isSymbolicLink() || !after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) {
+      return null;
+    }
+    return canonical;
+  } catch {
+    return null;
+  }
+}
+function gitIdentity(checkoutRoot, state, repositoryRoot = checkoutRoot) {
+  return {
+    checkout_root: checkoutRoot,
+    repository_root: repositoryRoot,
+    state
+  };
+}
+async function resolveGitWorkspaceIdentity(startDir) {
+  const requested = path7.resolve(startDir);
+  let canonicalStart;
+  try {
+    canonicalStart = await fs4.realpath(requested);
+    const startEntry = await fs4.stat(canonicalStart);
+    if (!startEntry.isDirectory()) return gitIdentity(canonicalStart, "unknown");
+  } catch {
+    return gitIdentity(requested, "unknown");
+  }
+  let dir = canonicalStart;
+  for (let i = 0; i < 64; i++) {
+    const gitEntry = path7.join(dir, ".git");
+    let entry;
+    try {
+      entry = await fs4.lstat(gitEntry);
+    } catch (error) {
+      if (!isFileNotFound(error)) return gitIdentity(dir, "unknown");
+      const parent = path7.dirname(dir);
+      if (parent === dir) return gitIdentity(canonicalStart, "none");
+      dir = parent;
+      continue;
+    }
+    const checkoutRoot = dir;
+    if (entry.isSymbolicLink()) return gitIdentity(checkoutRoot, "unknown");
+    if (entry.isDirectory()) {
+      if (!await canonicalSafeDirectory(gitEntry)) return gitIdentity(checkoutRoot, "unknown");
+      return gitIdentity(checkoutRoot, "main");
+    }
+    if (!entry.isFile()) return gitIdentity(checkoutRoot, "unknown");
+    const pointerRead = await readSmallRegularFile(gitEntry);
+    if (pointerRead.kind !== "ok" || pointerRead.value.includes("\0")) {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const pointerMatch = /^gitdir:[ \t]*([^\r\n]+)\r?\n?$/.exec(pointerRead.value);
+    const pointerValue = pointerMatch?.[1];
+    if (!pointerValue) return gitIdentity(checkoutRoot, "unknown");
+    let gitDirCandidate;
+    try {
+      gitDirCandidate = path7.isAbsolute(pointerValue) ? pointerValue : path7.resolve(checkoutRoot, pointerValue);
+    } catch {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const gitDir = await canonicalSafeDirectory(gitDirCandidate);
+    if (!gitDir) return gitIdentity(checkoutRoot, "unknown");
+    const commonRead = await readSmallRegularFile(path7.join(gitDir, "commondir"));
+    if (commonRead.kind === "missing") {
+      const gitDirParent = path7.dirname(gitDir);
+      const looksLikeWorktreeAdmin = path7.basename(gitDirParent) === "worktrees" && path7.basename(path7.dirname(gitDirParent)) === ".git";
+      if (looksLikeWorktreeAdmin) return gitIdentity(checkoutRoot, "unknown");
+      return gitIdentity(checkoutRoot, "main");
+    }
+    if (commonRead.kind !== "ok" || commonRead.value.includes("\0")) {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const commonMatch = /^([^\r\n]+)\r?\n?$/.exec(commonRead.value);
+    const commonValue = commonMatch?.[1];
+    if (!commonValue) return gitIdentity(checkoutRoot, "unknown");
+    let commonCandidate;
+    try {
+      commonCandidate = path7.isAbsolute(commonValue) ? commonValue : path7.resolve(gitDir, commonValue);
+    } catch {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const commonDir = await canonicalSafeDirectory(commonCandidate);
+    if (!commonDir) return gitIdentity(checkoutRoot, "unknown");
+    const worktreesDir = path7.join(commonDir, "worktrees");
+    if (path7.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const repositoryRoot = path7.dirname(commonDir);
+    const repositoryGitDir = await canonicalSafeDirectory(path7.join(repositoryRoot, ".git"));
+    if (!repositoryGitDir || repositoryGitDir !== commonDir) {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const reverseRead = await readSmallRegularFile(path7.join(gitDir, "gitdir"));
+    if (reverseRead.kind !== "ok" || reverseRead.value.includes("\0")) {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const reverseMatch = /^([^\r\n]+)\r?\n?$/.exec(reverseRead.value);
+    const reverseValue = reverseMatch?.[1];
+    if (!reverseValue) return gitIdentity(checkoutRoot, "unknown");
+    try {
+      const reverseCandidate = path7.isAbsolute(reverseValue) ? reverseValue : path7.resolve(gitDir, reverseValue);
+      const [reverseTarget, checkoutGitFile] = await Promise.all([
+        fs4.realpath(reverseCandidate),
+        fs4.realpath(gitEntry)
+      ]);
+      if (reverseTarget !== checkoutGitFile) return gitIdentity(checkoutRoot, "unknown");
+    } catch {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    return gitIdentity(checkoutRoot, "worktree", repositoryRoot);
+  }
+  return gitIdentity(canonicalStart, "unknown");
+}
+async function findWorkspaceBinding(startDir) {
+  const direct = await walkForWorkspaceBinding(startDir);
+  const gitIdentity2 = await resolveGitWorkspaceIdentity(startDir);
+  if (gitIdentity2.state !== "worktree") return direct;
+  if (direct) {
+    const bindingRoot = await fs4.realpath(direct.workspaceRoot).catch(() => path7.resolve(direct.workspaceRoot));
+    if (containedBy(gitIdentity2.checkout_root, bindingRoot)) return direct;
+  }
+  return walkForWorkspaceBinding(gitIdentity2.repository_root);
+}
+function isFileNotFound(error) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 // packages/plugin-core/src/client.ts

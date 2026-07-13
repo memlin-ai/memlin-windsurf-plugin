@@ -420,11 +420,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants);
+          this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -441,10 +441,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants);
+        this.rhs = optimizeExpr(this.rhs, names, constants2);
         return this;
       }
       get names() {
@@ -505,8 +505,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants) {
-        this.code = optimizeExpr(this.code, names, constants);
+      optimizeNames(names, constants2) {
+        this.code = optimizeExpr(this.code, names, constants2);
         return this;
       }
       get names() {
@@ -535,12 +535,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         const { nodes } = this;
         let i2 = nodes.length;
         while (i2--) {
           const n2 = nodes[i2];
-          if (n2.optimizeNames(names, constants))
+          if (n2.optimizeNames(names, constants2))
             continue;
           subtractNames(names, n2.names);
           nodes.splice(i2, 1);
@@ -593,12 +593,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a2;
-        this.else = (_a2 = this.else) === null || _a2 === void 0 ? void 0 : _a2.optimizeNames(names, constants);
-        if (!(super.optimizeNames(names, constants) || this.else))
+        this.else = (_a2 = this.else) === null || _a2 === void 0 ? void 0 : _a2.optimizeNames(names, constants2);
+        if (!(super.optimizeNames(names, constants2) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants);
+        this.condition = optimizeExpr(this.condition, names, constants2);
         return this;
       }
       get names() {
@@ -621,10 +621,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants);
+        this.iteration = optimizeExpr(this.iteration, names, constants2);
         return this;
       }
       get names() {
@@ -660,10 +660,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants) {
-        if (!super.optimizeNames(names, constants))
+      optimizeNames(names, constants2) {
+        if (!super.optimizeNames(names, constants2))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants);
+        this.iterable = optimizeExpr(this.iterable, names, constants2);
         return this;
       }
       get names() {
@@ -705,11 +705,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants) {
+      optimizeNames(names, constants2) {
         var _a2, _b;
-        super.optimizeNames(names, constants);
-        (_a2 = this.catch) === null || _a2 === void 0 ? void 0 : _a2.optimizeNames(names, constants);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants);
+        super.optimizeNames(names, constants2);
+        (_a2 = this.catch) === null || _a2 === void 0 ? void 0 : _a2.optimizeNames(names, constants2);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants2);
         return this;
       }
       get names() {
@@ -1010,7 +1010,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants) {
+    function optimizeExpr(expr, names, constants2) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -1025,14 +1025,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n2) {
-        const c2 = constants[n2.str];
+        const c2 = constants2[n2.str];
         if (c2 === void 0 || names[n2.str] !== 1)
           return n2;
         delete names[n2.str];
         return c2;
       }
       function canOptimize(e2) {
-        return e2 instanceof code_1._Code && e2._items.some((c2) => c2 instanceof code_1.Name && names[c2.str] === 1 && constants[c2.str] !== void 0);
+        return e2 instanceof code_1._Code && e2._items.some((c2) => c2 instanceof code_1.Name && names[c2.str] === 1 && constants2[c2.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -67882,11 +67882,12 @@ function resolveApiUrl() {
 
 // packages/plugin-core/dist/workspace-binding.js
 import { randomUUID } from "node:crypto";
-import { promises as fs3 } from "node:fs";
+import { constants, promises as fs3 } from "node:fs";
 import path4 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
 var WORKSPACE_BINDING_FILE = "config.json";
-async function findWorkspaceBinding(startDir) {
+var GIT_POINTER_MAX_BYTES = 8 * 1024;
+async function walkForWorkspaceBinding(startDir) {
   let dir = path4.resolve(startDir);
   for (let i2 = 0; i2 < 64; i2++) {
     const candidate = path4.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
@@ -67910,6 +67911,172 @@ async function findWorkspaceBinding(startDir) {
     dir = parent;
   }
   return null;
+}
+async function readSmallRegularFile(file) {
+  let before;
+  try {
+    before = await fs3.lstat(file);
+  } catch (error2) {
+    return isFileNotFound(error2) ? { kind: "missing" } : { kind: "invalid" };
+  }
+  try {
+    if (before.isSymbolicLink() || !before.isFile() || before.size > GIT_POINTER_MAX_BYTES) {
+      return { kind: "invalid" };
+    }
+    const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+    const handle = await fs3.open(file, constants.O_RDONLY | noFollow);
+    try {
+      const opened = await handle.stat();
+      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size || opened.size > GIT_POINTER_MAX_BYTES) {
+        return { kind: "invalid" };
+      }
+      const bytes = await handle.readFile();
+      const [after, afterPath] = await Promise.all([handle.stat(), fs3.lstat(file)]);
+      if (afterPath.isSymbolicLink() || !afterPath.isFile() || after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size || bytes.byteLength !== opened.size || bytes.includes(0)) {
+        return { kind: "invalid" };
+      }
+      return { kind: "ok", value: bytes.toString("utf8") };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return { kind: "invalid" };
+  }
+}
+function containedBy(parent, child) {
+  const relative = path4.relative(parent, child);
+  return relative === "" || relative !== ".." && !relative.startsWith(`..${path4.sep}`) && !path4.isAbsolute(relative);
+}
+async function canonicalSafeDirectory(candidate) {
+  try {
+    const before = await fs3.lstat(candidate);
+    if (before.isSymbolicLink() || !before.isDirectory()) return null;
+    await fs3.access(candidate, constants.R_OK | constants.X_OK);
+    const canonical = await fs3.realpath(candidate);
+    const after = await fs3.lstat(candidate);
+    if (after.isSymbolicLink() || !after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) {
+      return null;
+    }
+    return canonical;
+  } catch {
+    return null;
+  }
+}
+function gitIdentity(checkoutRoot, state, repositoryRoot = checkoutRoot) {
+  return {
+    checkout_root: checkoutRoot,
+    repository_root: repositoryRoot,
+    state
+  };
+}
+async function resolveGitWorkspaceIdentity(startDir) {
+  const requested = path4.resolve(startDir);
+  let canonicalStart;
+  try {
+    canonicalStart = await fs3.realpath(requested);
+    const startEntry = await fs3.stat(canonicalStart);
+    if (!startEntry.isDirectory()) return gitIdentity(canonicalStart, "unknown");
+  } catch {
+    return gitIdentity(requested, "unknown");
+  }
+  let dir = canonicalStart;
+  for (let i2 = 0; i2 < 64; i2++) {
+    const gitEntry = path4.join(dir, ".git");
+    let entry;
+    try {
+      entry = await fs3.lstat(gitEntry);
+    } catch (error2) {
+      if (!isFileNotFound(error2)) return gitIdentity(dir, "unknown");
+      const parent = path4.dirname(dir);
+      if (parent === dir) return gitIdentity(canonicalStart, "none");
+      dir = parent;
+      continue;
+    }
+    const checkoutRoot = dir;
+    if (entry.isSymbolicLink()) return gitIdentity(checkoutRoot, "unknown");
+    if (entry.isDirectory()) {
+      if (!await canonicalSafeDirectory(gitEntry)) return gitIdentity(checkoutRoot, "unknown");
+      return gitIdentity(checkoutRoot, "main");
+    }
+    if (!entry.isFile()) return gitIdentity(checkoutRoot, "unknown");
+    const pointerRead = await readSmallRegularFile(gitEntry);
+    if (pointerRead.kind !== "ok" || pointerRead.value.includes("\0")) {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const pointerMatch = /^gitdir:[ \t]*([^\r\n]+)\r?\n?$/.exec(pointerRead.value);
+    const pointerValue = pointerMatch?.[1];
+    if (!pointerValue) return gitIdentity(checkoutRoot, "unknown");
+    let gitDirCandidate;
+    try {
+      gitDirCandidate = path4.isAbsolute(pointerValue) ? pointerValue : path4.resolve(checkoutRoot, pointerValue);
+    } catch {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const gitDir = await canonicalSafeDirectory(gitDirCandidate);
+    if (!gitDir) return gitIdentity(checkoutRoot, "unknown");
+    const commonRead = await readSmallRegularFile(path4.join(gitDir, "commondir"));
+    if (commonRead.kind === "missing") {
+      const gitDirParent = path4.dirname(gitDir);
+      const looksLikeWorktreeAdmin = path4.basename(gitDirParent) === "worktrees" && path4.basename(path4.dirname(gitDirParent)) === ".git";
+      if (looksLikeWorktreeAdmin) return gitIdentity(checkoutRoot, "unknown");
+      return gitIdentity(checkoutRoot, "main");
+    }
+    if (commonRead.kind !== "ok" || commonRead.value.includes("\0")) {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const commonMatch = /^([^\r\n]+)\r?\n?$/.exec(commonRead.value);
+    const commonValue = commonMatch?.[1];
+    if (!commonValue) return gitIdentity(checkoutRoot, "unknown");
+    let commonCandidate;
+    try {
+      commonCandidate = path4.isAbsolute(commonValue) ? commonValue : path4.resolve(gitDir, commonValue);
+    } catch {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const commonDir = await canonicalSafeDirectory(commonCandidate);
+    if (!commonDir) return gitIdentity(checkoutRoot, "unknown");
+    const worktreesDir = path4.join(commonDir, "worktrees");
+    if (path4.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const repositoryRoot = path4.dirname(commonDir);
+    const repositoryGitDir = await canonicalSafeDirectory(path4.join(repositoryRoot, ".git"));
+    if (!repositoryGitDir || repositoryGitDir !== commonDir) {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const reverseRead = await readSmallRegularFile(path4.join(gitDir, "gitdir"));
+    if (reverseRead.kind !== "ok" || reverseRead.value.includes("\0")) {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    const reverseMatch = /^([^\r\n]+)\r?\n?$/.exec(reverseRead.value);
+    const reverseValue = reverseMatch?.[1];
+    if (!reverseValue) return gitIdentity(checkoutRoot, "unknown");
+    try {
+      const reverseCandidate = path4.isAbsolute(reverseValue) ? reverseValue : path4.resolve(gitDir, reverseValue);
+      const [reverseTarget, checkoutGitFile] = await Promise.all([
+        fs3.realpath(reverseCandidate),
+        fs3.realpath(gitEntry)
+      ]);
+      if (reverseTarget !== checkoutGitFile) return gitIdentity(checkoutRoot, "unknown");
+    } catch {
+      return gitIdentity(checkoutRoot, "unknown");
+    }
+    return gitIdentity(checkoutRoot, "worktree", repositoryRoot);
+  }
+  return gitIdentity(canonicalStart, "unknown");
+}
+async function findWorkspaceBinding(startDir) {
+  const direct = await walkForWorkspaceBinding(startDir);
+  const gitIdentity2 = await resolveGitWorkspaceIdentity(startDir);
+  if (gitIdentity2.state !== "worktree") return direct;
+  if (direct) {
+    const bindingRoot = await fs3.realpath(direct.workspaceRoot).catch(() => path4.resolve(direct.workspaceRoot));
+    if (containedBy(gitIdentity2.checkout_root, bindingRoot)) return direct;
+  }
+  return walkForWorkspaceBinding(gitIdentity2.repository_root);
+}
+function isFileNotFound(error2) {
+  return typeof error2 === "object" && error2 !== null && "code" in error2 && error2.code === "ENOENT";
 }
 
 // packages/plugin-core/dist/client.js

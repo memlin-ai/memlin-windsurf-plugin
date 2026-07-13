@@ -51,8 +51,9 @@ var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 
 // packages/plugin-core/src/workspace-binding.ts
 import { randomUUID } from "node:crypto";
-import { promises as fs2 } from "node:fs";
+import { constants, promises as fs2 } from "node:fs";
 import path3 from "node:path";
+var GIT_POINTER_MAX_BYTES = 8 * 1024;
 
 // packages/plugin-core/src/client.ts
 var CONFIG_DIR = path4.join(os4.homedir(), ".config", "memlin");
