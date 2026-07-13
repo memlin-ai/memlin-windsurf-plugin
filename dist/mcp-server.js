@@ -67398,7 +67398,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.32";
+  cachedAgentVersion = "0.1.33";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -67881,6 +67881,7 @@ function resolveApiUrl() {
 }
 
 // packages/plugin-core/dist/workspace-binding.js
+import { randomUUID } from "node:crypto";
 import { promises as fs3 } from "node:fs";
 import path4 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
@@ -68635,7 +68636,7 @@ function agentHeaders(accessToken, accountId) {
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.1.32",
+    "Memlin-Agent-Version": "0.1.33",
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -68841,7 +68842,7 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.1.32" },
+  { name: "memlin", version: "0.1.33" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

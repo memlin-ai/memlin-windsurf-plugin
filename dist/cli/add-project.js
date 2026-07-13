@@ -437,7 +437,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.32";
+  cachedAgentVersion = "0.1.33";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -920,6 +920,7 @@ function resolveApiUrl() {
 }
 
 // packages/plugin-core/src/workspace-binding.ts
+import { randomUUID } from "node:crypto";
 import { promises as fs2 } from "node:fs";
 import path4 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
@@ -950,9 +951,35 @@ async function findWorkspaceBinding(startDir) {
   return null;
 }
 async function writeWorkspaceBinding(workspaceRoot, binding) {
-  const dir = path4.join(path4.resolve(workspaceRoot), WORKSPACE_DIR_NAME);
-  await fs2.mkdir(dir, { recursive: true });
+  if (typeof binding.account_id !== "string" || binding.account_id.length === 0) {
+    throw new Error("Workspace binding account_id is required.");
+  }
+  const root = await fs2.realpath(path4.resolve(workspaceRoot));
+  const rootEntry = await fs2.stat(root);
+  if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
+  const dir = path4.join(root, WORKSPACE_DIR_NAME);
+  try {
+    const entry = await fs2.lstat(dir);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
+    }
+  } catch (error) {
+    if (!isFileNotFound(error)) throw error;
+    await fs2.mkdir(dir, { mode: 448, recursive: true });
+    const entry = await fs2.lstat(dir);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
+    }
+  }
   const file = path4.join(dir, WORKSPACE_BINDING_FILE);
+  try {
+    const existing = await fs2.lstat(file);
+    if (!existing.isFile() || existing.isSymbolicLink()) {
+      throw new Error(`Refusing to replace an unsafe workspace binding at ${file}`);
+    }
+  } catch (error) {
+    if (!isFileNotFound(error)) throw error;
+  }
   const body = JSON.stringify(
     {
       account_id: binding.account_id,
@@ -962,8 +989,27 @@ async function writeWorkspaceBinding(workspaceRoot, binding) {
     null,
     2
   );
-  await fs2.writeFile(file, body + "\n", "utf8");
-  return file;
+  const temporary = path4.join(dir, `.config.${randomUUID()}.tmp`);
+  let handle;
+  try {
+    handle = await fs2.open(temporary, "wx", 384);
+    await handle.writeFile(body + "\n", "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = void 0;
+    await fs2.rename(temporary, file);
+    const installed = await fs2.lstat(file);
+    if (!installed.isFile() || installed.isSymbolicLink()) {
+      throw new Error(`Workspace binding verification failed at ${file}`);
+    }
+    return file;
+  } finally {
+    await handle?.close().catch(() => void 0);
+    await fs2.unlink(temporary).catch(() => void 0);
+  }
+}
+function isFileNotFound(error) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 // packages/plugin-core/src/client.ts

@@ -491,7 +491,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.32";
+  cachedAgentVersion = "0.1.33";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -974,6 +974,7 @@ function resolveApiUrl() {
 }
 
 // packages/plugin-core/src/workspace-binding.ts
+import { randomUUID } from "node:crypto";
 import { promises as fs3 } from "node:fs";
 import path5 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";

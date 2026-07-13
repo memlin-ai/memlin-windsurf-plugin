@@ -50,6 +50,7 @@ import path2 from "node:path";
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 
 // packages/plugin-core/src/workspace-binding.ts
+import { randomUUID } from "node:crypto";
 import { promises as fs2 } from "node:fs";
 import path3 from "node:path";
 
