@@ -62779,6 +62779,9 @@ var KIND_THRESHOLDS = {
   // very load-bearing when surfaced. Permissive, like memory.
   decision: 0.55
 };
+function passesCandidateThreshold(rankSimilarity, cosineEvidence, threshold) {
+  return typeof cosineEvidence === "number" && Number.isFinite(cosineEvidence) ? cosineEvidence >= threshold : rankSimilarity >= threshold;
+}
 var REDUNDANCY_COLLAPSE_THRESHOLD = 0.92;
 var REDUNDANCY_COLLAPSE_MIN = 0.85;
 var REDUNDANCY_COLLAPSE_KINDS = /* @__PURE__ */ new Set([
@@ -63680,16 +63683,17 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   for (const { kind: kind2, rows } of kindResults) {
     const threshold = customThresholds?.[kind2] ?? KIND_THRESHOLDS[kind2];
     for (const r2 of rows) {
-      const belowRank = r2.similarity < threshold;
-      const belowEvidence = typeof r2.cosine_sim === "number" ? r2.cosine_sim < threshold : false;
-      if (belowRank || belowEvidence) {
+      const hasCosineEvidence = typeof r2.cosine_sim === "number" && Number.isFinite(r2.cosine_sim);
+      const thresholdScore = hasCosineEvidence ? r2.cosine_sim : r2.similarity;
+      if (!passesCandidateThreshold(r2.similarity, r2.cosine_sim, threshold)) {
         omittedCandidates.push({
           id: r2.id,
           kind: kind2,
           title: r2.title,
+          threshold_score: thresholdScore,
           similarity: r2.similarity,
           reason: "below_threshold",
-          detail: belowRank ? `${kind2} similarity ${r2.similarity.toFixed(3)} missed threshold ${threshold.toFixed(3)}` : `${kind2} cosine evidence ${r2.cosine_sim.toFixed(3)} missed threshold ${threshold.toFixed(3)} (rank score ${r2.similarity.toFixed(3)})`,
+          detail: hasCosineEvidence ? `${kind2} cosine evidence ${r2.cosine_sim.toFixed(3)} missed threshold ${threshold.toFixed(3)} (rank score ${r2.similarity.toFixed(3)})` : `${kind2} similarity ${r2.similarity.toFixed(3)} missed threshold ${threshold.toFixed(3)}`,
           path: r2.path
         });
         continue;
@@ -64754,7 +64758,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const pathRecallMs = Date.now() - pathRecallStartedAt;
   let floorIncludedId = null;
   if (included.length === 0 && requiredCoreItems.length === 0 && pinnedIncluded.length === 0) {
-    const floorCandidates = omittedCandidates.filter((o2) => o2.reason === "below_threshold" && o2.similarity >= RECALL_FLOOR).sort((a2, b2) => b2.similarity - a2.similarity).slice(0, 3);
+    const floorCandidates = omittedCandidates.filter(
+      (o2) => o2.reason === "below_threshold" && (o2.threshold_score ?? o2.similarity) >= RECALL_FLOOR
+    ).sort((a2, b2) => (b2.threshold_score ?? b2.similarity) - (a2.threshold_score ?? a2.similarity)).slice(0, 3);
     for (const best of floorCandidates) {
       if (floorIncludedId) break;
       try {
@@ -65153,11 +65159,14 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     // instead of just "0 items"), plus what the recall floor / path-doc legs
     // contributed this resolve.
     ...omittedCandidates.length > 0 ? {
-      near_misses: omittedCandidates.filter((o2) => o2.reason === "below_threshold").sort((a2, b2) => b2.similarity - a2.similarity).slice(0, 5).map((o2) => ({
+      near_misses: omittedCandidates.filter((o2) => o2.reason === "below_threshold").sort(
+        (a2, b2) => (b2.threshold_score ?? b2.similarity) - (a2.threshold_score ?? a2.similarity)
+      ).slice(0, 5).map((o2) => ({
         id: o2.id,
         kind: o2.kind,
         title: o2.title.slice(0, 80),
-        similarity: Math.round(o2.similarity * 1e3) / 1e3
+        similarity: Math.round((o2.threshold_score ?? o2.similarity) * 1e3) / 1e3,
+        ...o2.threshold_score !== void 0 ? { rank_similarity: Math.round(o2.similarity * 1e3) / 1e3 } : {}
       }))
     } : {},
     ...docPathMatches > 0 ? { doc_path_matches: docPathMatches } : {},
