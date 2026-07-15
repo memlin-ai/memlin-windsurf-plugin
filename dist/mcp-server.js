@@ -60937,12 +60937,28 @@ async function rerankHosted(task, candidates, config2) {
     if (apiKey) {
       headers["Authorization"] = `Bearer ${apiKey}`;
     }
+  } else if (provider === "tei") {
+    if (!url) {
+      throw new Error("TEI provider selected but no endpointUrl configured.");
+    }
+    url = `${url.replace(/\/+$/, "")}/rerank`;
+    if (apiKey) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+    }
   } else {
     throw new Error(`Unsupported rerank provider: ${provider}`);
   }
   const documentTexts = candidates.map(formatCandidateText);
   let body;
-  if (provider === "custom") {
+  if (provider === "tei") {
+    body = JSON.stringify({
+      query: task,
+      texts: documentTexts,
+      raw_scores: false,
+      truncate: true,
+      truncation_direction: "Right"
+    });
+  } else if (provider === "custom") {
     body = JSON.stringify({
       query: task,
       texts: documentTexts,
@@ -64051,6 +64067,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   let rerankAuditScores = null;
   let rerankLatencyMs = null;
   let rerankFallbackReason = null;
+  let rerankProvider = null;
   const { bodyMap, componentIdByDoc, rolesByDoc, componentScopedByDoc, canaryContentMap } = await hydrateCandidateBodies(
     ctx,
     candidates.map((c2) => c2.id),
@@ -64070,6 +64087,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       let scores;
       let latencyMs;
       if (ctx.hostedRerank) {
+        rerankProvider = ctx.hostedRerank.provider;
         const startedAt = Date.now();
         scores = await Promise.race([
           rerankHosted(args.task, rerankInputs, ctx.hostedRerank),
@@ -64079,6 +64097,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         ]);
         latencyMs = Date.now() - startedAt;
       } else {
+        rerankProvider = "llm";
         const result = await Promise.race([
           rerankCandidates(args.task, rerankInputs, ctx.rerank),
           new Promise(
@@ -65325,6 +65344,13 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     rerank_used: rerankAuditScores !== null,
     rerank_scores: rerankAuditScores,
     rerank_latency_ms: rerankLatencyMs,
+    // Which reranker was attempted: a hosted provider name ('tei' = the
+    // self-hosted platform cross-encoder, 'cohere'/'jina'/'custom' =
+    // account-configured) or 'llm' for the chat-model (Haiku) path. null
+    // when rerank was never wired/attempted. Distinguishes hosted vs model
+    // rerank in dashboards, and stays set on failed attempts so
+    // rerank_fallback_reason spikes are attributable to their provider.
+    rerank_provider: rerankProvider,
     // Sticky skill-canary decisions. Identity values are never persisted;
     // only the identity source, deterministic bucket, clamped ratio, and exact
     // selected version are recorded for replay/experiment analysis.
