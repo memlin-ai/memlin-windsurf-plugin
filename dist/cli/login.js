@@ -3412,7 +3412,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs5 = __require("fs");
+    var fs7 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3496,7 +3496,7 @@ var require_gray_matter = __commonJS({
       return stringify(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs5.readFileSync(filepath, "utf8");
+      const str2 = fs7.readFileSync(filepath, "utf8");
       const file = matter3(str2, options2);
       file.path = filepath;
       return file;
@@ -3526,15 +3526,15 @@ var require_gray_matter = __commonJS({
 
 // packages/plugin-core/src/companion-client.ts
 import http from "node:http";
-import os6 from "node:os";
-import path5 from "node:path";
+import os7 from "node:os";
+import path8 from "node:path";
 function companionSocketPath(env = process.env) {
   const override = env[COMPANION_SOCKET_ENV];
   if (override) return override;
   if (process.platform === "win32") {
-    return `\\\\.\\pipe\\memlin-companion-${os6.userInfo().username}`;
+    return `\\\\.\\pipe\\memlin-companion-${os7.userInfo().username}`;
   }
-  return path5.join(os6.homedir(), ".config", "memlin", "run", "companion.sock");
+  return path8.join(os7.homedir(), ".config", "memlin", "run", "companion.sock");
 }
 function companionDisabled(env = process.env) {
   const off = env[NO_COMPANION_ENV];
@@ -3632,27 +3632,90 @@ var init_companion_client = __esm({
 });
 
 // packages/plugin-core/src/cli/login.ts
-import { promises as fs4, writeSync } from "node:fs";
-import path6 from "node:path";
-import os7 from "node:os";
+import { writeSync } from "node:fs";
 
 // packages/plugin-core/src/auth.ts
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { randomUUID } from "node:crypto";
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
 var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
 var SCOPE = "openid profile email offline_access";
-function tokenFilePath() {
+function persistedTokenFilePath() {
   return process.env.MEMLIN_TOKEN_FILE || path.join(os.homedir(), ".config", "memlin", "token.json");
 }
-async function writePersistedToken(t) {
-  const file = tokenFilePath();
+var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
+var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
+var AUTH_FILE_LOCK_RETRY_MS = 50;
+function authFileLockPath() {
+  return `${persistedTokenFilePath()}.auth.lock`;
+}
+async function acquireAuthFileLock() {
+  const file = authFileLockPath();
+  const owner = `${process.pid}:${randomUUID()}`;
   await fs.mkdir(path.dirname(file), { recursive: true });
-  const tmp = path.join(path.dirname(file), `token.json.tmp-${process.pid}`);
+  const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      const handle = await fs.open(file, "wx", 384);
+      try {
+        await handle.writeFile(owner, "utf8");
+        await handle.sync();
+      } catch (error) {
+        await handle.close().catch(() => {
+        });
+        await fs.rm(file, { force: true }).catch(() => {
+        });
+        throw error;
+      }
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        await handle.close().catch(() => {
+        });
+        const currentOwner = await fs.readFile(file, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs.rm(file, { force: true }).catch(() => {
+        });
+      };
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      try {
+        const stat = await fs.stat(file);
+        if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
+          await fs.rm(file, { force: true });
+          continue;
+        }
+      } catch (statError) {
+        if (statError.code === "ENOENT") continue;
+        throw statError;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error("another Memlin sign-in or token refresh is still being saved");
+      }
+      await new Promise((resolve) => setTimeout(resolve, AUTH_FILE_LOCK_RETRY_MS));
+    }
+  }
+}
+async function withAuthFileLock(operation) {
+  const release = await acquireAuthFileLock();
+  try {
+    return await operation();
+  } finally {
+    await release();
+  }
+}
+async function writePersistedToken(t) {
+  const file = persistedTokenFilePath();
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const tmp = path.join(
+    path.dirname(file),
+    `${path.basename(file)}.tmp-${process.pid}-${randomUUID()}`
+  );
   await fs.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
   await fs.chmod(tmp, 384).catch(() => {
   });
@@ -3717,6 +3780,22 @@ function requireClientId() {
     );
   }
 }
+function decodeJwtPayload(jwt) {
+  const parts = jwt.split(".");
+  if (parts.length !== 3) throw new Error("not a JWT");
+  return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+}
+
+// packages/plugin-core/src/login-bootstrap.ts
+import { promises as fs4 } from "node:fs";
+import path5 from "node:path";
+import { randomUUID as randomUUID4 } from "node:crypto";
+
+// packages/plugin-core/src/client.ts
+import { promises as fs3 } from "node:fs";
+import path4 from "node:path";
+import os4 from "node:os";
+import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/src/memlin-api-client.ts
 import { readFileSync } from "node:fs";
@@ -4307,13 +4386,197 @@ function resolveApiUrl() {
   return process.env.MEMLIN_API_URL?.trim() || DEFAULT_API_URL;
 }
 
+// packages/plugin-core/src/workspace-binding.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { constants, promises as fs2 } from "node:fs";
+import path3 from "node:path";
+var GIT_POINTER_MAX_BYTES = 8 * 1024;
+
+// packages/plugin-core/src/client.ts
+function globalConfigFilePath() {
+  return process.env.MEMLIN_CONFIG_FILE || path4.join(os4.homedir(), ".config", "memlin", "config.json");
+}
+var CONFIG_DIR = path4.join(os4.homedir(), ".config", "memlin");
+var TOKEN_FILE = path4.join(CONFIG_DIR, "token.json");
+async function writeGlobalConfig(config) {
+  const file = globalConfigFilePath();
+  await fs3.mkdir(path4.dirname(file), { recursive: true });
+  const tmp = path4.join(
+    path4.dirname(file),
+    `${path4.basename(file)}.tmp-${process.pid}-${randomUUID3()}`
+  );
+  await fs3.writeFile(tmp, JSON.stringify(config, null, 2), { mode: 384 });
+  await fs3.chmod(tmp, 384).catch(() => {
+  });
+  await fs3.rename(tmp, file);
+}
+function accessTokenSubject(accessToken) {
+  try {
+    const subject = decodeJwtPayload(accessToken).sub;
+    return typeof subject === "string" && subject.length > 0 ? subject : null;
+  } catch {
+    return null;
+  }
+}
+
+// packages/plugin-core/src/login-bootstrap.ts
+var DISCOVERY_ACCOUNT_ID = "00000000-0000-0000-0000-000000000000";
+var LoginBootstrapError = class extends Error {
+  constructor(code, message, options2 = {}) {
+    super(message, options2);
+    this.code = code;
+  }
+  code;
+  name = "LoginBootstrapError";
+};
+var DEFAULT_PUBLICATION_DEPENDENCIES = {
+  writeConfig: writeGlobalConfig,
+  writeToken: writePersistedToken
+};
+async function readSnapshot(file) {
+  try {
+    return await fs4.readFile(file);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+async function restoreSnapshot(file, snapshot) {
+  if (snapshot === null) {
+    await fs4.rm(file, { force: true });
+    return;
+  }
+  await fs4.mkdir(path5.dirname(file), { recursive: true });
+  const tmp = path5.join(
+    path5.dirname(file),
+    `${path5.basename(file)}.rollback-${process.pid}-${randomUUID4()}`
+  );
+  await fs4.writeFile(tmp, snapshot, { mode: 384 });
+  await fs4.chmod(tmp, 384).catch(() => {
+  });
+  await fs4.rename(tmp, file);
+}
+async function publishMemlinLoginPair(config, token, dependencies = {}) {
+  if (!config.auth0_sub || accessTokenSubject(token.access_token) !== config.auth0_sub) {
+    throw new LoginBootstrapError(
+      "identity-mismatch",
+      "The authenticated identity does not match the Memlin account profile."
+    );
+  }
+  const configFile = globalConfigFilePath();
+  const tokenFile = persistedTokenFilePath();
+  const writers = { ...DEFAULT_PUBLICATION_DEPENDENCIES, ...dependencies };
+  try {
+    await withAuthFileLock(async () => {
+      const previousConfig = await readSnapshot(configFile);
+      const previousToken = await readSnapshot(tokenFile);
+      try {
+        await writers.writeConfig(config);
+        await writers.writeToken(token);
+      } catch (error) {
+        const rollback = await Promise.allSettled([
+          restoreSnapshot(configFile, previousConfig),
+          restoreSnapshot(tokenFile, previousToken)
+        ]);
+        const rollbackFailed = rollback.some((result) => result.status === "rejected");
+        throw new LoginBootstrapError(
+          "publication-failed",
+          rollbackFailed ? "Memlin sign-in could not be saved or safely rolled back. Restart Companion and sign in again." : "Memlin sign-in could not be saved. The previous local account remains active.",
+          { cause: error }
+        );
+      }
+    });
+  } catch (error) {
+    if (error instanceof LoginBootstrapError) throw error;
+    throw new LoginBootstrapError(
+      "publication-failed",
+      "Memlin could not lock the shared sign-in files. Try again.",
+      { cause: error }
+    );
+  }
+}
+function pickRequestedAccount(accounts, needle) {
+  const exact = accounts.find((account) => account.id === needle);
+  if (exact) return exact;
+  const lower = needle.toLowerCase();
+  const matches = accounts.filter((account) => account.name.toLowerCase().includes(lower));
+  return matches.length === 1 ? matches[0] : null;
+}
+function selectAccount(me, requestedAccount) {
+  if (me.accounts.length === 0) {
+    throw new LoginBootstrapError(
+      "account-setup-required",
+      "No Memlin workspace is available for this user. Finish account setup at https://memlin.ai/app/onboarding, then try again."
+    );
+  }
+  if (requestedAccount) {
+    const selected = pickRequestedAccount(me.accounts, requestedAccount);
+    if (!selected) {
+      const accounts = me.accounts.map((account) => `  ${account.id}  ${account.name}`).join("\n");
+      throw new LoginBootstrapError(
+        "account-not-found",
+        `--account "${requestedAccount}" doesn't match an account you're a member of.
+Your accounts:
+${accounts}`
+      );
+    }
+    return selected;
+  }
+  return me.accounts.find((account) => account.id === me.default_account_id) ?? me.accounts[0];
+}
+async function bootstrapMemlinLogin(token, options2 = {}) {
+  const apiUrl = resolveApiUrl();
+  const probe = new MemlinApiClient({
+    baseUrl: apiUrl,
+    getAccessToken: async () => token.access_token,
+    accountId: DISCOVERY_ACCOUNT_ID
+  });
+  let me;
+  try {
+    me = await probe.me();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const setupRequired = /(?:→|HTTP)\s*403\b/.test(detail);
+    throw new LoginBootstrapError(
+      setupRequired ? "account-setup-required" : "api-rejected",
+      setupRequired ? "Finish Memlin account setup at https://memlin.ai/app/onboarding, then try again." : `Signed in with the identity provider, but the Memlin API could not load the account profile. Endpoint: ${apiUrl}. Error: ${detail}`,
+      { cause: error }
+    );
+  }
+  const tokenSubject = accessTokenSubject(token.access_token);
+  if (!tokenSubject || typeof me.auth0_sub !== "string" || tokenSubject !== me.auth0_sub) {
+    throw new LoginBootstrapError(
+      "identity-mismatch",
+      "The authenticated identity does not match the Memlin account profile."
+    );
+  }
+  const account = selectAccount(me, options2.requestedAccount);
+  const config = {
+    api_url: apiUrl,
+    account_id: account.id,
+    user_id: me.user_id,
+    auth0_sub: me.auth0_sub,
+    project_id: null
+  };
+  await publishMemlinLoginPair(config, token);
+  return {
+    config,
+    account: { id: account.id, name: account.name },
+    user: {
+      id: me.user_id,
+      email: me.email,
+      displayName: me.display_name
+    }
+  };
+}
+
 // packages/plugin-core/src/resolver-skill.ts
 import { createHash } from "node:crypto";
-import { promises as fs2 } from "node:fs";
-import os4 from "node:os";
-import path3 from "node:path";
-var RESOLVER_SKILL_DIR = path3.join(os4.homedir(), ".claude", "skills", "memlin");
-var RESOLVER_SKILL_FILE = path3.join(RESOLVER_SKILL_DIR, "SKILL.md");
+import { promises as fs5 } from "node:fs";
+import os5 from "node:os";
+import path6 from "node:path";
+var RESOLVER_SKILL_DIR = path6.join(os5.homedir(), ".claude", "skills", "memlin");
+var RESOLVER_SKILL_FILE = path6.join(RESOLVER_SKILL_DIR, "SKILL.md");
 var LEGACY_RESOLVER_SKILL_HASHES = [
   // v1: 2026-06-09 → 2026-06-17. Before the "Writing your own memories"
   // section was added.
@@ -4323,7 +4586,7 @@ async function ensureResolverSkill() {
   try {
     let existing = null;
     try {
-      existing = await fs2.readFile(RESOLVER_SKILL_FILE, "utf8");
+      existing = await fs5.readFile(RESOLVER_SKILL_FILE, "utf8");
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
@@ -4335,11 +4598,11 @@ async function ensureResolverSkill() {
       if (!LEGACY_RESOLVER_SKILL_HASHES.includes(hash)) {
         return { status: "kept", path: RESOLVER_SKILL_FILE };
       }
-      await fs2.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+      await fs5.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
       return { status: "upgraded", path: RESOLVER_SKILL_FILE };
     }
-    await fs2.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
-    await fs2.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+    await fs5.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
+    await fs5.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
     return { status: "installed", path: RESOLVER_SKILL_FILE };
   } catch (e) {
     return {
@@ -4417,10 +4680,10 @@ focused on the reader side.
 `;
 
 // packages/plugin-core/src/plugin-install.ts
-import { promises as fs3 } from "node:fs";
+import { promises as fs6 } from "node:fs";
 import { existsSync } from "node:fs";
-import path4 from "node:path";
-import os5 from "node:os";
+import path7 from "node:path";
+import os6 from "node:os";
 var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
 var MEMLIN_MARKETPLACE_KEY = "memlin-ai";
 var MEMLIN_MARKETPLACE_SOURCE = {
@@ -4428,16 +4691,16 @@ var MEMLIN_MARKETPLACE_SOURCE = {
   repo: "memlin-ai/memlin-claude-plugin"
 };
 function defaultUserSettingsPaths() {
-  const claudeDir = path4.join(os5.homedir(), ".claude");
-  return { claudeDir, settingsFile: path4.join(claudeDir, "settings.json") };
+  const claudeDir = path7.join(os6.homedir(), ".claude");
+  return { claudeDir, settingsFile: path7.join(claudeDir, "settings.json") };
 }
 async function ensureUserScopePluginEnabled(paths) {
   const p = paths ?? defaultUserSettingsPaths();
   try {
-    await fs3.mkdir(p.claudeDir, { recursive: true });
+    await fs6.mkdir(p.claudeDir, { recursive: true });
     let current = {};
     if (existsSync(p.settingsFile)) {
-      const raw = await fs3.readFile(p.settingsFile, "utf8");
+      const raw = await fs6.readFile(p.settingsFile, "utf8");
       try {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === "object") current = parsed;
@@ -4473,7 +4736,7 @@ async function ensureUserScopePluginEnabled(paths) {
       };
       touchedMarketplace = true;
     }
-    await fs3.writeFile(p.settingsFile, JSON.stringify(next, null, 2) + "\n", "utf8");
+    await fs6.writeFile(p.settingsFile, JSON.stringify(next, null, 2) + "\n", "utf8");
     return {
       status: touchedMarketplace ? "enabled-with-marketplace" : "enabled",
       settingsFile: p.settingsFile,
@@ -4966,8 +5229,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path7, errorMaps, issueData } = params;
-  const fullPath = [...path7, ...issueData.path || []];
+  const { data, path: path9, errorMaps, issueData } = params;
+  const fullPath = [...path9, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5083,11 +5346,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path7, key) {
+  constructor(parent, value, path9, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path7;
+    this._path = path9;
     this._key = key;
   }
   get path() {
@@ -9186,8 +9449,6 @@ function printCommandGuide(opts = {}) {
 
 // packages/plugin-core/src/cli/login.ts
 init_companion_client();
-var CONFIG_DIR = path6.join(os7.homedir(), ".config", "memlin");
-var CONFIG_FILE = path6.join(CONFIG_DIR, "config.json");
 function parseLoginArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -9203,14 +9464,6 @@ function parseLoginArgs(argv) {
     }
   }
   return out;
-}
-function pickAccount(accounts, needle) {
-  const exact = accounts.find((a) => a.id === needle);
-  if (exact) return exact;
-  const lower = needle.toLowerCase();
-  const matches = accounts.filter((a) => a.name.toLowerCase().includes(lower));
-  if (matches.length === 1) return matches[0];
-  return null;
 }
 async function main() {
   const parsed = parseLoginArgs(process.argv.slice(2));
@@ -9244,62 +9497,21 @@ async function main() {
     if (elapsed % 5 === 0) writeSync(2, ".");
   });
   writeSync(2, "\n\n");
-  await writePersistedToken(token);
-  const apiUrl = resolveApiUrl();
-  const probe = new MemlinApiClient({
-    baseUrl: apiUrl,
-    getAccessToken: async () => token.access_token,
-    accountId: "00000000-0000-0000-0000-000000000000"
-  });
-  let me;
+  let login;
   try {
-    me = await probe.me();
-  } catch (err) {
-    console.error(
-      "memlin login: signed in to Auth0, but the Memlin API rejected the token.\n  Endpoint: " + apiUrl + "\n  Error: " + (err instanceof Error ? err.message : String(err))
-    );
-    process.exit(1);
-  }
-  if (me.accounts.length === 0) {
-    console.error(
-      "No Memlin workspaces on this user. Open https://memlin.ai once to bootstrap a personal workspace, then re-run `memlin login`."
-    );
-    process.exit(1);
-  }
-  let accountId;
-  let accountName;
-  if (requestedAccount) {
-    const picked = pickAccount(
-      me.accounts.map((a) => ({ id: a.id, name: a.name })),
-      requestedAccount
-    );
-    if (!picked) {
-      console.error(
-        `memlin login: --account "${requestedAccount}" doesn't match any account you're a member of.`
-      );
-      console.error("Your accounts:");
-      for (const a of me.accounts) {
-        console.error(`  ${a.id}  ${a.name}`);
-      }
-      process.exit(1);
+    login = await bootstrapMemlinLogin(token, { requestedAccount });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error(`memlin login: ${detail}`);
+    if (error instanceof LoginBootstrapError && error.code === "account-setup-required") {
+      console.error("Open https://memlin.ai/app/onboarding to finish setup.");
     }
-    accountId = picked.id;
-    accountName = picked.name;
-  } else {
-    accountId = me.default_account_id ?? me.accounts[0].id;
-    accountName = me.accounts.find((a) => a.id === accountId)?.name ?? "(unknown)";
+    process.exit(1);
+    return;
   }
-  const config = {
-    api_url: apiUrl,
-    account_id: accountId,
-    user_id: me.user_id,
-    project_id: null
-  };
-  await fs4.mkdir(CONFIG_DIR, { recursive: true });
-  await fs4.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
-  const displayName = me.display_name ?? me.email ?? me.user_id.slice(0, 8) + "\u2026";
+  const displayName = login.user.displayName ?? login.user.email ?? login.user.id.slice(0, 8) + "\u2026";
   console.log(`  \u2713 signed in as ${displayName}`);
-  console.log(`  \u2713 workspace "${accountName}"`);
+  console.log(`  \u2713 workspace "${login.account.name}"`);
   const installed = await ensureResolverSkill();
   if (installed.status === "installed") {
     console.log(`  \u2713 installed Memlin resolver skill (${installed.path})`);

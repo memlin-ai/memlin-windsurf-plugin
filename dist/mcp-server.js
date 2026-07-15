@@ -6886,12 +6886,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f2;
     };
-    function addFormats(ajv, list, fs8, exportName) {
+    function addFormats(ajv, list, fs7, exportName) {
       var _a2;
       var _b;
       (_a2 = (_b = ajv.opts.code).formats) !== null && _a2 !== void 0 ? _a2 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f2 of list)
-        ajv.addFormat(f2, fs8[f2]);
+        ajv.addFormat(f2, fs7[f2]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -29671,7 +29671,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs8 = __require("fs");
+    var fs7 = __require("fs");
     var sections = require_section_matter();
     var defaults2 = require_defaults2();
     var stringify2 = require_stringify();
@@ -29755,7 +29755,7 @@ var require_gray_matter = __commonJS({
       return stringify2(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str4 = fs8.readFileSync(filepath, "utf8");
+      const str4 = fs7.readFileSync(filepath, "utf8");
       const file = matter3(str4, options2);
       file.path = filepath;
       return file;
@@ -31412,7 +31412,6 @@ var init_companion_client = __esm({
 });
 
 // apps/mcp-server/src/index.ts
-import { promises as fs7 } from "node:fs";
 import { execSync as execSync4 } from "node:child_process";
 import path11 from "node:path";
 import os8 from "node:os";
@@ -67315,31 +67314,97 @@ import path8 from "node:path";
 import { promises as fs4 } from "node:fs";
 import path5 from "node:path";
 import os5 from "node:os";
+import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/dist/auth.js
 import { promises as fs2 } from "node:fs";
 import path2 from "node:path";
 import os2 from "node:os";
+import { randomUUID } from "node:crypto";
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
 var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
-function tokenFilePath() {
+function persistedTokenFilePath() {
   return process.env.MEMLIN_TOKEN_FILE || path2.join(os2.homedir(), ".config", "memlin", "token.json");
+}
+var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
+var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
+var AUTH_FILE_LOCK_RETRY_MS = 50;
+function authFileLockPath() {
+  return `${persistedTokenFilePath()}.auth.lock`;
+}
+async function acquireAuthFileLock() {
+  const file = authFileLockPath();
+  const owner = `${process.pid}:${randomUUID()}`;
+  await fs2.mkdir(path2.dirname(file), { recursive: true });
+  const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      const handle = await fs2.open(file, "wx", 384);
+      try {
+        await handle.writeFile(owner, "utf8");
+        await handle.sync();
+      } catch (error2) {
+        await handle.close().catch(() => {
+        });
+        await fs2.rm(file, { force: true }).catch(() => {
+        });
+        throw error2;
+      }
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        await handle.close().catch(() => {
+        });
+        const currentOwner = await fs2.readFile(file, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs2.rm(file, { force: true }).catch(() => {
+        });
+      };
+    } catch (error2) {
+      if (error2.code !== "EEXIST") throw error2;
+      try {
+        const stat = await fs2.stat(file);
+        if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
+          await fs2.rm(file, { force: true });
+          continue;
+        }
+      } catch (statError) {
+        if (statError.code === "ENOENT") continue;
+        throw statError;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error("another Memlin sign-in or token refresh is still being saved");
+      }
+      await new Promise((resolve) => setTimeout(resolve, AUTH_FILE_LOCK_RETRY_MS));
+    }
+  }
+}
+async function withAuthFileLock(operation) {
+  const release = await acquireAuthFileLock();
+  try {
+    return await operation();
+  } finally {
+    await release();
+  }
 }
 async function readPersistedToken() {
   try {
-    const raw = await fs2.readFile(tokenFilePath(), "utf8");
+    const raw = await fs2.readFile(persistedTokenFilePath(), "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 async function writePersistedToken(t2) {
-  const file = tokenFilePath();
+  const file = persistedTokenFilePath();
   await fs2.mkdir(path2.dirname(file), { recursive: true });
-  const tmp = path2.join(path2.dirname(file), `token.json.tmp-${process.pid}`);
+  const tmp = path2.join(
+    path2.dirname(file),
+    `${path2.basename(file)}.tmp-${process.pid}-${randomUUID()}`
+  );
   await fs2.writeFile(tmp, JSON.stringify(t2, null, 2), { mode: 384 });
   await fs2.chmod(tmp, 384).catch(() => {
   });
@@ -67389,17 +67454,27 @@ async function doRefresh(stale, marginMs) {
     }
   } catch {
   }
-  const refreshToken = latest?.refresh_token ?? stale.refresh_token;
+  const refreshSource = latest ?? stale;
+  const refreshToken = refreshSource.refresh_token;
   if (!refreshToken) {
     throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
   }
   try {
     const fresh = await refreshAccessToken(refreshToken);
-    await writePersistedToken(fresh);
-    return fresh.access_token;
+    return await withAuthFileLock(async () => {
+      const beforeWrite = await readPersistedToken();
+      if (!beforeWrite || beforeWrite.access_token !== refreshSource.access_token) {
+        if (beforeWrite && Date.now() < beforeWrite.expires_at - marginMs) {
+          return beforeWrite.access_token;
+        }
+        throw new Error("saved Memlin credentials changed while the token was refreshing");
+      }
+      await writePersistedToken(fresh);
+      return fresh.access_token;
+    });
   } catch (err) {
     const after = await readPersistedToken();
-    if (after && after.access_token !== stale.access_token && Date.now() < after.expires_at - 6e4) {
+    if (after && after.access_token !== refreshSource.access_token && Date.now() < after.expires_at - 6e4) {
       return after.access_token;
     }
     throw new Error(
@@ -67420,6 +67495,11 @@ function requireClientId() {
       "Auth0 client id not configured. Set MEMLIN_AUTH0_CLIENT_ID env var (and optionally MEMLIN_AUTH0_DOMAIN / MEMLIN_AUTH0_AUDIENCE for self-hosted setups)."
     );
   }
+}
+function decodeJwtPayload(jwt) {
+  const parts = jwt.split(".");
+  if (parts.length !== 3) throw new Error("not a JWT");
+  return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
 }
 
 // packages/plugin-core/dist/memlin-api-client.js
@@ -68060,7 +68140,7 @@ function resolveApiUrl() {
 }
 
 // packages/plugin-core/dist/workspace-binding.js
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { constants, promises as fs3 } from "node:fs";
 import path4 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
@@ -68259,29 +68339,53 @@ function isFileNotFound(error2) {
 }
 
 // packages/plugin-core/dist/client.js
+function globalConfigFilePath() {
+  return process.env.MEMLIN_CONFIG_FILE || path5.join(os5.homedir(), ".config", "memlin", "config.json");
+}
 var CONFIG_DIR = path5.join(os5.homedir(), ".config", "memlin");
-var CONFIG_FILE = path5.join(CONFIG_DIR, "config.json");
 var TOKEN_FILE = path5.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
-    const raw = await fs4.readFile(CONFIG_FILE, "utf8");
+    const raw = await fs4.readFile(globalConfigFilePath(), "utf8");
     const parsed = JSON.parse(raw);
-    if (!parsed.account_id || !parsed.user_id) return null;
+    if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
+      return null;
+    }
     return {
-      api_url: parsed.api_url ?? DEFAULT_API_URL,
+      api_url: typeof parsed.api_url === "string" && parsed.api_url.trim() ? parsed.api_url : DEFAULT_API_URL,
       account_id: parsed.account_id,
       user_id: parsed.user_id,
-      project_id: parsed.project_id ?? null
+      auth0_sub: parsed.auth0_sub,
+      project_id: typeof parsed.project_id === "string" || parsed.project_id === null ? parsed.project_id : null
     };
   } catch {
     return null;
   }
 }
+function accessTokenSubject(accessToken) {
+  try {
+    const subject = decodeJwtPayload(accessToken).sub;
+    return typeof subject === "string" && subject.length > 0 ? subject : null;
+  } catch {
+    return null;
+  }
+}
+function configMatchesAccessToken(config2, accessToken) {
+  const subject = accessTokenSubject(accessToken);
+  return subject !== null && subject === config2.auth0_sub;
+}
+async function getIdentityBoundAccessToken(config2) {
+  const accessToken = await getValidAccessToken();
+  if (!configMatchesAccessToken(config2, accessToken)) {
+    throw new Error("not signed in \u2014 saved Memlin account does not match the saved token");
+  }
+  return accessToken;
+}
 async function getApi(opts = {}) {
   const config2 = await readConfig();
   if (!config2) return null;
   try {
-    await getValidAccessToken();
+    await getIdentityBoundAccessToken(config2);
   } catch {
     return null;
   }
@@ -68291,7 +68395,7 @@ async function getApi(opts = {}) {
   const apiUrl = process.env.MEMLIN_API_URL?.trim() || config2.api_url || resolveApiUrl();
   const api = new MemlinApiClient({
     baseUrl: apiUrl,
-    getAccessToken: getValidAccessToken,
+    getAccessToken: () => getIdentityBoundAccessToken(config2),
     accountId: config2.account_id
   });
   return { api, config: config2, workspaceBound, workspaceRoot };
@@ -68847,15 +68951,6 @@ function filterAbsentOnDisk(paths, rootOverride) {
 // apps/mcp-server/src/index.ts
 var MEMLIN_PROD_SUPABASE_URL = "https://nsvqnmvummyxbzupxytl.supabase.co";
 var MEMLIN_PROD_SUPABASE_ANON_KEY = "sb_publishable_EDSbENKAPxGmvigUHqiKOg_l06zoSXG";
-var CONFIG_FILE2 = path11.join(os8.homedir(), ".config", "memlin", "config.json");
-async function readPersistedConfig() {
-  try {
-    const raw = await fs7.readFile(CONFIG_FILE2, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
 function normalizeGitRemote3(raw) {
   if (!raw) return null;
   let s2 = raw.trim();
@@ -68915,11 +69010,25 @@ function readGitRemote2(cwd) {
     return null;
   }
 }
-async function currentAccessToken() {
-  return process.env.MEMLIN_ACCESS_TOKEN || await getValidAccessToken();
+async function currentAccessToken(expectedConfig) {
+  const override = process.env.MEMLIN_ACCESS_TOKEN?.trim();
+  if (override) return override;
+  const config2 = expectedConfig === void 0 ? await readConfig() : expectedConfig;
+  if (!config2) throw new Error("not signed in \u2014 run `memlin login`");
+  return getIdentityBoundAccessToken(config2);
+}
+function authConfigRevision(config2) {
+  if (!config2) return null;
+  return JSON.stringify([
+    config2.api_url,
+    config2.account_id,
+    config2.user_id,
+    config2.auth0_sub,
+    config2.project_id ?? null
+  ]);
 }
 async function resolveConfig() {
-  const config2 = await readPersistedConfig();
+  const config2 = await readConfig();
   const cwd = runtimeCwd();
   const gitRemote = readGitRemote2(cwd);
   const apiUrl = process.env.MEMLIN_API_URL || config2?.api_url || "https://memlin.ai/api/v1";
@@ -68931,7 +69040,7 @@ async function resolveConfig() {
   let accountId = process.env.MEMLIN_ACCOUNT_ID || pinnedAccountId || config2?.account_id || "";
   const userId = process.env.MEMLIN_USER_ID || config2?.user_id || "";
   let projectId = process.env.MEMLIN_PROJECT_ID || (pinnedProjectId !== void 0 ? pinnedProjectId : config2?.project_id ?? null);
-  const accessToken = await currentAccessToken();
+  const accessToken = await currentAccessToken(config2);
   if (!supabaseUrl || !supabaseAnon || !accessToken || !accountId || !userId) {
     const missing = [
       !supabaseUrl && "SUPABASE_URL",
@@ -68964,7 +69073,9 @@ async function resolveConfig() {
     projectId,
     apiUrl,
     cwd,
-    gitRemote
+    gitRemote,
+    authConfig: config2,
+    authConfigRevision: authConfigRevision(config2)
   };
 }
 function agentKind() {
@@ -69000,16 +69111,16 @@ async function resolveProject2(input) {
     return null;
   }
 }
-async function resolveViaApi(args) {
-  const accessToken = await currentAccessToken();
-  const res = await fetch(`${cfg.apiUrl.replace(/\/+$/, "")}/resolve`, {
+async function resolveViaApi(args, requestCfg) {
+  const accessToken = await currentAccessToken(requestCfg.authConfig);
+  const res = await fetch(`${requestCfg.apiUrl.replace(/\/+$/, "")}/resolve`, {
     method: "POST",
-    headers: agentHeaders(accessToken, cfg.accountId),
+    headers: agentHeaders(accessToken, requestCfg.accountId),
     body: JSON.stringify({
       ...args,
-      project_id: args.project_id ?? cfg.projectId ?? null,
-      cwd: args.cwd ?? cfg.cwd,
-      git_remote: args.git_remote ?? cfg.gitRemote,
+      project_id: args.project_id ?? requestCfg.projectId ?? null,
+      cwd: args.cwd ?? requestCfg.cwd,
+      git_remote: args.git_remote ?? requestCfg.gitRemote,
       ...process.env.MEMLIN_SESSION_ID ? { session_id: process.env.MEMLIN_SESSION_ID } : {}
     })
   });
@@ -69017,28 +69128,28 @@ async function resolveViaApi(args) {
   if (!res.ok) throw new Error(`resolve HTTP ${res.status}: ${body}`);
   return JSON.parse(body);
 }
-function createToolContext(accessToken) {
-  const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnon, {
+function createToolContext(accessToken, requestCfg) {
+  const supabase = createClient(requestCfg.supabaseUrl, requestCfg.supabaseAnon, {
     auth: { persistSession: false, autoRefreshToken: false },
     global: { headers: { Authorization: `Bearer ${accessToken}` } }
   });
   return {
     supabase,
-    accountId: cfg.accountId,
-    projectId: cfg.projectId,
-    userId: cfg.userId,
+    accountId: requestCfg.accountId,
+    projectId: requestCfg.projectId,
+    userId: requestCfg.userId,
     // Light up semantic search when OPENAI_API_KEY is in env. sync-core's embed
     // throws if the key is missing, so we only wire the function in when it's
     // actually set — otherwise handlers fall back to ILIKE.
     embed: process.env.OPENAI_API_KEY ? embed : void 0,
     agentKind: agentKind(),
     sessionId: process.env.MEMLIN_SESSION_ID || null,
-    defaultCwd: cfg.cwd,
-    defaultGitRemote: cfg.gitRemote,
+    defaultCwd: requestCfg.cwd,
+    defaultGitRemote: requestCfg.gitRemote,
     // For tools that call back into the REST API (memlin_capture_session →
     // /api/v1/scribe/session) rather than going straight to Supabase.
     accessToken,
-    apiBaseUrl: cfg.apiUrl
+    apiBaseUrl: requestCfg.apiUrl
   };
 }
 var STATUS_TOOL = {
@@ -69054,32 +69165,46 @@ function fmtDuration(absMs) {
   if (abs < 864e5) return `${Math.round(abs / 36e5)}h`;
   return `${Math.round(abs / 864e5)}d`;
 }
-async function buildStatus() {
+async function buildStatus(requestCfg) {
   const now = Date.now();
   const lines = ["memlin status", "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"];
   const token = await readPersistedToken().catch(() => null);
+  const persistedConfig = await readConfig().catch(() => null);
+  const environmentToken = process.env.MEMLIN_ACCESS_TOKEN?.trim() || null;
+  const identityBound = Boolean(
+    environmentToken || token && persistedConfig && configMatchesAccessToken(persistedConfig, token.access_token)
+  );
   let auth;
   lines.push("", "Auth");
-  if (!token) {
+  if (!environmentToken && !token) {
     auth = {
       signed_in: false,
       detail: 'not signed in \u2014 run "Memlin: Sign In" (Command Palette) or /memlin-login'
     };
     lines.push('  not signed in \u2014 run "Memlin: Sign In" (Command Palette) or /memlin-login');
+  } else if (!identityBound) {
+    auth = {
+      signed_in: false,
+      detail: "saved account and token do not match \u2014 sign in again"
+    };
+    lines.push("  saved account and token do not match \u2014 sign in again");
   } else {
-    const hasExpiry = Number.isFinite(token.expires_at) && token.expires_at > 0;
-    const remaining = hasExpiry ? token.expires_at - now : null;
+    const expiresAt = token?.expires_at;
+    const hasExpiry = typeof expiresAt === "number" && Number.isFinite(expiresAt) && expiresAt > 0;
+    const remaining = hasExpiry ? expiresAt - now : null;
     const expired = remaining != null ? remaining <= 0 : false;
     auth = {
       signed_in: true,
-      access_token: "present",
-      expires_at: hasExpiry ? new Date(token.expires_at).toISOString() : null,
+      access_token: environmentToken ? "environment" : "present",
+      expires_at: hasExpiry ? new Date(expiresAt).toISOString() : null,
       expires_in_ms: remaining,
       expired,
-      refresh_token: token.refresh_token ? "present" : "absent",
-      refresh_state: token.refresh_token ? "auto-rotates on next call" : "re-run sign in when the access token expires"
+      refresh_token: token?.refresh_token ? "present" : "absent",
+      refresh_state: token?.refresh_token ? "auto-rotates on next call" : environmentToken ? "managed by the host environment" : "re-run sign in when the access token expires"
     };
-    if (!hasExpiry) {
+    if (environmentToken && !token) {
+      lines.push("  access token: provided by the host environment");
+    } else if (!hasExpiry) {
       lines.push("  access token: present (no expiry recorded \u2014 legacy token)");
     } else if (expired) {
       lines.push(
@@ -69088,23 +69213,23 @@ async function buildStatus() {
     } else {
       lines.push(
         `  access token: valid for ${fmtDuration(remaining)} (until ${new Date(
-          token.expires_at
+          expiresAt
         ).toLocaleString()})`
       );
     }
     lines.push(
-      `  refresh token: ${token.refresh_token ? "present (auto-rotates)" : "absent (re-run sign in when token expires)"}`
+      `  refresh token: ${environmentToken && !token ? "managed by the host environment" : token?.refresh_token ? "present (auto-rotates)" : "absent (re-run sign in when token expires)"}`
     );
   }
-  lines.push("", "Account", `  account_id:  ${cfg.accountId || "(none)"}`);
+  lines.push("", "Account", `  account_id:  ${requestCfg.accountId || "(none)"}`);
   lines.push("", "Project");
-  lines.push(`  cwd:         ${cfg.cwd}`);
-  if (cfg.projectId) lines.push(`  project:     ${cfg.projectId}`);
+  lines.push(`  cwd:         ${requestCfg.cwd}`);
+  if (requestCfg.projectId) lines.push(`  project:     ${requestCfg.projectId}`);
   else lines.push("  project:     (none) \u2014 running against account-scope only");
-  if (cfg.gitRemote) lines.push(`  git remote:  ${cfg.gitRemote}`);
+  if (requestCfg.gitRemote) lines.push(`  git remote:  ${requestCfg.gitRemote}`);
   lines.push("", "Routing");
   lines.push(`  host:        ${agentKind()}`);
-  lines.push(`  api:         ${cfg.apiUrl}`);
+  lines.push(`  api:         ${requestCfg.apiUrl}`);
   lines.push("  mcp:         local stdio (node ./dist/mcp-server.js)");
   let sync = null;
   let localChanges = null;
@@ -69155,15 +69280,15 @@ async function buildStatus() {
   }
   return {
     auth,
-    account: { account_id: cfg.accountId || null },
+    account: { account_id: requestCfg.accountId || null },
     project: {
-      project_id: cfg.projectId ?? null,
-      cwd: cfg.cwd,
-      git_remote: cfg.gitRemote
+      project_id: requestCfg.projectId ?? null,
+      cwd: requestCfg.cwd,
+      git_remote: requestCfg.gitRemote
     },
     routing: {
       host: agentKind(),
-      api_url: cfg.apiUrl,
+      api_url: requestCfg.apiUrl,
       mcp_transport: "local stdio (node ./dist/mcp-server.js)"
     },
     sync,
@@ -69179,12 +69304,36 @@ var cfg = await resolveConfig().catch((err) => {
 var cfgResolvedAt = Date.now();
 var CFG_TTL_MS = 3e4;
 async function refreshCfg() {
-  if (Date.now() - cfgResolvedAt < CFG_TTL_MS) return;
+  const cachedCfg = cfg;
+  const liveConfig = await readConfig().catch(() => null);
+  const liveRevision = authConfigRevision(liveConfig);
+  const identityChanged = liveRevision !== cachedCfg.authConfigRevision;
+  if (!identityChanged && Date.now() - cfgResolvedAt < CFG_TTL_MS) return cachedCfg;
   try {
-    cfg = await resolveConfig();
+    const nextCfg = await resolveConfig();
+    const finalConfig = await readConfig().catch(() => null);
+    const finalRevision = authConfigRevision(finalConfig);
+    if (finalRevision !== nextCfg.authConfigRevision) {
+      throw new Error("Memlin account changed while request configuration was resolving.");
+    }
+    if (cfg.authConfigRevision !== cachedCfg.authConfigRevision && cfg.authConfigRevision !== nextCfg.authConfigRevision) {
+      if (cfg.authConfigRevision === finalRevision) return cfg;
+      throw new Error("A newer Memlin account configuration is already active.");
+    }
+    cfg = nextCfg;
     cfgResolvedAt = Date.now();
-  } catch {
+    return nextCfg;
+  } catch (error2) {
+    const currentConfig = await readConfig().catch(() => null);
+    const currentRevision = authConfigRevision(currentConfig);
+    if (identityChanged || currentRevision !== cachedCfg.authConfigRevision) {
+      if (cfg.authConfigRevision === currentRevision) return cfg;
+      throw new Error("Memlin account credentials changed; retry after sign-in finishes.", {
+        cause: error2
+      });
+    }
     cfgResolvedAt = Date.now() - CFG_TTL_MS + 5e3;
+    return cachedCfg;
   }
 }
 var server = new Server(
@@ -69198,36 +69347,48 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => ({
   prompts: listPrompts()
 }));
 server.setRequestHandler(GetPromptRequestSchema, async (req) => {
-  await refreshCfg();
+  const requestCfg = await refreshCfg();
   const name = req.params.name;
   const args = req.params.arguments ?? {};
-  const token = await currentAccessToken();
-  const resolveFn = async ({ task, project_id }) => await resolveViaApi({
-    task,
-    ...project_id ? { project_id } : {}
-  });
-  const result = await getPrompt(createToolContext(token), name, args, resolveFn);
+  const token = await currentAccessToken(requestCfg.authConfig);
+  const resolveFn = async ({ task, project_id }) => await resolveViaApi(
+    {
+      task,
+      ...project_id ? { project_id } : {}
+    },
+    requestCfg
+  );
+  const result = await getPrompt(createToolContext(token, requestCfg), name, args, resolveFn);
   return result;
 });
-server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-  resources: await listResources(createToolContext(await currentAccessToken()))
-}));
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  const requestCfg = await refreshCfg();
+  return {
+    resources: await listResources(
+      createToolContext(await currentAccessToken(requestCfg.authConfig), requestCfg)
+    )
+  };
+});
 server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
   resourceTemplates: resourceTemplates()
 }));
 server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
-  const result = await readResource(createToolContext(await currentAccessToken()), req.params.uri);
+  const requestCfg = await refreshCfg();
+  const result = await readResource(
+    createToolContext(await currentAccessToken(requestCfg.authConfig), requestCfg),
+    req.params.uri
+  );
   return result;
 });
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  await refreshCfg();
+  const requestCfg = await refreshCfg();
   const name = req.params.name;
   const args = req.params.arguments ?? {};
   try {
     const verdict = await runPreToolUseHandler({
       tool_name: name,
       tool_input: args,
-      cwd: cfg.cwd,
+      cwd: requestCfg.cwd,
       ...process.env.MEMLIN_SESSION_ID ? { session_id: process.env.MEMLIN_SESSION_ID } : {}
     });
     if (verdict.decision === "block") {
@@ -69245,7 +69406,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   } catch {
   }
   try {
-    const result = name === "memlin_status" ? await buildStatus() : name === "memlin_resolve_task" ? await resolveViaApi(args) : await callTool(createToolContext(await currentAccessToken()), name, args);
+    const result = name === "memlin_status" ? await buildStatus(requestCfg) : name === "memlin_resolve_task" ? await resolveViaApi(args, requestCfg) : await callTool(
+      createToolContext(await currentAccessToken(requestCfg.authConfig), requestCfg),
+      name,
+      args
+    );
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   } catch (err) {
     return {
