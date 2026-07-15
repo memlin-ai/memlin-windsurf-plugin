@@ -59020,6 +59020,8 @@ function isEligibleForRecall(row, opts = {}) {
   if (ms && ms !== "active" && !(opts.includeBackground === true && ms === "background")) {
     return false;
   }
+  const supersededBy = typeof row.metadataSupersededBy === "string" ? row.metadataSupersededBy.trim() : "";
+  if (!ms && supersededBy && supersededBy !== row.id) return false;
   if ((row.kind === "goal" || row.kind === "skill") && row.status !== "approved") return false;
   return true;
 }
@@ -61318,6 +61320,8 @@ async function searchRanked(ctx, args, limit2) {
     (r2) => isEligibleForRecall({
       status: r2.status ?? null,
       metadataStatus: (r2.metadata ?? {}).status ?? null,
+      metadataSupersededBy: (r2.metadata ?? {}).superseded_by ?? null,
+      id: r2.id ?? null,
       kind: r2.kind
     })
   ).slice(0, limit2);
@@ -61669,6 +61673,8 @@ function isDirectResolverDocumentEligible(row, context, options2 = {}) {
   return isEligibleForRecall({
     status: typeof row.status === "string" ? row.status : null,
     metadataStatus: typeof metadata.status === "string" ? metadata.status : null,
+    metadataSupersededBy: typeof metadata.superseded_by === "string" ? metadata.superseded_by : null,
+    id: typeof row.id === "string" ? row.id : null,
     kind: row.kind
   });
 }
@@ -63574,30 +63580,12 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     }
   }
   const reactivationDone = maybeReactivateColdMatches(ctx, ctx.accountId, queryVec);
-  let maxTokens;
-  let budgetTier;
-  let budgetSource;
-  let budgetFloorApplied = false;
-  if (args.max_tokens !== void 0) {
-    maxTokens = args.max_tokens;
-    budgetTier = "explicit";
-    budgetSource = "explicit";
-  } else {
-    const fromCorpus = await inferBudgetFromCorpus(ctx, queryVec);
-    if (fromCorpus) {
-      const heuristicTokens = inferBudget(args.task).tokens;
-      const floored = Math.max(fromCorpus.tokens, Math.round(heuristicTokens * 0.75));
-      maxTokens = Math.min(BUDGET_CEILING, floored);
-      budgetFloorApplied = maxTokens > fromCorpus.tokens;
-      budgetTier = tierForTokens(maxTokens);
-      budgetSource = "corpus";
-    } else {
-      const fromHeuristic = inferBudget(args.task);
-      maxTokens = fromHeuristic.tokens;
-      budgetTier = fromHeuristic.tier;
-      budgetSource = "heuristic";
-    }
-  }
+  const corpusBudgetPromise = args.max_tokens === void 0 ? inferBudgetFromCorpus(ctx, queryVec).catch((e2) => {
+    console.warn(
+      `[resolver] inferBudgetFromCorpus rejected: ${e2 instanceof Error ? e2.message : String(e2)}`
+    );
+    return null;
+  }) : null;
   const useHybrid = args.hybrid !== false;
   const RRF_TO_SIMILARITY_SCALE = 30;
   const kindResults = await Promise.all(
@@ -63746,7 +63734,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         // doc's decay clock to "fresh" — exactly what neutralized decay
         // fleet-wide. created_at is the doc's true age. citation.updated_at
         // above stays as the "last modified" provenance shown to users.
-        decayMultiplier: decayMultiplierForKind(kind2, r2.created_at)
+        decayMultiplier: decayMultiplierForKind(kind2, r2.created_at),
+        createdAt: r2.created_at
       });
     }
   }
@@ -63861,6 +63850,20 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
             similarity: c2.similarity,
             reason: "status_filtered",
             detail: `metadata.status is '${metaStatus}' (not active)`,
+            path: c2.citation.path
+          });
+          candidates.splice(i2, 1);
+          continue;
+        }
+        const supersededBy = typeof meta?.superseded_by === "string" ? meta.superseded_by.trim() : "";
+        if (!metaStatus && supersededBy && supersededBy !== c2.id) {
+          omittedCandidates.push({
+            id: c2.id,
+            kind: c2.kind,
+            title: c2.title,
+            similarity: c2.similarity,
+            reason: "superseded_by_stamp",
+            detail: `metadata.superseded_by points at ${supersededBy} (superseded without a status stamp)`,
             path: c2.citation.path
           });
           candidates.splice(i2, 1);
@@ -64026,7 +64029,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
               componentId: null,
               componentName: null,
               // created_at, not updated_at — see the search-candidate build.
-              decayMultiplier: decayMultiplierForKind(row.kind, row.created_at)
+              decayMultiplier: decayMultiplierForKind(row.kind, row.created_at),
+              createdAt: row.created_at
             });
           }
         }
@@ -64378,37 +64382,53 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
           return t2 <= AUTHORITY_TIER.USER_CORRECTION ? t2 : AUTHORITY_TIER.HISTORICAL;
         };
         const ranked = candidates.filter((c2) => neighbours.has(c2.id)).sort(byAuthorityThenScore(collapseTier, effectiveScore));
-        for (const keeper of ranked) {
-          if (claimed.has(keeper.id)) continue;
-          claimed.add(keeper.id);
-          const twins = [];
-          for (const nId of neighbours.get(keeper.id) ?? []) {
+        for (const leader of ranked) {
+          if (claimed.has(leader.id)) continue;
+          claimed.add(leader.id);
+          const members = [];
+          for (const nId of neighbours.get(leader.id) ?? []) {
             if (claimed.has(nId)) continue;
             const twin = byId.get(nId);
             if (!twin) continue;
             claimed.add(nId);
-            const sim = simByPair.get(`${keeper.id}:${nId}`) ?? dedupeThreshold;
+            members.push(twin);
+          }
+          if (members.length === 0) continue;
+          let keeper = leader;
+          if (leader.kind === "decision") {
+            const leaderTier = leader.authorityTier ?? AUTHORITY_TIER.HISTORICAL;
+            for (const m2 of members) {
+              if (m2.kind !== "decision") continue;
+              if ((m2.authorityTier ?? AUTHORITY_TIER.HISTORICAL) !== leaderTier) continue;
+              const mAt = Date.parse(m2.createdAt ?? "");
+              const kAt = Date.parse(keeper.createdAt ?? "");
+              if (Number.isFinite(mAt) && Number.isFinite(kAt) && mAt > kAt) keeper = m2;
+            }
+          }
+          const keptNewerDecision = keeper !== leader;
+          const droppedMembers = keptNewerDecision ? [leader, ...members.filter((m2) => m2.id !== keeper.id)] : members;
+          const twins = [];
+          for (const twin of droppedMembers) {
+            const sim = simByPair.get(`${keeper.id}:${twin.id}`) ?? dedupeThreshold;
             twins.push({
               id: twin.id,
               title: twin.title,
               similarity: sim,
-              est_tokens: estimateTokens(bodyMap.get(nId) ?? "")
+              est_tokens: estimateTokens(bodyMap.get(twin.id) ?? "")
             });
-            dropInfo.set(nId, { keeperTitle: keeper.title, similarity: sim });
+            dropInfo.set(twin.id, { keeperTitle: keeper.title, similarity: sim, keptNewerDecision });
           }
-          if (twins.length > 0) {
-            keeper.collapsedDuplicates = twins;
-            dedupeDroppedCount += twins.length;
-            dedupeTokensSaved += twins.reduce((s2, t2) => s2 + t2.est_tokens, 0);
-            dedupeClusters.push({
-              kept_id: keeper.id,
-              dropped: twins.map((t2) => ({
-                id: t2.id,
-                similarity: Number(t2.similarity.toFixed(4)),
-                est_tokens: t2.est_tokens
-              }))
-            });
-          }
+          keeper.collapsedDuplicates = twins;
+          dedupeDroppedCount += twins.length;
+          dedupeTokensSaved += twins.reduce((s2, t2) => s2 + t2.est_tokens, 0);
+          dedupeClusters.push({
+            kept_id: keeper.id,
+            dropped: twins.map((t2) => ({
+              id: t2.id,
+              similarity: Number(t2.similarity.toFixed(4)),
+              est_tokens: t2.est_tokens
+            }))
+          });
         }
         for (let i2 = candidates.length - 1; i2 >= 0; i2--) {
           const c2 = candidates[i2];
@@ -64421,7 +64441,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
             title: c2.title,
             similarity: c2.similarity,
             reason: "redundant_duplicate",
-            detail: `near-duplicate of "${drop.keeperTitle}" (cosine ${drop.similarity.toFixed(3)}) \u2014 kept the higher-scored copy`,
+            detail: `near-duplicate of "${drop.keeperTitle}" (cosine ${drop.similarity.toFixed(3)}) \u2014 ${drop.keptNewerDecision ? "kept the newer decision" : "kept the higher-scored copy"}`,
             path: c2.citation.path
           });
           candidates.splice(i2, 1);
@@ -64484,6 +64504,30 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     rest = kept;
   }
   budgetOrder.push(...rest);
+  let maxTokens;
+  let budgetTier;
+  let budgetSource;
+  let budgetFloorApplied = false;
+  if (args.max_tokens !== void 0) {
+    maxTokens = args.max_tokens;
+    budgetTier = "explicit";
+    budgetSource = "explicit";
+  } else {
+    const fromCorpus = corpusBudgetPromise ? await corpusBudgetPromise : null;
+    if (fromCorpus) {
+      const heuristicTokens = inferBudget(args.task).tokens;
+      const floored = Math.max(fromCorpus.tokens, Math.round(heuristicTokens * 0.75));
+      maxTokens = Math.min(BUDGET_CEILING, floored);
+      budgetFloorApplied = maxTokens > fromCorpus.tokens;
+      budgetTier = tierForTokens(maxTokens);
+      budgetSource = "corpus";
+    } else {
+      const fromHeuristic = inferBudget(args.task);
+      maxTokens = fromHeuristic.tokens;
+      budgetTier = fromHeuristic.tier;
+      budgetSource = "heuristic";
+    }
+  }
   const included = [];
   const excluded = /* @__PURE__ */ new Set();
   const requiredCoreTokens = requiredCoreItems.reduce(
