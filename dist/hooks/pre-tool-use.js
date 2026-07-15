@@ -8243,6 +8243,23 @@ function isDeployTriggerCommand(command) {
   return DEPLOY_TRIGGER_CMD_RE.test(command);
 }
 
+// packages/shared/dist/authority.js
+var AUTHORITY_TIER = {
+  PLATFORM: 1,
+  REQUIRED_GOVERNANCE: 2,
+  CURRENT_INSTRUCTION: 3,
+  USER_CORRECTION: 4,
+  APPROVED_POLICY: 5,
+  HISTORICAL: 6
+};
+
+// packages/shared/dist/decision-authority.js
+var DECISION_AUTHORITY = {
+  REQUIRED_GOVERNANCE: AUTHORITY_TIER.REQUIRED_GOVERNANCE,
+  APPROVED_POLICY: AUTHORITY_TIER.APPROVED_POLICY,
+  HISTORICAL: AUTHORITY_TIER.HISTORICAL
+};
+
 // packages/shared/dist/skill-frontmatter.js
 var import_gray_matter2 = __toESM(require_gray_matter(), 1);
 

@@ -59050,6 +59050,34 @@ function byAuthorityThenScore(tierOf, scoreOf) {
   };
 }
 
+// packages/shared/dist/decision-authority.js
+var DECISION_AUTHORITY = {
+  REQUIRED_GOVERNANCE: AUTHORITY_TIER.REQUIRED_GOVERNANCE,
+  APPROVED_POLICY: AUTHORITY_TIER.APPROVED_POLICY,
+  HISTORICAL: AUTHORITY_TIER.HISTORICAL
+};
+function decisionAuthorityTier(input) {
+  if (input.metadata?.required_for_projects === true) {
+    return DECISION_AUTHORITY.REQUIRED_GOVERNANCE;
+  }
+  if (input.sqlStatus === "approved") return DECISION_AUTHORITY.APPROVED_POLICY;
+  return DECISION_AUTHORITY.HISTORICAL;
+}
+function classifyDecisionPair(a2, b2) {
+  if (a2.authorityTier !== b2.authorityTier) {
+    const [current2, outdated2] = a2.authorityTier < b2.authorityTier ? [a2, b2] : [b2, a2];
+    return { currentId: current2.id, outdatedId: outdated2.id, basis: "authority" };
+  }
+  const ta = Date.parse(a2.created_at);
+  const tb = Date.parse(b2.created_at);
+  if (ta !== tb && Number.isFinite(ta) && Number.isFinite(tb)) {
+    const [current2, outdated2] = ta > tb ? [a2, b2] : [b2, a2];
+    return { currentId: current2.id, outdatedId: outdated2.id, basis: "recency" };
+  }
+  const [current, outdated] = a2.id < b2.id ? [a2, b2] : [b2, a2];
+  return { currentId: current.id, outdatedId: outdated.id, basis: "recency" };
+}
+
 // packages/shared/dist/skill-frontmatter.js
 var import_gray_matter2 = __toESM(require_gray_matter(), 1);
 
@@ -65657,8 +65685,8 @@ async function resolveProposal(ctx, rawArgs) {
       }
     }).eq("id", args.proposal_id);
     if (error3) throw new Error(`resolve_proposal: reject failed: ${error3.message}`);
-    if (existing.proposal_action === "merge") {
-      const merge2 = existing.merge;
+    if (existing.proposal_action === "merge" || existing.proposal_action === "supersede") {
+      const merge2 = existing.merge ?? existing.supersede;
       if (merge2?.insight_id) {
         try {
           await ctx.supabase.from("derived_insights").update({ status: "dismissed", resolved_at: nowIso }).eq("id", merge2.insight_id).eq("account_id", ctx.accountId);
@@ -65677,6 +65705,9 @@ async function resolveProposal(ctx, rawArgs) {
   }
   if (existing.proposal_action === "update") {
     return applyUpdateProposal(ctx, args.proposal_id, doc, existing, actor, nowIso);
+  }
+  if (existing.proposal_action === "supersede") {
+    return applySupersedeProposal(ctx, args.proposal_id, doc, existing, actor, nowIso);
   }
   const { error: error2 } = await ctx.supabase.from("documents").update({
     metadata: {
@@ -65843,6 +65874,84 @@ async function applyMergeProposal(ctx, proposalId, doc, existing, actor, nowIso)
   }
   return {
     status: "merged",
+    kind: doc.kind,
+    title: doc.title
+  };
+}
+async function applySupersedeProposal(ctx, proposalId, doc, existing, actor, nowIso) {
+  const supersede = existing.supersede ?? {};
+  const draftKeepId = typeof supersede.keep_id === "string" ? supersede.keep_id : null;
+  const draftRetireId = typeof supersede.retire_id === "string" ? supersede.retire_id : null;
+  if (!draftKeepId || !draftRetireId) {
+    throw new Error("resolve_proposal: supersede proposal is malformed (missing keep/retire ids)");
+  }
+  const { data: memberRows, error: memberReadErr } = await ctx.supabase.from("documents").select("id, account_id, kind, status, created_at, metadata").eq("account_id", ctx.accountId).in("id", [draftKeepId, draftRetireId]);
+  if (memberReadErr) {
+    throw new Error(`resolve_proposal: supersede member read failed: ${memberReadErr.message}`);
+  }
+  const members = memberRows ?? [];
+  if (members.length !== 2) {
+    throw new Error(
+      "resolve_proposal: supersede pair went stale (member missing) \u2014 reject this proposal"
+    );
+  }
+  const metaOf = (m2) => m2.metadata ?? {};
+  const otherOf = (m2) => members.find((o2) => o2.id !== m2.id);
+  let retire = members.find((m2) => metaOf(m2).superseded_by === otherOf(m2).id) ?? null;
+  let keeper = retire ? otherOf(retire) : null;
+  if (!retire || !keeper) {
+    for (const m2 of members) {
+      const metaStatus = typeof metaOf(m2).status === "string" && metaOf(m2).status ? metaOf(m2).status : "active";
+      if (m2.kind !== "decision" || m2.status === "archived" || metaStatus !== "active") {
+        throw new Error(
+          "resolve_proposal: supersede pair went stale (member no longer an eligible decision) \u2014 reject this proposal"
+        );
+      }
+    }
+    const reviewer = existing.reviewer ?? {};
+    const reviewerCurrentId = reviewer.verdict === "contradiction" && typeof reviewer.current_id === "string" && members.some((m2) => m2.id === reviewer.current_id) ? reviewer.current_id : null;
+    const [a2, b2] = members;
+    const tierOf = (m2) => decisionAuthorityTier({ sqlStatus: m2.status, metadata: m2.metadata });
+    const cls = classifyDecisionPair(
+      { id: a2.id, created_at: a2.created_at, authorityTier: tierOf(a2) },
+      { id: b2.id, created_at: b2.created_at, authorityTier: tierOf(b2) }
+    );
+    const keepId = cls.basis === "authority" ? cls.currentId : reviewerCurrentId ?? draftKeepId;
+    keeper = members.find((m2) => m2.id === keepId);
+    retire = otherOf(keeper);
+    const { error: stampErr } = await ctx.supabase.from("documents").update({
+      status: "archived",
+      metadata: {
+        ...metaOf(retire),
+        status: "superseded",
+        superseded_by: keeper.id,
+        superseded_at: nowIso,
+        superseded_reason: "contradiction"
+      }
+    }).eq("id", retire.id).eq("account_id", ctx.accountId);
+    if (stampErr) {
+      throw new Error(`resolve_proposal: supersede stamp failed: ${stampErr.message}`);
+    }
+  }
+  const { error: flipErr } = await ctx.supabase.from("documents").update({
+    metadata: {
+      ...existing,
+      status: "applied",
+      superseded_doc_id: retire.id,
+      kept_doc_id: keeper.id,
+      accepted_at: nowIso,
+      accepted_by_user_sub: actor
+    }
+  }).eq("id", proposalId);
+  if (flipErr) throw new Error(`resolve_proposal: supersede flip failed: ${flipErr.message}`);
+  if (typeof supersede.insight_id === "string") {
+    try {
+      await ctx.supabase.from("derived_insights").update({ status: "accepted", resolved_at: nowIso }).eq("id", supersede.insight_id).eq("account_id", ctx.accountId);
+    } catch {
+    }
+  }
+  return {
+    status: "applied",
     kind: doc.kind,
     title: doc.title
   };
