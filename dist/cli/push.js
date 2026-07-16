@@ -193,6 +193,8 @@ var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
 var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
 var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
 var AGENT_CAPABILITIES_HEADER = "Memlin-Agent-Capabilities";
+var AGENT_PLATFORM_HEADER = "Memlin-Agent-Platform";
+var AGENT_ARCHITECTURE_HEADER = "Memlin-Agent-Architecture";
 var AGENT_EXPECTED_CAPABILITIES = {
   "claude-code": ["cli", "commands", "hooks", "sync", "scribe", "resolve"],
   cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
@@ -760,7 +762,9 @@ var MemlinApiClient = class {
       [AGENT_KIND_HEADER]: resolveHost().kind,
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: agentVersion(),
-      [AGENT_CAPABILITIES_HEADER]: agentCapabilities().join(",")
+      [AGENT_CAPABILITIES_HEADER]: agentCapabilities().join(","),
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os5.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os5.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h["Memlin-Account-Id"] = this.cfg.accountId;
