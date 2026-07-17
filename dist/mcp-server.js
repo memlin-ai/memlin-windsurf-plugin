@@ -59174,6 +59174,20 @@ var dmp = new import_diff_match_patch.default();
 // packages/mcp-tools/src/tools.ts
 var TOOL_SEARCHABLE_KINDS = ["skill", "memory", "goal", "schema", "decision"];
 var TOOL_GENERIC_WRITABLE_KINDS = ["memory", "skill", "goal", "schema"];
+var TOOL_HANDOFF_AGENT_KINDS = [
+  "claude-code",
+  "claude-ai",
+  "codex",
+  "cursor",
+  "windsurf",
+  "vscode",
+  "gemini",
+  "grok",
+  "hermes",
+  "openclaw",
+  "antigravity",
+  "mcp"
+];
 var TOOLS = [
   {
     name: "memlin_read_memory",
@@ -59562,7 +59576,7 @@ var TOOLS = [
         },
         target_agent_kind: {
           type: "string",
-          enum: ["claude-code", "claude-ai", "codex", "cursor", "windsurf", "mcp"],
+          enum: [...TOOL_HANDOFF_AGENT_KINDS],
           description: "Optional target agent kind filter. Agents should pass their own kind when known."
         },
         status: {

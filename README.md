@@ -25,8 +25,10 @@ manual scribe/sync commands.
 - **Sync:** via the `memlin` CLI.
 - **Scribe:** automatic through `post_cascade_response_with_transcript`; manual
   via `memlin scribe` otherwise.
-- **Hooks:** guardrails for writes, commands, and MCP calls; plan sync after
-  writes; and turn capture from Windsurf's documented Cascade hook events.
+- **Hooks:** `pre_user_prompt` runs session-start once per trajectory (plan
+  sync, handoff auto-accept, heartbeat); guardrails for writes, commands, and
+  MCP calls; plan sync after writes; and turn capture from Windsurf's
+  documented Cascade hook events.
 
 ## Install
 

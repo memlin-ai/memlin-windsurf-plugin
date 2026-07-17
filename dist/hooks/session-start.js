@@ -182,6 +182,9 @@ var init_companion_client = __esm({
 
 // apps/windsurf-plugin/src/hooks/session-start.ts
 import { spawn } from "node:child_process";
+import { promises as fs5 } from "node:fs";
+import os7 from "node:os";
+import path8 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // packages/plugin-core/dist/client.js
@@ -1274,6 +1277,12 @@ function applyWorkspaceOverlay(config, overlay) {
   }
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
+function log(msg) {
+  if (process.env.MEMLIN_DEBUG) {
+    process.stderr.write(`[memlin] ${msg}
+`);
+  }
+}
 
 // packages/plugin-core/dist/project-resolver.js
 import { execSync } from "node:child_process";
@@ -1428,6 +1437,41 @@ function renderHandoffContext(handoff) {
   ].join("\n");
 }
 
+// packages/plugin-core/dist/heartbeat.js
+import crypto from "node:crypto";
+import { promises as fs4 } from "node:fs";
+import os6 from "node:os";
+import path7 from "node:path";
+var DEFAULT_THROTTLE_MS = 6e4;
+function statePath(cwd, host) {
+  const key = crypto.createHash("sha256").update(cwd).digest("hex").slice(0, 16);
+  return path7.join(os6.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
+}
+async function recentlySent(file, throttleMs) {
+  try {
+    const raw = await fs4.readFile(file, "utf8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed.sent_at === "number" && Date.now() - parsed.sent_at < throttleMs;
+  } catch {
+    return false;
+  }
+}
+async function recordInstallHeartbeat(cwd, reason, opts = {}) {
+  const host = opts.host ?? resolveHost().kind;
+  const throttleMs = opts.throttleMs ?? DEFAULT_THROTTLE_MS;
+  const file = statePath(cwd, host);
+  if (await recentlySent(file, throttleMs)) return;
+  try {
+    const ctx = await getApi({ cwd });
+    if (!ctx) return;
+    await ctx.api.getAccount();
+    await fs4.writeFile(file, JSON.stringify({ sent_at: Date.now(), reason, host }), "utf8");
+    log(`${host} activity recorded: ${reason}`);
+  } catch (err) {
+    log(`${host} activity failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // apps/windsurf-plugin/src/hook-io.ts
 function readHookInput() {
   return new Promise((resolve) => {
@@ -1457,6 +1501,24 @@ function readHookInput() {
 
 // apps/windsurf-plugin/src/hooks/session-start.ts
 var PULL_PLANS_BIN = fileURLToPath2(import.meta.resolve("@memlin/plugin-core/cli/pull-plans"));
+function gatePath(trajectoryId) {
+  const key = trajectoryId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64) || "unknown";
+  return path8.join(os7.tmpdir(), `memlin-windsurf-session-start-${key}`);
+}
+async function alreadyRan(trajectoryId) {
+  try {
+    await fs5.access(gatePath(trajectoryId));
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function markRan(trajectoryId) {
+  try {
+    await fs5.writeFile(gatePath(trajectoryId), JSON.stringify({ at: Date.now() }), "utf8");
+  } catch {
+  }
+}
 function firePlanSync(cwd) {
   try {
     const child = spawn(process.execPath, [PULL_PLANS_BIN], {
@@ -1470,9 +1532,17 @@ function firePlanSync(cwd) {
   }
 }
 async function main() {
+  process.env.MEMLIN_HOST = "windsurf";
   const input = await readHookInput();
   const cwd = input?.cwd ?? input?.workspace_roots?.[0] ?? process.cwd();
+  const trajectoryId = input?.trajectory_id ?? input?.execution_id ?? `cwd:${cwd}`;
+  if (await alreadyRan(trajectoryId)) {
+    process.stdout.write("{}");
+    return;
+  }
+  await markRan(trajectoryId);
   firePlanSync(cwd);
+  void recordInstallHeartbeat(cwd, "session-start", { throttleMs: 0, host: "windsurf" });
   let handoffContext = null;
   let hazardWarning = null;
   try {
