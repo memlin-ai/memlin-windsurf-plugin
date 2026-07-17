@@ -63619,6 +63619,10 @@ async function maybeReactivateColdMatches(ctx, accountId, queryVec) {
 }
 async function assembleBundle(ctx, rawArgs, audit = {}) {
   const bundleStartedAt = Date.now();
+  let embeddingMs = 0;
+  let embeddingCacheHit = false;
+  let budgetRpcMs = null;
+  let budgetWaitMs = 0;
   const args = AssembleBundleArgs.parse(rawArgs);
   const kPerKind = args.k_per_kind ?? DEFAULT_K_PER_KIND;
   const projectId = args.project_id ?? ctx.projectId ?? null;
@@ -63667,8 +63671,10 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     );
   }
   let queryVec;
+  const embeddingStartedAt = Date.now();
   const cachedVec = getCachedEmbedding(args.task);
   if (cachedVec) {
+    embeddingCacheHit = true;
     queryVec = cachedVec;
   } else {
     try {
@@ -63680,15 +63686,20 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       );
     }
   }
+  embeddingMs = Date.now() - embeddingStartedAt;
   const reactivationDone = maybeReactivateColdMatches(ctx, ctx.accountId, queryVec);
-  const corpusBudgetPromise = args.max_tokens === void 0 ? inferBudgetFromCorpus(ctx, queryVec).catch((e2) => {
-    console.warn(
-      `[resolver] inferBudgetFromCorpus rejected: ${e2 instanceof Error ? e2.message : String(e2)}`
-    );
-    return null;
-  }) : null;
+  const corpusBudgetPromise = args.max_tokens === void 0 ? (() => {
+    const startedAt = Date.now();
+    return inferBudgetFromCorpus(ctx, queryVec).catch((e2) => {
+      console.warn(`[resolver] inferBudgetFromCorpus rejected: ${e2 instanceof Error ? e2.message : String(e2)}`);
+      return null;
+    }).finally(() => {
+      budgetRpcMs = Date.now() - startedAt;
+    });
+  })() : null;
   const useHybrid = args.hybrid !== false;
   const RRF_TO_SIMILARITY_SCALE = 30;
+  const searchFanoutStartedAt = Date.now();
   const kindResults = await Promise.all(
     requestedKinds.map(async (kind2) => {
       const rpcName = useHybrid ? "search_documents_hybrid" : "search_documents";
@@ -63760,6 +63771,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       return { kind: kind2, rows: [...merged.values()] };
     })
   );
+  const searchFanoutMs = Date.now() - searchFanoutStartedAt;
   const nativeFunctions = args.native_functions === true && !!projectId && requestedKinds.includes("memory");
   const functionBodyById = /* @__PURE__ */ new Map();
   const functionComponentById = /* @__PURE__ */ new Map();
@@ -64630,7 +64642,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     budgetTier = "explicit";
     budgetSource = "explicit";
   } else {
+    const budgetWaitStartedAt = Date.now();
     const fromCorpus = corpusBudgetPromise ? await corpusBudgetPromise : null;
+    budgetWaitMs = Date.now() - budgetWaitStartedAt;
     if (fromCorpus) {
       const heuristicTokens = inferBudget(args.task).tokens;
       const floored = Math.max(fromCorpus.tokens, Math.round(heuristicTokens * 0.75));
@@ -65325,6 +65339,16 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     ...approvedColumnIds.has(i2.id) ? { approved: true } : {}
   }));
   const contextCounts = buildDeliveredContextCounts(deliveredItems);
+  const truncationReasons = /* @__PURE__ */ new Set();
+  if (requiredCoreTokens > maxTokens) truncationReasons.add("required_core_over_budget");
+  if (pinnedTokens > maxTokens) truncationReasons.add("pinned_content_over_budget");
+  if (omittedCandidates.some((candidate) => candidate.reason === "pinned_overflow")) truncationReasons.add("pinned_cap_excluded");
+  const budgetExcluded = omittedCandidates.filter((candidate) => candidate.reason === "budget_excluded");
+  if (budgetExcluded.some((candidate) => candidate.detail.startsWith("path-matched doc:"))) truncationReasons.add("path_document_budget_excluded");
+  if (budgetExcluded.some((candidate) => !candidate.detail.startsWith("path-matched doc:"))) truncationReasons.add("ranked_document_budget_excluded");
+  if (primary && estimateTokens(primary.body) > maxTokens) truncationReasons.add("primary_skill_over_budget");
+  if (used > maxTokens) truncationReasons.add("delivered_context_over_budget");
+  if (truncated && truncationReasons.size === 0) truncationReasons.add("other_budget_truncation");
   const empty_context_reason = contextCounts.total > 0 ? null : omittedCandidates.length > 0 ? "all_candidates_filtered" : "no_candidates_found";
   const auditMetadata = {
     task: args.task,
@@ -65387,6 +65411,12 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     // rerank-only slice.
     latency_ms: {
       total: Date.now() - bundleStartedAt,
+      embedding: embeddingMs,
+      embedding_cache_hit: embeddingCacheHit,
+      search_fanout: searchFanoutMs,
+      budget_rpc: budgetRpcMs,
+      budget_wait: budgetWaitMs,
+      rerank: rerankLatencyMs,
       awareness_feeds: awarenessFeedsMs,
       path_recall: pathRecallMs
     },
@@ -65427,6 +65457,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     token_budget: maxTokens,
     token_used: used,
     truncated,
+    truncation_reasons: [...truncationReasons],
+    budget_excluded_count: budgetExcluded.length,
     active_component_id: activeComponentId,
     active_component_name: activeComponentName,
     active_repo: activeRepo,
