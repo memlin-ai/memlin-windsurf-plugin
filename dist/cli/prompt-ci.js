@@ -927,6 +927,12 @@ var MemlinApiClient = class {
   async createProject(input, opts = {}) {
     return this.request("POST", "/projects", input, { accountId: opts.accountId });
   }
+  /** Atomically create/select a project and register one or more logical
+   * local sources. Device paths are intentionally absent from this wire
+   * contract. */
+  async linkLocalSources(input, opts = {}) {
+    return this.request("POST", "/projects/local-link", input, { accountId: opts.accountId });
+  }
   /**
    * PATCH /projects/{id} — attach/detach local paths, set/clear the git
    * remote, or rename. Owner/admin only; 409 when a path or remote is
