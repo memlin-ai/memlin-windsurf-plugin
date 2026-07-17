@@ -59086,6 +59086,52 @@ function classifyDecisionPair(a2, b2) {
   return { currentId: current.id, outdatedId: outdated.id, basis: "recency" };
 }
 
+// packages/shared/dist/outcome-fitness.js
+function outcomeWeight(input) {
+  if (input.outcome === "positive") return 1;
+  if (input.severity === "high") return 1.5;
+  return 1;
+}
+function outcomeMatchesTaskCategory(outcomeCategory, resolveCategory) {
+  const oc = typeof outcomeCategory === "string" && outcomeCategory.length > 0 ? outcomeCategory : "unknown";
+  if (oc === "unknown") return true;
+  const rc = typeof resolveCategory === "string" && resolveCategory.length > 0 ? resolveCategory : "unknown";
+  if (rc === "unknown") return true;
+  return oc === rc;
+}
+function fitnessFromCounts(pos, neg) {
+  if (pos === 0 && neg === 0) return 1;
+  const diff = pos - neg;
+  const total = pos + neg;
+  const val = diff / (total + 5);
+  const clamped = Math.max(-0.5, Math.min(0.3, val));
+  return 1 + clamped;
+}
+function accumulateOutcomeCounts(meta, itemIds, resolveCategory, posCounts, negCounts) {
+  if (!meta) return false;
+  const val = meta.outcome;
+  if (val !== "positive" && val !== "negative") return false;
+  if (!outcomeMatchesTaskCategory(
+    typeof meta.task_category === "string" ? meta.task_category : null,
+    resolveCategory
+  )) {
+    return false;
+  }
+  const weight = outcomeWeight({
+    outcome: val,
+    severity: typeof meta.severity === "string" ? meta.severity : null,
+    agent_apology: meta.agent_apology === true
+  });
+  for (const itemId of itemIds) {
+    if (val === "positive") {
+      posCounts.set(itemId, (posCounts.get(itemId) ?? 0) + weight);
+    } else {
+      negCounts.set(itemId, (negCounts.get(itemId) ?? 0) + weight);
+    }
+  }
+  return true;
+}
+
 // packages/shared/dist/skill-frontmatter.js
 var import_gray_matter2 = __toESM(require_gray_matter(), 1);
 
@@ -62992,7 +63038,7 @@ function decayMultiplierForKind(kind2, updated_at, now = Date.now()) {
   if (!profile) return 1;
   return applyProfile(profile, updated_at, now);
 }
-async function loadFitnessMultipliers(ctx, candidateIds) {
+async function loadFitnessMultipliers(ctx, candidateIds, resolveTaskCategory) {
   const multipliers = /* @__PURE__ */ new Map();
   if (candidateIds.length === 0) return multipliers;
   try {
@@ -63028,8 +63074,7 @@ async function loadFitnessMultipliers(ctx, candidateIds) {
     for (const outcome of outcomes) {
       const meta = outcome.metadata;
       const aid = meta?.audit_id;
-      const val = meta?.outcome;
-      if (typeof aid !== "string" || val !== "positive" && val !== "negative") continue;
+      if (typeof aid !== "string") continue;
       const deliveredIds = auditToItems.get(aid);
       if (!deliveredIds) continue;
       const hasExplicitAttribution = meta !== null && Object.prototype.hasOwnProperty.call(meta, "applied_item_ids");
@@ -63041,26 +63086,13 @@ async function loadFitnessMultipliers(ctx, candidateIds) {
           )
         )
       ] : [] : deliveredIds;
-      for (const itemId of itemIds) {
-        if (val === "positive") {
-          posCounts.set(itemId, (posCounts.get(itemId) ?? 0) + 1);
-        } else {
-          negCounts.set(itemId, (negCounts.get(itemId) ?? 0) + 1);
-        }
-      }
+      accumulateOutcomeCounts(meta, itemIds, resolveTaskCategory, posCounts, negCounts);
     }
     for (const cid of candidateIds) {
-      const pos = posCounts.get(cid) ?? 0;
-      const neg = negCounts.get(cid) ?? 0;
-      if (pos === 0 && neg === 0) {
-        multipliers.set(cid, 1);
-        continue;
-      }
-      const diff = pos - neg;
-      const total = pos + neg;
-      const val = diff / (total + 5);
-      const clamped = Math.max(-0.5, Math.min(0.3, val));
-      multipliers.set(cid, 1 + clamped);
+      multipliers.set(
+        cid,
+        fitnessFromCounts(posCounts.get(cid) ?? 0, negCounts.get(cid) ?? 0)
+      );
     }
   } catch (err) {
     console.warn(
@@ -64170,7 +64202,11 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     }
   }
   const candidateIds = candidates.map((c2) => c2.id);
-  const fitnessMultipliers = await loadFitnessMultipliers(ctx, candidateIds);
+  const fitnessMultipliers = await loadFitnessMultipliers(
+    ctx,
+    candidateIds,
+    classifyTask(args.task)
+  );
   for (const c2 of candidates) {
     c2.fitnessMultiplier = fitnessMultipliers.get(c2.id) ?? 1;
   }
@@ -66540,7 +66576,10 @@ async function searchFeedback(ctx, rawArgs) {
   const { data, error: error2 } = await query;
   if (error2) throw new Error(`feedback_search: ${error2.message}`);
   const rows = data ?? [];
-  let ranked = rows;
+  let ranked = rows.map((r2) => ({
+    row: r2,
+    score: 0
+  }));
   if (embedding && rows.length > 0) {
     const ids = rows.map((r2) => r2.id);
     const { data: vecRows, error: vecErr } = await ctx.supabase.from("documents").select("id, embedding").in("id", ids);
@@ -66554,17 +66593,16 @@ async function searchFeedback(ctx, rawArgs) {
         score: cosine2(embedding, vecMap.get(r2.id) ?? null)
       }));
       scored.sort((a2, b2) => b2.score - a2.score);
-      ranked = scored.slice(0, limit2).map((s2) => s2.row);
+      ranked = scored.slice(0, limit2);
     }
   }
-  return ranked.map((r2) => {
+  return ranked.map(({ row: r2, score }) => {
     const v2 = Array.isArray(r2.document_versions) ? r2.document_versions[0] : r2.document_versions;
     const meta = r2.metadata ?? {};
     return {
       id: r2.id,
       title: r2.title,
-      similarity: 0,
-      // placeholder; clients can rely on order, not value
+      similarity: score,
       body: v2?.content ?? "",
       rating: typeof meta.rating === "number" ? meta.rating : null,
       sentiment: meta.sentiment === "positive" || meta.sentiment === "neutral" || meta.sentiment === "negative" ? meta.sentiment : null,

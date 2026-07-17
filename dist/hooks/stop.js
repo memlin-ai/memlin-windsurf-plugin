@@ -9589,6 +9589,332 @@ var ActionMetadataSchema = external_exports.object({
   implementation: ActionImplementationSchema
 });
 
+// packages/shared/dist/task-classifier.js
+var RULES = [
+  // Tests come BEFORE feature/bug — "add tests" / "fix tests" both
+  // belong here.
+  {
+    category: "test",
+    patterns: [
+      "add test",
+      "write test",
+      "fix test",
+      "failing test",
+      "broken test",
+      "flaky test",
+      "test coverage",
+      "unit test",
+      "integration test",
+      "e2e test",
+      "snapshot test",
+      "pytest",
+      "jest",
+      "vitest",
+      "cypress",
+      "playwright"
+    ],
+    regex: [/\bspecs?\b/, /\bfixtures?\b/, /\bmock(?:ing|s)?\b/]
+  },
+  // Migration before bug/feature — "migrate to" / "rollback migration"
+  // both belong here even if the task also says "add".
+  {
+    category: "migration",
+    patterns: [
+      "migration",
+      "migrate to",
+      "migrate from",
+      "rollback migration",
+      "schema change",
+      "alter table",
+      "add column",
+      "drop column",
+      "create table",
+      "create index",
+      "upgrade to v",
+      "data migration",
+      "backfill"
+    ]
+  },
+  // Infra before feature — "add CI step" should be infra, not feature.
+  {
+    category: "infra",
+    patterns: [
+      "github action",
+      "github workflow",
+      "gh workflow",
+      "azure pipeline",
+      "ci pipeline",
+      "ci/cd",
+      "deploy to",
+      "dockerfile",
+      "docker-compose",
+      "kubernetes",
+      "helm chart",
+      "terraform",
+      "pulumi",
+      "env var",
+      "environment variable",
+      "config file",
+      "next.config",
+      "webpack",
+      "esbuild config",
+      // Install / tooling-setup ops — a recurring live theme for a product
+      // whose users install agent plugins/extensions ("do we have to
+      // reinstall it", "full install", pasted `.vsix` install sessions).
+      // Kept SPECIFIC (no bare "install") so "ship the v2 onboarding"
+      // stays a feature and "fix the install button" stays a bug.
+      "reinstall",
+      "re-install",
+      "uninstall",
+      "un-install",
+      "full install",
+      "fresh install",
+      "clean install",
+      "install the extension",
+      "install-extension",
+      "install the plugin",
+      "install the cli",
+      "install cursor",
+      ".vsix",
+      "vsix"
+    ]
+  },
+  // Docs before feature — "add README" is docs.
+  {
+    category: "docs",
+    patterns: [
+      "readme",
+      "add docs",
+      "write docs",
+      "update docs",
+      "doc string",
+      "docstring",
+      "jsdoc",
+      "tsdoc",
+      "comment block",
+      "runbook",
+      "changelog",
+      "release notes",
+      "inline comment"
+    ]
+  },
+  // Review — formal PR review + lint, AND informal product feedback /
+  // shaping prompts ("page is useless", "I dont want X") that appear a
+  // lot in live data. These are review-class because they're commenting
+  // on something that already exists rather than asking for new work.
+  // Bias conservative: only obvious feedback phrasings, no broad "we
+  // need to" / "should be" patterns that swallow legitimate features.
+  {
+    category: "review",
+    patterns: [
+      "review pr",
+      "review the pr",
+      "review this",
+      "lint",
+      "eslint",
+      "prettier",
+      "code review",
+      "review changes",
+      "pr feedback",
+      // Feedback / shaping phrasings — informal but unambiguous.
+      "doesn't work for me",
+      "is useless",
+      "page is broken",
+      "this is broken",
+      "too much friction",
+      "doesn't feel right",
+      "reword",
+      "rephrase",
+      // Taste / preference feedback on something that already exists.
+      "don't like",
+      "dont like",
+      "don't love",
+      "dont love",
+      "not a fan",
+      "looks off",
+      "looks wrong"
+    ]
+  },
+  // Refactor before bug — "refactor auth.ts" is refactor, not bug.
+  {
+    category: "refactor",
+    patterns: [
+      "refactor",
+      "rename",
+      "clean up",
+      "cleanup",
+      "consolidate",
+      "simplify",
+      "extract function",
+      "extract method",
+      "extract component",
+      "move file",
+      "reorganize",
+      "restructure",
+      "inline",
+      "dedupe",
+      "remove dead code"
+    ]
+  },
+  // Bug — explicit bug words. Comes after refactor + test so
+  // "fix test" lands in test not bug. The "still …" / "doesn't work" /
+  // "is it fixed" / "did you fix" phrasings were the single biggest
+  // bucket of live UNKNOWN tasks (bare-fix imperatives + state-check
+  // follow-ups like "is it fixed" / "still says … wrong" / "merge it and
+  // fix it"). They're unambiguous fix-intent — the user is reporting or
+  // chasing a defect — so they belong here even without the word "bug".
+  {
+    category: "bug",
+    patterns: [
+      "fix bug",
+      "fix the bug",
+      "bug in",
+      "bug where",
+      "crash",
+      "crashes when",
+      "error when",
+      "broken",
+      "regression",
+      "reproduces",
+      "reproduce",
+      "memory leak",
+      "race condition",
+      "off-by-one",
+      "null pointer",
+      "segfault",
+      "panic",
+      // State-check follow-ups — "is it fixed?", "did you fix it",
+      // "still broken". These dominate real conversational task text.
+      "is it fixed",
+      "is this fixed",
+      "is that fixed",
+      "is it fully fixed",
+      "fully fixed",
+      "did you fix",
+      "did u fix",
+      "didn't fix",
+      "didnt fix",
+      "didn't you fix",
+      "didnt you fix",
+      "not fixed yet",
+      "still not fixed",
+      "still broken",
+      "still failing",
+      "still fails",
+      "still doesn't work",
+      "still doesnt work",
+      "still says",
+      "still shows",
+      // Failure reports without the word "bug".
+      "doesn't work",
+      "does not work",
+      "doesnt work",
+      "not working",
+      "isn't working",
+      "isnt working",
+      "no longer works",
+      "stopped working",
+      "won't work",
+      "wont work"
+    ],
+    // "fix X" alone is bug only when X looks like a problem, OR when the
+    // object is a pronoun ("fix it / this / them / everything") — a bare
+    // fix imperative is always defect work. Word boundary on the pronoun
+    // so "fix iteration" / "fix item" don't false-match.
+    regex: [
+      /\bfix\b.*\b(crash|error|broken|failure|leak)\b/,
+      /\bfix(?:es|ed|ing)?\s+(?:it|this|that|them|these|those|all|everything)\b/
+    ]
+  },
+  // Chore — dependency / housekeeping. Before feature.
+  // Informal-phrasing patterns ("knock off", "close gaps", "keep
+  // pushing") added from live-unknown samples — they're chore-class
+  // intent ("clear the punch list") not feature/refactor work. Typos
+  // in the input ("close thse gaps") are NOT handled here — they're
+  // the LLM rescue's job downstream.
+  {
+    category: "chore",
+    patterns: [
+      "bump version",
+      "bump dependency",
+      "update dependency",
+      "update package",
+      "update deps",
+      "pnpm update",
+      "npm update",
+      "yarn upgrade",
+      "package.json",
+      "remove unused",
+      "tidy",
+      "housekeeping",
+      "knock off",
+      "knock them off",
+      "knocking them off",
+      "close the gap",
+      "close these gap",
+      "close those gap",
+      "close gaps",
+      "close the gaps",
+      "close these gaps",
+      "close those gaps",
+      "clean these up",
+      "punch list",
+      "sweep through",
+      "tighten up",
+      "keep pushing",
+      "keep going"
+    ],
+    // `bump pnpm dependency`, `bump npm dep`, etc. — substring patterns
+    // would need every middle word; a regex handles them in one rule.
+    regex: [/\bbump\b.*\b(dep(?:s|endency|endencies)?|version|package)\b/]
+  },
+  // Feature — broad "add X / build X / implement X" patterns. Last
+  // because many other categories share these words. Includes a few
+  // informal "we need X" / "I want X" patterns that landed as unknown
+  // in live data.
+  {
+    category: "feature",
+    patterns: [
+      "add feature",
+      "new feature",
+      "build a",
+      "build the",
+      "implement",
+      "introduce",
+      "support for",
+      "wire up",
+      "integrate with",
+      "connect to",
+      "plug in",
+      "ship it",
+      "ship the",
+      "i want to",
+      "we need a",
+      "we need the"
+    ],
+    regex: [
+      /\badd(?:ing)? (?:a |an |the )?(?:new )?(?!test|doc|comment|migration|column|index|table)\w+/,
+      /\bcreate(?:s|d)? (?:a |an |the )?(?:new )?(?!test|doc|migration|table|index)\w+/
+    ]
+  }
+];
+function classifyTask(task) {
+  if (!task) return "unknown";
+  const lower = task.toLowerCase().trim();
+  if (!lower) return "unknown";
+  for (const rule of RULES) {
+    for (const pattern of rule.patterns) {
+      if (lower.includes(pattern)) return rule.category;
+    }
+    if (rule.regex) {
+      for (const re of rule.regex) {
+        if (re.test(lower)) return rule.category;
+      }
+    }
+  }
+  return "unknown";
+}
+
 // packages/shared/dist/authority.js
 var AUTHORITY_TIER = {
   PLATFORM: 1,
@@ -9892,8 +10218,12 @@ async function maybeRecordOutcome(ctx, payload) {
   if (!exchange) return;
   const u = exchange.user_message;
   const a = exchange.agent_message;
-  const isNegative = classifyNegativeFeedback(u).isNegative || hasAgentApology(a);
+  const feedback = classifyNegativeFeedback(u);
+  const agentApology = hasAgentApology(a);
+  const isNegative = feedback.isNegative || agentApology;
   const outcome = isNegative ? "negative" : "positive";
+  const severity = isNegative ? feedback.severity !== "none" ? feedback.severity : agentApology ? "medium" : "none" : "none";
+  const taskCategory = classifyTask(lastResolve.task);
   let attribution = {
     applied_item_ids: [],
     attribution_mode: "replay_unavailable"
@@ -9916,6 +10246,10 @@ async function maybeRecordOutcome(ctx, payload) {
       metadata: {
         audit_id: lastResolve.audit_id,
         outcome,
+        severity,
+        kinds: feedback.kinds,
+        agent_apology: agentApology,
+        task_category: taskCategory,
         applied_item_ids: attribution.applied_item_ids,
         attribution_mode: attribution.attribution_mode
       }
