@@ -4174,7 +4174,7 @@ var MemlinApiClient = class {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
   /** GET /documents — list, filtered. */
-  async listDocuments(opts = {}) {
+  async listDocuments(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.kinds) for (const k of opts.kinds) qs.append("kind", k);
     if (opts.scopes) for (const s of opts.scopes) qs.append("scope", s);
@@ -4183,15 +4183,17 @@ var MemlinApiClient = class {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    const res = await this.request("GET", `/documents${suffix}`);
+    const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
     return res.documents.map((d) => {
       const { status, ...rest } = d;
       return status == null ? rest : { ...rest, status };
     });
   }
   /** POST /documents — create or update a document. */
-  async writeDocument(input) {
-    return this.request("POST", "/documents", input);
+  async writeDocument(input, callOpts = {}) {
+    return this.request("POST", "/documents", input, {
+      accountId: callOpts.accountId
+    });
   }
   /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
   async syncWorkspaceContract(input) {
@@ -9164,7 +9166,14 @@ var DOCUMENT_KINDS = [
 ];
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];
-var MEMORY_TYPES = ["correction", "preference", "fact", "reference", "episodic"];
+var MEMORY_TYPES = [
+  "correction",
+  "preference",
+  "fact",
+  "reference",
+  "episodic",
+  "working"
+];
 var AGENT_KINDS = [
   "claude-code",
   "claude-ai",
@@ -10057,6 +10066,144 @@ ${text}`);
     log(`session scribe failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
+function workingMemoryPath(sessionId) {
+  return `sessions/${sessionId}/working.md`;
+}
+var WORKING_MEMORY_MAX_CHARS = 2400;
+function buildWorkingMemoryContent(input) {
+  const updatedAt = input.updatedAt ?? (/* @__PURE__ */ new Date()).toISOString();
+  const lines = [
+    "# Session working memory",
+    "",
+    `- session_id: \`${input.sessionId}\``,
+    `- updated_at: ${updatedAt}`,
+    ""
+  ];
+  if (input.task?.trim()) {
+    lines.push("## Current task", "", input.task.trim(), "");
+  }
+  const user = (input.userMessage ?? "").trim();
+  const agent = (input.agentMessage ?? "").trim();
+  if (user || agent) {
+    lines.push("## Latest exchange", "");
+    if (user) lines.push(`**User:** ${truncateWorkingText(user, 800)}`, "");
+    if (agent) lines.push(`**Agent:** ${truncateWorkingText(agent, 1200)}`, "");
+  }
+  if (!input.task?.trim() && !user && !agent) {
+    lines.push("_No task or exchange captured yet for this session._", "");
+  }
+  return truncateWorkingText(lines.join("\n").trimEnd() + "\n", WORKING_MEMORY_MAX_CHARS);
+}
+function truncateWorkingText(text, max) {
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}\u2026`;
+}
+async function maybeUpsertWorkingMemory(ctx, payload) {
+  const transcriptSessionId = payload.transcript_path?.split("/").pop()?.replace(/\.jsonl$/, "");
+  const sessionId = payload.session_id ?? transcriptSessionId ?? null;
+  if (!sessionId) {
+    log("working memory: skipped \u2014 no session_id");
+    return;
+  }
+  const cwd = payload.cwd ?? process.cwd();
+  let accountOverride;
+  let resolvedProjectId = null;
+  let hazard = "none";
+  try {
+    const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
+    resolvedProjectId = resolved.project_id;
+    if (resolved.account_id && resolved.account_id !== ctx.config.account_id) {
+      accountOverride = resolved.account_id;
+    }
+    hazard = accountBindingHazard(resolved, { allowMismatch: allowAccountMismatch() });
+  } catch {
+  }
+  if (!isWorkspaceActive({
+    resolvedProjectId,
+    workspaceBound: ctx.workspaceBound
+  })) {
+    log("working memory: skipped \u2014 not a known Memlin workspace");
+    return;
+  }
+  if (hazard === "block") {
+    log("working memory: BLOCKED \u2014 account-binding mismatch");
+    return;
+  }
+  const state = await readState();
+  const last = getLastResolveForSession(state, sessionId);
+  const exchange = payload.transcript_path ? await readLastExchange(payload.transcript_path) : null;
+  const content = buildWorkingMemoryContent({
+    sessionId,
+    task: last?.task ?? null,
+    userMessage: exchange?.user_message ?? null,
+    agentMessage: exchange?.agent_message ?? null
+  });
+  if (!last?.task && !exchange) {
+    log("working memory: skipped \u2014 no resolve or exchange yet");
+    return;
+  }
+  const path8 = workingMemoryPath(sessionId);
+  const callOpts = accountOverride ? { accountId: accountOverride } : {};
+  let documentId = state.working_memory_ids?.[sessionId] ?? null;
+  if (!documentId) {
+    try {
+      const docs = await withTimeout(
+        ctx.api.listDocuments(
+          {
+            kinds: ["memory"],
+            ...resolvedProjectId ? { project_id: resolvedProjectId } : {}
+          },
+          callOpts
+        ),
+        TIMEOUT_MS,
+        []
+      );
+      const hit = docs.find((d) => d.path === path8);
+      if (hit) documentId = hit.id;
+    } catch (err) {
+      log(
+        `working memory: list failed (continuing create): ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+  try {
+    const write = ctx.api.writeDocument(
+      {
+        document_id: documentId,
+        scope: resolvedProjectId ? "project" : "team",
+        kind: "memory",
+        title: `Working memory \u2014 ${sessionId.slice(0, 12)}`,
+        path: path8,
+        content,
+        commit_message: "session working memory",
+        project_id: resolvedProjectId,
+        metadata: {
+          memory_type: "working",
+          session_id: sessionId
+        }
+      },
+      callOpts
+    );
+    const result = await withTimeout(write, TIMEOUT_MS, null);
+    if (!result) {
+      log("working memory: write timed out");
+      return;
+    }
+    const next = await readState();
+    next.working_memory_ids = {
+      ...next.working_memory_ids ?? {},
+      [sessionId]: result.document_id
+    };
+    const ids = Object.entries(next.working_memory_ids);
+    if (ids.length > 64) {
+      next.working_memory_ids = Object.fromEntries(ids.slice(ids.length - 64));
+    }
+    await writeState(next);
+    log(`working memory: upserted ${path8} (v${result.version_number})`);
+  } catch (err) {
+    log(`working memory failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 async function runStopHandler(payload) {
   const ctx = await getApi();
   if (!ctx) return;
@@ -10064,7 +10211,8 @@ async function runStopHandler(payload) {
     heartbeat(ctx),
     maybeProposeMemory(ctx, payload),
     maybeScribeSession(ctx, payload),
-    maybeRecordOutcome(ctx, payload)
+    maybeRecordOutcome(ctx, payload),
+    maybeUpsertWorkingMemory(ctx, payload)
   ]);
 }
 

@@ -7600,7 +7600,14 @@ var DOCUMENT_KINDS = [
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];
 var SEARCHABLE_KINDS = ["skill", "memory", "goal", "schema", "decision"];
-var MEMORY_TYPES = ["correction", "preference", "fact", "reference", "episodic"];
+var MEMORY_TYPES = [
+  "correction",
+  "preference",
+  "fact",
+  "reference",
+  "episodic",
+  "working"
+];
 var AGENT_KINDS = [
   "claude-code",
   "claude-ai",

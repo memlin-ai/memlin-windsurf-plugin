@@ -614,7 +614,7 @@ var MemlinApiClient = class {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
   /** GET /documents — list, filtered. */
-  async listDocuments(opts = {}) {
+  async listDocuments(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.kinds) for (const k of opts.kinds) qs.append("kind", k);
     if (opts.scopes) for (const s of opts.scopes) qs.append("scope", s);
@@ -623,15 +623,17 @@ var MemlinApiClient = class {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    const res = await this.request("GET", `/documents${suffix}`);
+    const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
     return res.documents.map((d) => {
       const { status, ...rest } = d;
       return status == null ? rest : { ...rest, status };
     });
   }
   /** POST /documents — create or update a document. */
-  async writeDocument(input) {
-    return this.request("POST", "/documents", input);
+  async writeDocument(input, callOpts = {}) {
+    return this.request("POST", "/documents", input, {
+      accountId: callOpts.accountId
+    });
   }
   /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
   async syncWorkspaceContract(input) {

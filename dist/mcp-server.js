@@ -57872,7 +57872,14 @@ var DOCUMENT_STATUS_TRANSITIONS = {
   approved: ["draft", "archived"],
   archived: ["draft"]
 };
-var MEMORY_TYPES = ["correction", "preference", "fact", "reference", "episodic"];
+var MEMORY_TYPES = [
+  "correction",
+  "preference",
+  "fact",
+  "reference",
+  "episodic",
+  "working"
+];
 var DEFAULT_MEMORY_TYPE = "fact";
 var LEGACY_MEMORY_TYPE_MAP = {
   feedback: "correction",
@@ -59329,7 +59336,7 @@ var TOOLS = [
         },
         include_open_threads: {
           type: "boolean",
-          description: 'Additionally pull OPEN episodic threads (predictions / follow-ups) whose entities match \u2014 by entity + status, bypassing similarity. For serial-content tasks (episodes, newsletters, recaps): "last week we flagged NVDA" gets grounded in the actual prior claim.'
+          description: "Deprecated no-op. Open episodic threads are always pulled by entity + status. Kept for older clients."
         },
         entities: {
           type: "array",
@@ -61116,7 +61123,9 @@ var CLIENT_WRITABLE_METADATA_KEYS = /* @__PURE__ */ new Set([
   "component-links",
   "examples",
   "anti-examples",
-  "custom"
+  "custom",
+  // Tier-0 session working memory — session_id scopes force-include.
+  "session_id"
 ]);
 function filterClientMetadata(raw, kind2) {
   if (!raw) return {};
@@ -62498,6 +62507,60 @@ async function assemblePinned(ctx, projectId, agentKind2 = null, onTargetMismatc
   });
   return out;
 }
+var SESSION_WORKING_MAX_TOKENS = 600;
+async function assembleSessionWorking(ctx, sessionId, projectId) {
+  let query = ctx.supabase.from("documents").select(
+    `id, account_id, created_by, locked_to_owners, scope, project_id, kind, title,
+       path, status, metadata, updated_at,
+       document_versions!documents_current_version_fk ( content, version_number, author_id )`
+  ).eq("account_id", ctx.accountId).eq("kind", "memory").eq("memory_type", "working").eq("metadata->>session_id", sessionId).eq("locked_to_owners", false).limit(5);
+  if (projectId) query = query.or(`project_id.is.null,project_id.eq.${projectId}`);
+  else query = query.is("project_id", null);
+  const { data, error: error2 } = await query;
+  if (error2) {
+    console.warn(`[resolver] session working fetch failed: ${error2.message}`);
+    return [];
+  }
+  const out = [];
+  let used = 0;
+  for (const row of data ?? []) {
+    const metadata = row.metadata ?? {};
+    if (metadata.memory_type !== "working") continue;
+    if (metadata.session_id !== sessionId) continue;
+    if (!isDirectResolverDocumentEligible(
+      row,
+      { accountId: ctx.accountId, userId: ctx.userId, projectId },
+      {
+        projectAssociation: "account-or-active-project",
+        expectedKind: ["memory"]
+      }
+    )) {
+      continue;
+    }
+    const version4 = Array.isArray(row.document_versions) ? row.document_versions[0] : row.document_versions;
+    const body = version4?.content ?? "";
+    const cost = estimateTokens(body);
+    if (out.length > 0 && used + cost > SESSION_WORKING_MAX_TOKENS) break;
+    used += cost;
+    out.push({
+      id: row.id,
+      kind: "memory",
+      title: row.title,
+      body,
+      similarity: 1,
+      citation: {
+        path: row.path ?? null,
+        version_number: version4?.version_number ?? 1,
+        updated_at: row.updated_at ?? "",
+        author_id: version4?.author_id ?? null
+      },
+      component_id: null,
+      component_name: null,
+      memory_type: "working"
+    });
+  }
+  return out;
+}
 function buildDeliveredContextCounts(deliveredItems) {
   const laneCount = (...lanes) => {
     const accepted = new Set(lanes);
@@ -62514,6 +62577,7 @@ function buildDeliveredContextCounts(deliveredItems) {
     decisions: laneCount("decision"),
     required: laneCount("required"),
     pinned: laneCount("pinned"),
+    session_working: laneCount("session_working"),
     open_threads: laneCount("open_thread"),
     pack_context: laneCount("pack_context"),
     claim_guardrails: laneCount(
@@ -62538,6 +62602,7 @@ function dedupeResolveBundleDocumentLanes(bundle) {
   });
   bundle.required_core = keepFirst(bundle.required_core);
   bundle.pinned = keepFirst(bundle.pinned);
+  bundle.session_working = keepFirst(bundle.session_working);
   bundle.open_threads = keepFirst(bundle.open_threads);
   bundle.pack_context = keepFirst(bundle.pack_context);
   if (bundle.claim_guardrails) {
@@ -62610,6 +62675,12 @@ function buildDeliveredItemSnapshots(bundle) {
     () => "pinned",
     () => "directive",
     () => "force_included_pin"
+  );
+  add(
+    bundle.session_working,
+    () => "session_working",
+    () => "session_working",
+    () => "session_id_match"
   );
   add(
     bundle.open_threads,
@@ -62741,10 +62812,8 @@ var AssembleBundleArgs = external_exports.object({
   /** Explicit marginal-value cutoff fraction (0..1), overriding the account
    *  setting. For eval sweeps and diagnostics; 0 disables. */
   marginal_cutoff: external_exports.number().min(0).max(1).optional(),
-  /** Additionally pull OPEN episodic threads (predictions / follow-ups)
-   *  whose entities match — by entity + status, deliberately bypassing the
-   *  similarity threshold. Serial-content agents set this so "last week we
-   *  flagged NVDA" is grounded in the actual prior claim. */
+  /** Deprecated no-op. Open threads are always pulled (S1). Kept so older
+   *  clients that still send the flag don't fail schema validation. */
   include_open_threads: external_exports.boolean().optional(),
   /** Entities to match open threads against. When omitted, entities are
    *  inferred by word-boundary matching thread entities in the task text. */
@@ -62863,7 +62932,10 @@ var MEMORY_TYPE_WEIGHTS = {
   reference: 1,
   // Episodes are recalled by entity + time through the open-threads lane,
   // not by similarity ranking — neutral weight in the semantic lane.
-  episodic: 1
+  episodic: 1,
+  // Session working memory is force-included by session_id only — never
+  // compete in the semantic lane (weight 0 + explicit skip below).
+  working: 0
 };
 var ACTIVE_COMPONENT_BOOST = 0.15;
 var SAME_REPO_BOOST = 0.1;
@@ -63833,6 +63905,19 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         }
         if (c2.kind === "memory" && typeof meta?.memory_type === "string") {
           c2.memory_type = normalizeMemoryType(meta.memory_type);
+        }
+        if (c2.kind === "memory" && c2.memory_type === "working") {
+          omittedCandidates.push({
+            id: c2.id,
+            kind: c2.kind,
+            title: c2.title,
+            similarity: c2.similarity,
+            reason: "status_filtered",
+            detail: "session working memory is force-included by session_id, not semantic rank",
+            path: c2.citation.path
+          });
+          candidates.splice(i2, 1);
+          continue;
         }
         const inherited = isProjectBrainInheritedDoc(projectId, c2, scopeRow);
         const inheritedDefault = meta?.default_for_projects === true || projectBrainPolicy.optionalChainIds.has(c2.id);
@@ -64933,6 +65018,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     recent_file_edits: recentFileEdits,
     work_in_flight: workInFlight,
     open_threads: [],
+    session_working: [],
     pack_context: [],
     recent_feedback: []
   };
@@ -64984,68 +65070,89 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     } catch {
     }
   }
-  if (args.include_open_threads) {
+  if (audit.sessionId) {
     try {
-      const { data: threadRows, error: threadErr } = await ctx.supabase.rpc("list_open_threads", {
-        p_account_id: ctx.accountId,
-        p_entities: args.entities && args.entities.length > 0 ? args.entities : null,
-        p_status: "open",
-        p_project_id: projectId ?? null,
-        p_limit: 50
-      });
-      if (!threadErr && Array.isArray(threadRows)) {
-        const taskLower = ` ${args.task.toLowerCase()} `;
-        const higherPriorityIds = /* @__PURE__ */ new Set([
-          ...bundle.required_core.map((item) => item.id),
-          ...bundle.pinned.map((item) => item.id)
-        ]);
-        const OPEN_THREADS_MAX = 5;
-        const OPEN_THREADS_MAX_TOKENS = 1e3;
-        let threadTokens = 0;
-        for (const raw of threadRows) {
-          if (bundle.open_threads.length >= OPEN_THREADS_MAX) break;
-          const id = raw.id;
-          if (higherPriorityIds.has(id)) continue;
-          const entities = Array.isArray(raw.entities) ? raw.entities.filter((e2) => typeof e2 === "string") : [];
-          if (!args.entities || args.entities.length === 0) {
-            const hit = entities.some((e2) => {
-              const esc2 = e2.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-              return new RegExp(`(?:^|\\W)${esc2}(?:\\W|$)`).test(taskLower);
-            });
-            if (!hit) continue;
-          }
-          const body = typeof raw.content === "string" ? raw.content : "";
-          const tokens = estimateTokens(body);
-          if (threadTokens + tokens > OPEN_THREADS_MAX_TOKENS && bundle.open_threads.length > 0) {
-            break;
-          }
-          threadTokens += tokens;
-          higherPriorityIds.add(id);
-          bundle.open_threads.push({
-            id,
-            kind: "memory",
-            title: raw.title ?? "",
-            body,
-            similarity: 0,
-            citation: {
-              path: raw.path ?? null,
-              version_number: raw.version_number ?? 1,
-              updated_at: raw.updated_at ?? "",
-              author_id: null
-            },
-            component_id: null,
-            component_name: null,
-            thread: {
-              status: "open",
-              occurred_at: raw.occurred_at ?? null,
-              entities,
-              resolves: raw.resolves ?? null
-            }
-          });
-        }
+      const working = await assembleSessionWorking(ctx, audit.sessionId, projectId);
+      const higherPriorityIds = /* @__PURE__ */ new Set([
+        ...bundle.required_core.map((item) => item.id),
+        ...bundle.pinned.map((item) => item.id)
+      ]);
+      for (const item of working) {
+        if (higherPriorityIds.has(item.id)) continue;
+        bundle.session_working.push(item);
+        higherPriorityIds.add(item.id);
       }
-    } catch {
+      if (bundle.session_working.length > 0) {
+        const workingIds = new Set(bundle.session_working.map((i2) => i2.id));
+        bundle.memory = bundle.memory.filter((m2) => !workingIds.has(m2.id));
+      }
+    } catch (e2) {
+      console.warn(
+        `[resolver] session working assembly failed: ${e2 instanceof Error ? e2.message : String(e2)}`
+      );
     }
+  }
+  try {
+    const { data: threadRows, error: threadErr } = await ctx.supabase.rpc("list_open_threads", {
+      p_account_id: ctx.accountId,
+      p_entities: args.entities && args.entities.length > 0 ? args.entities : null,
+      p_status: "open",
+      p_project_id: projectId ?? null,
+      p_limit: 50
+    });
+    if (!threadErr && Array.isArray(threadRows)) {
+      const taskLower = ` ${args.task.toLowerCase()} `;
+      const higherPriorityIds = /* @__PURE__ */ new Set([
+        ...bundle.required_core.map((item) => item.id),
+        ...bundle.pinned.map((item) => item.id),
+        ...bundle.session_working.map((item) => item.id)
+      ]);
+      const OPEN_THREADS_MAX = 5;
+      const OPEN_THREADS_MAX_TOKENS = 1e3;
+      let threadTokens = 0;
+      for (const raw of threadRows) {
+        if (bundle.open_threads.length >= OPEN_THREADS_MAX) break;
+        const id = raw.id;
+        if (higherPriorityIds.has(id)) continue;
+        const entities = Array.isArray(raw.entities) ? raw.entities.filter((e2) => typeof e2 === "string") : [];
+        if (!args.entities || args.entities.length === 0) {
+          const hit = entities.some((e2) => {
+            const esc2 = e2.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            return new RegExp(`(?:^|\\W)${esc2}(?:\\W|$)`).test(taskLower);
+          });
+          if (!hit) continue;
+        }
+        const body = typeof raw.content === "string" ? raw.content : "";
+        const tokens = estimateTokens(body);
+        if (threadTokens + tokens > OPEN_THREADS_MAX_TOKENS && bundle.open_threads.length > 0) {
+          break;
+        }
+        threadTokens += tokens;
+        higherPriorityIds.add(id);
+        bundle.open_threads.push({
+          id,
+          kind: "memory",
+          title: raw.title ?? "",
+          body,
+          similarity: 0,
+          citation: {
+            path: raw.path ?? null,
+            version_number: raw.version_number ?? 1,
+            updated_at: raw.updated_at ?? "",
+            author_id: null
+          },
+          component_id: null,
+          component_name: null,
+          thread: {
+            status: "open",
+            occurred_at: raw.occurred_at ?? null,
+            entities,
+            resolves: raw.resolves ?? null
+          }
+        });
+      }
+    }
+  } catch {
   }
   dedupeResolveBundleDocumentLanes(bundle);
   const deliveredSemanticIds = /* @__PURE__ */ new Set([
@@ -65207,13 +65314,10 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const empty_context_reason = contextCounts.total > 0 ? null : omittedCandidates.length > 0 ? "all_candidates_filtered" : "no_candidates_found";
   const auditMetadata = {
     task: args.task,
-    // Open-threads lane (include_open_threads) — which threads were pulled
-    // by entity, so audit replay shows the recall extension explicitly.
-    ...args.include_open_threads ? {
-      include_open_threads: true,
-      thread_entities: args.entities ?? null,
-      open_thread_ids: bundle.open_threads.map((t2) => t2.id)
-    } : {},
+    // Open-threads lane — always on; record which threads were pulled by entity.
+    include_open_threads: true,
+    thread_entities: args.entities ?? null,
+    open_thread_ids: bundle.open_threads.map((t2) => t2.id),
     // Subscribed-pack lane — which packs/items fed this bundle, for audit
     // replay attribution.
     ...bundle.pack_context.length > 0 ? {
@@ -66792,6 +66896,7 @@ function renderBundleText(result, task) {
     }
     if (b2.required_core?.length) sections.push(["Required core", b2.required_core]);
     if (b2.pinned?.length) sections.push(["Pinned directives", b2.pinned]);
+    if (b2.session_working?.length) sections.push(["Session working memory", b2.session_working]);
     const skills = [b2.primary_skill, ...b2.supporting_skills ?? []].filter(
       (s2) => Boolean(s2)
     );
@@ -67788,7 +67893,7 @@ var MemlinApiClient = class {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
   /** GET /documents — list, filtered. */
-  async listDocuments(opts = {}) {
+  async listDocuments(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.kinds) for (const k2 of opts.kinds) qs.append("kind", k2);
     if (opts.scopes) for (const s2 of opts.scopes) qs.append("scope", s2);
@@ -67797,15 +67902,17 @@ var MemlinApiClient = class {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    const res = await this.request("GET", `/documents${suffix}`);
+    const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
     return res.documents.map((d2) => {
       const { status, ...rest } = d2;
       return status == null ? rest : { ...rest, status };
     });
   }
   /** POST /documents — create or update a document. */
-  async writeDocument(input) {
-    return this.request("POST", "/documents", input);
+  async writeDocument(input, callOpts = {}) {
+    return this.request("POST", "/documents", input, {
+      accountId: callOpts.accountId
+    });
   }
   /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
   async syncWorkspaceContract(input) {
