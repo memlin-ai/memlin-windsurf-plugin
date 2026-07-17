@@ -8555,7 +8555,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.33";
+  cachedAgentVersion = "0.1.34";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -10321,12 +10321,15 @@ async function main() {
   let projectId;
   let accountOverride = null;
   let resolvedAccountId = null;
+  let bindingSource;
   if (parsed.project !== void 0) {
     projectId = parsed.project;
+    bindingSource = parsed.project ? "explicit_project" : "account_scope";
   } else {
     const resolved = await resolveProject(api, cwd, config.project_id);
     projectId = resolved.project_id;
     resolvedAccountId = resolved.account_id;
+    bindingSource = resolved.reason === "git-remote" ? "git_remote" : resolved.reason === "local-path" ? "local_path" : resolved.reason === "config" ? workspaceBound ? "workspace_pin" : "startup_default" : gitRemote ? "unresolved" : "account_scope";
     if (resolved.account_id && resolved.account_id !== config.account_id) {
       accountOverride = resolved.account_id;
     }
@@ -10357,6 +10360,8 @@ async function main() {
         cwd,
         git_remote: gitRemote,
         git_branch: readGitBranch(cwd),
+        invocation_source: hookOutFile ? "prompt_hook" : "cli",
+        binding_source: bindingSource,
         ...parsed.maxTokens !== void 0 ? { max_tokens: parsed.maxTokens } : {},
         ...parsed.kinds ? { kinds: parsed.kinds } : {},
         ...parsed.hybrid !== void 0 ? { hybrid: parsed.hybrid } : {},

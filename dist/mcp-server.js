@@ -26451,12 +26451,12 @@ var require_extend_shallow = __commonJS({
     };
     function assign(a2, b2) {
       for (var key in b2) {
-        if (hasOwn2(b2, key)) {
+        if (hasOwn3(b2, key)) {
           a2[key] = b2[key];
         }
       }
     }
-    function hasOwn2(obj, key) {
+    function hasOwn3(obj, key) {
       return Object.prototype.hasOwnProperty.call(obj, key);
     }
   }
@@ -62668,9 +62668,7 @@ function dedupeResolveBundleDocumentLanes(bundle) {
   if (bundle.claim_guardrails) {
     bundle.claim_guardrails.approved = keepFirst(bundle.claim_guardrails.approved);
     bundle.claim_guardrails.blocked = keepFirst(bundle.claim_guardrails.blocked);
-    bundle.claim_guardrails.competitor_facts = keepFirst(
-      bundle.claim_guardrails.competitor_facts
-    );
+    bundle.claim_guardrails.competitor_facts = keepFirst(bundle.claim_guardrails.competitor_facts);
     if (bundle.claim_guardrails.approved.length === 0 && bundle.claim_guardrails.blocked.length === 0 && bundle.claim_guardrails.competitor_facts.length === 0) {
       bundle.claim_guardrails = null;
     }
@@ -62877,8 +62875,30 @@ var AssembleBundleArgs = external_exports.object({
   include_open_threads: external_exports.boolean().optional(),
   /** Entities to match open threads against. When omitted, entities are
    *  inferred by word-boundary matching thread entities in the task text. */
-  entities: external_exports.array(external_exports.string().min(1).max(64)).max(16).optional()
+  entities: external_exports.array(external_exports.string().min(1).max(64)).max(16).optional(),
+  /** Transport that initiated this resolve. Diagnostic only; it never changes
+   * retrieval, eligibility, or ranking behavior. */
+  invocation_source: external_exports.enum(["mcp_tool", "prompt_hook", "cli", "api", "web", "internal"]).optional(),
+  /** How the caller selected project scope. Diagnostic only; the server
+   * derives binding_status from the effective project plus this source. */
+  binding_source: external_exports.enum([
+    "explicit_project",
+    "workspace_pin",
+    "git_remote",
+    "local_path",
+    "startup_default",
+    "account_scope",
+    "unresolved"
+  ]).optional()
 });
+function resolveRoutingAuditMetadata(args, projectId) {
+  const bindingSource = args.binding_source ?? (projectId ? "explicit_project" : args.cwd || args.git_remote ? "unresolved" : "account_scope");
+  return {
+    invocation_source: args.invocation_source ?? "internal",
+    binding_source: bindingSource,
+    binding_status: projectId ? "bound" : bindingSource === "account_scope" ? "account_scope" : "unbound"
+  };
+}
 var BUDGET_MICRO_TOKENS = 1500;
 var BUDGET_STANDARD_TOKENS = 4e3;
 var BUDGET_DEEP_TOKENS = 8e3;
@@ -63089,10 +63109,7 @@ async function loadFitnessMultipliers(ctx, candidateIds, resolveTaskCategory) {
       accumulateOutcomeCounts(meta, itemIds, resolveTaskCategory, posCounts, negCounts);
     }
     for (const cid of candidateIds) {
-      multipliers.set(
-        cid,
-        fitnessFromCounts(posCounts.get(cid) ?? 0, negCounts.get(cid) ?? 0)
-      );
+      multipliers.set(cid, fitnessFromCounts(posCounts.get(cid) ?? 0, negCounts.get(cid) ?? 0));
     }
   } catch (err) {
     console.warn(
@@ -63723,7 +63740,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const corpusBudgetPromise = args.max_tokens === void 0 ? (() => {
     const startedAt = Date.now();
     return inferBudgetFromCorpus(ctx, queryVec).catch((e2) => {
-      console.warn(`[resolver] inferBudgetFromCorpus rejected: ${e2 instanceof Error ? e2.message : String(e2)}`);
+      console.warn(
+        `[resolver] inferBudgetFromCorpus rejected: ${e2 instanceof Error ? e2.message : String(e2)}`
+      );
       return null;
     }).finally(() => {
       budgetRpcMs = Date.now() - startedAt;
@@ -63912,7 +63931,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     } else {
       const statusById = /* @__PURE__ */ new Map();
       const scopeRowById = /* @__PURE__ */ new Map();
-      const candidateKindById = new Map(candidates.map((candidate) => [candidate.id, candidate.kind]));
+      const candidateKindById = new Map(
+        candidates.map((candidate) => [candidate.id, candidate.kind])
+      );
       for (const r2 of statusRows ?? []) {
         const expectedKind = candidateKindById.get(r2.id);
         if (!expectedKind || ctx.serviceTokenId && !isDirectResolverDocumentEligible(
@@ -64581,7 +64602,11 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
               similarity: sim,
               est_tokens: estimateTokens(bodyMap.get(twin.id) ?? "")
             });
-            dropInfo.set(twin.id, { keeperTitle: keeper.title, similarity: sim, keptNewerDecision });
+            dropInfo.set(twin.id, {
+              keeperTitle: keeper.title,
+              similarity: sim,
+              keptNewerDecision
+            });
           }
           keeper.collapsedDuplicates = twins;
           dedupeDroppedCount += twins.length;
@@ -65378,16 +65403,23 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const truncationReasons = /* @__PURE__ */ new Set();
   if (requiredCoreTokens > maxTokens) truncationReasons.add("required_core_over_budget");
   if (pinnedTokens > maxTokens) truncationReasons.add("pinned_content_over_budget");
-  if (omittedCandidates.some((candidate) => candidate.reason === "pinned_overflow")) truncationReasons.add("pinned_cap_excluded");
-  const budgetExcluded = omittedCandidates.filter((candidate) => candidate.reason === "budget_excluded");
-  if (budgetExcluded.some((candidate) => candidate.detail.startsWith("path-matched doc:"))) truncationReasons.add("path_document_budget_excluded");
-  if (budgetExcluded.some((candidate) => !candidate.detail.startsWith("path-matched doc:"))) truncationReasons.add("ranked_document_budget_excluded");
-  if (primary && estimateTokens(primary.body) > maxTokens) truncationReasons.add("primary_skill_over_budget");
+  if (omittedCandidates.some((candidate) => candidate.reason === "pinned_overflow"))
+    truncationReasons.add("pinned_cap_excluded");
+  const budgetExcluded = omittedCandidates.filter(
+    (candidate) => candidate.reason === "budget_excluded"
+  );
+  if (budgetExcluded.some((candidate) => candidate.detail.startsWith("path-matched doc:")))
+    truncationReasons.add("path_document_budget_excluded");
+  if (budgetExcluded.some((candidate) => !candidate.detail.startsWith("path-matched doc:")))
+    truncationReasons.add("ranked_document_budget_excluded");
+  if (primary && estimateTokens(primary.body) > maxTokens)
+    truncationReasons.add("primary_skill_over_budget");
   if (used > maxTokens) truncationReasons.add("delivered_context_over_budget");
   if (truncated && truncationReasons.size === 0) truncationReasons.add("other_budget_truncation");
   const empty_context_reason = contextCounts.total > 0 ? null : omittedCandidates.length > 0 ? "all_candidates_filtered" : "no_candidates_found";
   const auditMetadata = {
     task: args.task,
+    ...resolveRoutingAuditMetadata(args, projectId),
     // Open-threads lane — always on; record which threads were pulled by entity.
     include_open_threads: true,
     thread_entities: args.entities ?? null,
@@ -67848,7 +67880,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.33";
+  cachedAgentVersion = "0.1.34";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -69149,6 +69181,74 @@ function filterAbsentOnDisk(paths, rootOverride) {
   return paths.filter((p2) => !existsSync2(path10.join(root, p2)));
 }
 
+// apps/mcp-server/src/request-routing.ts
+function hasOwn2(input, key) {
+  return Object.prototype.hasOwnProperty.call(input, key);
+}
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+async function resolveRequestRouting(args, config2, deps) {
+  const explicitCwd = nonEmptyString(args.cwd);
+  const cwd = explicitCwd ?? config2.cwd;
+  const cwdChanged = cwd !== config2.cwd;
+  const gitRemoteWasExplicit = hasOwn2(args, "git_remote");
+  const explicitGitRemote = nonEmptyString(args.git_remote);
+  const discoveredGitRemote = gitRemoteWasExplicit ? null : deps.readGitRemote(cwd);
+  const gitRemote = explicitGitRemote ?? discoveredGitRemote ?? (!cwdChanged && !gitRemoteWasExplicit ? config2.gitRemote : null);
+  if (hasOwn2(args, "project_id")) {
+    const projectId = nonEmptyString(args.project_id);
+    return {
+      accountId: config2.accountId,
+      projectId,
+      cwd,
+      gitRemote,
+      bindingSource: projectId ? "explicit_project" : "account_scope"
+    };
+  }
+  const pin = await deps.findWorkspaceBinding(cwd);
+  if (pin) {
+    const projectId = pin.binding.project_id ?? null;
+    return {
+      accountId: pin.binding.account_id,
+      projectId,
+      cwd,
+      gitRemote,
+      bindingSource: projectId ? "workspace_pin" : "account_scope"
+    };
+  }
+  const resolved = await deps.resolveProject({
+    accountId: config2.accountId,
+    cwd,
+    gitRemote
+  });
+  if (resolved?.project_id) {
+    return {
+      accountId: resolved.account_id ?? config2.accountId,
+      projectId: resolved.project_id,
+      cwd,
+      gitRemote,
+      bindingSource: resolved.reason === "local-path" ? "local_path" : "git_remote"
+    };
+  }
+  if (!cwdChanged && config2.projectId) {
+    return {
+      accountId: config2.accountId,
+      projectId: config2.projectId,
+      cwd,
+      gitRemote,
+      bindingSource: "startup_default"
+    };
+  }
+  return {
+    accountId: config2.accountId,
+    projectId: null,
+    cwd,
+    gitRemote,
+    bindingSource: gitRemote || explicitCwd ? "unresolved" : "account_scope"
+  };
+}
+
 // apps/mcp-server/src/index.ts
 var MEMLIN_PROD_SUPABASE_URL = "https://nsvqnmvummyxbzupxytl.supabase.co";
 var MEMLIN_PROD_SUPABASE_ANON_KEY = "sb_publishable_EDSbENKAPxGmvigUHqiKOg_l06zoSXG";
@@ -69294,7 +69394,7 @@ function agentHeaders(accessToken, accountId) {
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.1.33",
+    "Memlin-Agent-Version": "0.1.34",
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -69312,16 +69412,56 @@ async function resolveProject2(input) {
     return null;
   }
 }
+var projectResolutionCache = /* @__PURE__ */ new Map();
+var PROJECT_RESOLUTION_TTL_MS = 3e4;
+var PROJECT_RESOLUTION_CACHE_MAX = 200;
+async function resolveProjectCached(input) {
+  const key = JSON.stringify([input.accountId, input.cwd, input.gitRemote]);
+  const cached2 = projectResolutionCache.get(key);
+  if (cached2 && cached2.expiresAt > Date.now()) return cached2.value;
+  const value = await resolveProject2(input);
+  if (projectResolutionCache.size >= PROJECT_RESOLUTION_CACHE_MAX) {
+    const oldest = projectResolutionCache.keys().next().value;
+    if (oldest !== void 0) projectResolutionCache.delete(oldest);
+  }
+  projectResolutionCache.set(key, {
+    expiresAt: Date.now() + PROJECT_RESOLUTION_TTL_MS,
+    value
+  });
+  return value;
+}
 async function resolveViaApi(args, requestCfg) {
   const accessToken = await currentAccessToken(requestCfg.authConfig);
+  const routing = await resolveRequestRouting(
+    args,
+    {
+      accountId: requestCfg.accountId,
+      projectId: requestCfg.projectId,
+      cwd: requestCfg.cwd,
+      gitRemote: requestCfg.gitRemote
+    },
+    {
+      readGitRemote: readGitRemote2,
+      findWorkspaceBinding,
+      resolveProject: ({ accountId, cwd, gitRemote }) => resolveProjectCached({
+        apiUrl: requestCfg.apiUrl,
+        accessToken,
+        accountId,
+        cwd,
+        gitRemote
+      })
+    }
+  );
   const res = await fetch(`${requestCfg.apiUrl.replace(/\/+$/, "")}/resolve`, {
     method: "POST",
-    headers: agentHeaders(accessToken, requestCfg.accountId),
+    headers: agentHeaders(accessToken, routing.accountId),
     body: JSON.stringify({
       ...args,
-      project_id: args.project_id ?? requestCfg.projectId ?? null,
-      cwd: args.cwd ?? requestCfg.cwd,
-      git_remote: args.git_remote ?? requestCfg.gitRemote,
+      project_id: routing.projectId,
+      cwd: routing.cwd,
+      git_remote: routing.gitRemote,
+      invocation_source: "mcp_tool",
+      binding_source: routing.bindingSource,
       ...process.env.MEMLIN_SESSION_ID ? { session_id: process.env.MEMLIN_SESSION_ID } : {}
     })
   });
@@ -69538,7 +69678,7 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.1.33" },
+  { name: "memlin", version: "0.1.34" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
