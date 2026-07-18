@@ -42789,9 +42789,9 @@ var PostgrestBuilder = class {
           if ((fetchError === null || fetchError === void 0 ? void 0 : fetchError.name) === "AbortError" || (fetchError === null || fetchError === void 0 ? void 0 : fetchError.code) === "ABORT_ERR") throw fetchError;
           if (!RETRYABLE_METHODS.includes(_this.method)) throw fetchError;
           if (_this.retryEnabled && attemptCount < DEFAULT_MAX_RETRIES) {
-            const delay = getRetryDelay(attemptCount);
+            const delay2 = getRetryDelay(attemptCount);
             attemptCount++;
-            await sleep(delay, _this.signal);
+            await sleep(delay2, _this.signal);
             continue;
           }
           throw fetchError;
@@ -42799,10 +42799,10 @@ var PostgrestBuilder = class {
         if (shouldRetry(_this.method, res$1.status, attemptCount, _this.retryEnabled)) {
           var _res$headers$get, _res$headers;
           const retryAfterHeader = (_res$headers$get = (_res$headers = res$1.headers) === null || _res$headers === void 0 ? void 0 : _res$headers.get("Retry-After")) !== null && _res$headers$get !== void 0 ? _res$headers$get : null;
-          const delay = retryAfterHeader !== null ? Math.max(0, parseInt(retryAfterHeader, 10) || 0) * 1e3 : getRetryDelay(attemptCount);
+          const delay2 = retryAfterHeader !== null ? Math.max(0, parseInt(retryAfterHeader, 10) || 0) * 1e3 : getRetryDelay(attemptCount);
           await res$1.text();
           attemptCount++;
-          await sleep(delay, _this.signal);
+          await sleep(delay2, _this.signal);
           continue;
         }
         return await _this.processResponse(res$1);
@@ -67886,6 +67886,50 @@ function agentVersion() {
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
 }
+var DEFAULT_REQUEST_TIMEOUT_MS = 15e3;
+var DEFAULT_MAX_RETRIES2 = 2;
+var DEFAULT_RETRY_BASE_DELAY_MS = 250;
+var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504]);
+var RETRIABLE_NETWORK_CODES = /* @__PURE__ */ new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "EPIPE",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EAI_AGAIN",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET"
+]);
+function isRetriableNetworkError(error2) {
+  if (error2 instanceof Error && (error2.name === "TimeoutError" || error2.name === "AbortError")) {
+    return true;
+  }
+  let current = error2;
+  for (let depth = 0; current instanceof Error && depth < 5; depth++) {
+    const code = current.code;
+    if (code && RETRIABLE_NETWORK_CODES.has(code)) return true;
+    current = current.cause;
+  }
+  return false;
+}
+function unreachableError(url, cause) {
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+  }
+  return new Error(
+    `Couldn't reach Memlin at ${host}. Check your internet connection and try again.`,
+    { cause }
+  );
+}
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 var MemlinApiClient = class {
   constructor(cfg2) {
     this.cfg = cfg2;
@@ -67919,24 +67963,49 @@ var MemlinApiClient = class {
       Accept: "application/json"
     };
     if (body !== void 0) headers["Content-Type"] = "application/json";
-    const res = await fetch(url, {
-      method,
-      headers,
-      ...body !== void 0 ? { body: JSON.stringify(body) } : {}
-    });
-    const text = await res.text();
-    let parsed = null;
-    if (text) {
+    const idempotent = method === "GET";
+    const maxAttempts = idempotent ? (this.cfg.maxRetries ?? DEFAULT_MAX_RETRIES2) + 1 : 1;
+    const timeoutMs = this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    for (let attempt = 1; ; attempt++) {
+      let res;
+      let text;
       try {
-        parsed = JSON.parse(text);
-      } catch {
+        res = await fetch(url, {
+          method,
+          headers,
+          // A dead socket must abort rather than hang the caller forever.
+          signal: AbortSignal.timeout(timeoutMs),
+          ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+        });
+        text = await res.text();
+      } catch (error2) {
+        if (attempt < maxAttempts && isRetriableNetworkError(error2)) {
+          await delay(this.backoffMs(attempt));
+          continue;
+        }
+        throw unreachableError(url, error2);
       }
+      if (idempotent && attempt < maxAttempts && RETRIABLE_STATUS.has(res.status)) {
+        await delay(this.backoffMs(attempt));
+        continue;
+      }
+      let parsed = null;
+      if (text) {
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+        }
+      }
+      if (!res.ok) {
+        const errMsg = parsed?.error ?? text ?? `HTTP ${res.status}`;
+        throw new Error(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`);
+      }
+      return parsed;
     }
-    if (!res.ok) {
-      const errMsg = parsed?.error ?? text ?? `HTTP ${res.status}`;
-      throw new Error(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`);
-    }
-    return parsed;
+  }
+  backoffMs(attempt) {
+    const base = this.cfg.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+    return base * 2 ** (attempt - 1);
   }
   // ---------- endpoints ----------
   /** GET /me — identity + account list. No account header sent (this is the discovery call). */

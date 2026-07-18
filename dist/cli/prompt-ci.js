@@ -491,6 +491,50 @@ function agentVersion() {
 function agentCapabilities() {
   return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
 }
+var DEFAULT_REQUEST_TIMEOUT_MS = 15e3;
+var DEFAULT_MAX_RETRIES = 2;
+var DEFAULT_RETRY_BASE_DELAY_MS = 250;
+var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504]);
+var RETRIABLE_NETWORK_CODES = /* @__PURE__ */ new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "EPIPE",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EAI_AGAIN",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET"
+]);
+function isRetriableNetworkError(error) {
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+    return true;
+  }
+  let current = error;
+  for (let depth = 0; current instanceof Error && depth < 5; depth++) {
+    const code = current.code;
+    if (code && RETRIABLE_NETWORK_CODES.has(code)) return true;
+    current = current.cause;
+  }
+  return false;
+}
+function unreachableError(url, cause) {
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+  }
+  return new Error(
+    `Couldn't reach Memlin at ${host}. Check your internet connection and try again.`,
+    { cause }
+  );
+}
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 var MemlinApiClient = class {
   constructor(cfg) {
     this.cfg = cfg;
@@ -524,24 +568,49 @@ var MemlinApiClient = class {
       Accept: "application/json"
     };
     if (body !== void 0) headers["Content-Type"] = "application/json";
-    const res = await fetch(url, {
-      method,
-      headers,
-      ...body !== void 0 ? { body: JSON.stringify(body) } : {}
-    });
-    const text = await res.text();
-    let parsed = null;
-    if (text) {
+    const idempotent = method === "GET";
+    const maxAttempts = idempotent ? (this.cfg.maxRetries ?? DEFAULT_MAX_RETRIES) + 1 : 1;
+    const timeoutMs = this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    for (let attempt = 1; ; attempt++) {
+      let res;
+      let text;
       try {
-        parsed = JSON.parse(text);
-      } catch {
+        res = await fetch(url, {
+          method,
+          headers,
+          // A dead socket must abort rather than hang the caller forever.
+          signal: AbortSignal.timeout(timeoutMs),
+          ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+        });
+        text = await res.text();
+      } catch (error) {
+        if (attempt < maxAttempts && isRetriableNetworkError(error)) {
+          await delay(this.backoffMs(attempt));
+          continue;
+        }
+        throw unreachableError(url, error);
       }
+      if (idempotent && attempt < maxAttempts && RETRIABLE_STATUS.has(res.status)) {
+        await delay(this.backoffMs(attempt));
+        continue;
+      }
+      let parsed = null;
+      if (text) {
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+        }
+      }
+      if (!res.ok) {
+        const errMsg = parsed?.error ?? text ?? `HTTP ${res.status}`;
+        throw new Error(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`);
+      }
+      return parsed;
     }
-    if (!res.ok) {
-      const errMsg = parsed?.error ?? text ?? `HTTP ${res.status}`;
-      throw new Error(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`);
-    }
-    return parsed;
+  }
+  backoffMs(attempt) {
+    const base = this.cfg.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+    return base * 2 ** (attempt - 1);
   }
   // ---------- endpoints ----------
   /** GET /me — identity + account list. No account header sent (this is the discovery call). */
