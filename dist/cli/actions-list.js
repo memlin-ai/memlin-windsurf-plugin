@@ -405,6 +405,24 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -1312,6 +1330,48 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/cli/args.ts
 function parseSlashArgs(raw) {
   const tokens = [];
@@ -1454,33 +1514,33 @@ async function main() {
   if ("error" in parsed) {
     if (parsed.error === "help") {
       printHelp();
-      process.exit(0);
+      exitCli(0);
     }
     console.error(`memlin actions list: ${parsed.error}`);
     printHelp();
-    process.exit(2);
+    exitCli(2);
   }
   const ctx = await getApi();
   if (!ctx) {
     console.error("memlin: not configured. Run `memlin login` first.");
-    process.exit(1);
+    exitCli(1);
   }
   let actions;
   try {
     actions = await ctx.api.listActions(parsed);
   } catch (e) {
     console.error(`memlin actions list failed: ${e instanceof Error ? e.message : e}`);
-    process.exit(1);
+    exitCli(1);
   }
   if (parsed.json) {
     process.stdout.write(JSON.stringify(actions, null, 2) + "\n");
-    process.exit(0);
+    exitCli(0);
   }
   if (actions.length === 0) {
     console.log(
       parsed.filter ? `# no actions matching "${parsed.filter}". Try without --filter, or seed a new one.` : "# no actions in this workspace yet."
     );
-    process.exit(0);
+    exitCli(0);
   }
   console.log(`# ${actions.length} action(s):`);
   console.log("");
@@ -1489,7 +1549,7 @@ async function main() {
     console.log("");
   }
 }
-main().catch((err) => {
+runCliMain(main, (err) => {
   console.error("memlin actions list failed:", err instanceof Error ? err.message : err);
-  process.exit(1);
+  return 1;
 });

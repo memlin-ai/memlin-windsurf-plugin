@@ -3694,6 +3694,7 @@ var init_companion_client = __esm({
 
 // packages/plugin-core/src/cli/diff.ts
 import { promises as fs4 } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
@@ -8468,6 +8469,24 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -9375,6 +9394,48 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/cli/diff.ts
 function parseDiffArgs(argv) {
   const out = {
@@ -9486,10 +9547,10 @@ async function main() {
       console.log("");
       console.log("Diff a fenced `memlin-contract` JSON block in a Memlin doc against");
       console.log("a local JSON file. Exit 0 on match, 1 on drift, 2 on error.");
-      process.exit(0);
+      exitCli(0);
     }
     console.error(`memlin diff: ${parsed.error}`);
-    process.exit(2);
+    exitCli(2);
   }
   const documentId = parsed.documentId;
   const localFile = parsed.localFile;
@@ -9498,23 +9559,23 @@ async function main() {
     localRaw = await fs4.readFile(localFile, "utf8");
   } catch (e) {
     console.error(`memlin diff: cannot read ${localFile}: ${e instanceof Error ? e.message : e}`);
-    process.exit(2);
+    exitCli(2);
   }
   let local;
   try {
     local = JSON.parse(localRaw);
   } catch (e) {
     console.error(`memlin diff: ${localFile} is not valid JSON: ${e instanceof Error ? e.message : e}`);
-    process.exit(2);
+    exitCli(2);
   }
   if (!local || typeof local !== "object" || Array.isArray(local)) {
     console.error(`memlin diff: ${localFile} must be a JSON object at the top level`);
-    process.exit(2);
+    exitCli(2);
   }
   const apiCtx = await getApi();
   if (!apiCtx) {
     console.error(`memlin diff: not signed in (run \`memlin login\`)`);
-    process.exit(2);
+    exitCli(2);
   }
   const { api } = apiCtx;
   let doc;
@@ -9522,7 +9583,7 @@ async function main() {
     doc = await api.getDocument(documentId);
   } catch (e) {
     console.error(`memlin diff: fetch document ${documentId} failed: ${e instanceof Error ? e.message : e}`);
-    process.exit(2);
+    exitCli(2);
   }
   const docContent = typeof doc.content === "string" ? doc.content : "";
   let contract;
@@ -9530,13 +9591,13 @@ async function main() {
     contract = extractContract(docContent);
   } catch (e) {
     console.error(`memlin diff: ${e instanceof Error ? e.message : e}`);
-    process.exit(2);
+    exitCli(2);
   }
   if (!contract) {
     console.error(
       `memlin diff: no \`memlin-contract\` fenced block found in document ${documentId}`
     );
-    process.exit(2);
+    exitCli(2);
   }
   const drift = diffContract(contract, local, parsed.mode);
   if (parsed.json) {
@@ -9595,12 +9656,12 @@ async function main() {
       );
     }
   }
-  process.exit(drift.length === 0 ? 0 : 1);
+  return drift.length === 0 ? 0 : 1;
 }
-if (import.meta.url === (process.argv[1] ? `file://${process.argv[1]}` : void 0)) {
-  main().catch((err) => {
+if (import.meta.url === (process.argv[1] ? pathToFileURL(process.argv[1]).href : void 0)) {
+  runCliMain(main, (err) => {
     console.error(`memlin diff: ${err instanceof Error ? err.message : err}`);
-    process.exit(2);
+    return 2;
   });
 }
 export {

@@ -405,6 +405,24 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -1312,6 +1330,48 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/cli/args.ts
 function parseSlashArgs(raw) {
   const tokens = [];
@@ -1401,7 +1461,7 @@ async function main() {
   const ctx = await getApi();
   if (!ctx) {
     process.stderr.write("not signed in \u2014 run memlin login first\n");
-    process.exit(1);
+    exitCli(1);
   }
   const args = argvAsSlashArgs();
   const action = args[0];
@@ -1436,13 +1496,13 @@ async function main() {
       process.stderr.write(
         "memlin handoffs create: no project pinned in config \u2014 run `memlin add-project` first or set MEMLIN_PROJECT_ID for this invocation.\n"
       );
-      process.exit(2);
+      exitCli(2);
     }
     if (!targetKind) {
       process.stderr.write(
         'usage: memlin handoffs create <target_agent_kind> "<task>" [--path P] [--decisions D] [--blockers B] [--memory M]\n'
       );
-      process.exit(1);
+      exitCli(1);
     }
     const taskParts = [];
     let path6 = null;
@@ -1470,14 +1530,14 @@ async function main() {
       if (a?.startsWith("--")) {
         process.stderr.write(`unknown flag: ${a}
 `);
-        process.exit(1);
+        exitCli(1);
       }
       taskParts.push(a ?? "");
     }
     const task = taskParts.join(" ").trim();
     if (!task) {
       process.stderr.write("memlin handoffs create: <task> is required\n");
-      process.exit(1);
+      exitCli(1);
     }
     try {
       const result2 = await ctx.api.createHandoff({
@@ -1501,20 +1561,20 @@ async function main() {
         `memlin handoffs create failed: ${err instanceof Error ? err.message : String(err)}
 `
       );
-      process.exit(1);
+      exitCli(1);
     }
   }
   if (action !== "accept" && action !== "complete" && action !== "cancel") {
     process.stderr.write(
       'usage: memlin handoffs [list] | create <target> "<task>" | accept <id> | complete <id> | cancel <id>\n'
     );
-    process.exit(1);
+    exitCli(1);
   }
   const needle = args[1];
   if (!needle) {
     process.stderr.write(`missing handoff id \u2014 usage: memlin handoffs ${action} <id>
 `);
-    process.exit(1);
+    exitCli(1);
   }
   const { handoffs } = await ctx.api.listHandoffs({
     project_id: ctx.config.project_id ?? null,
@@ -1526,16 +1586,16 @@ async function main() {
   if ("error" in match) {
     process.stderr.write(`${match.error}
 `);
-    process.exit(2);
+    exitCli(2);
   }
   const result = await ctx.api.updateHandoff(match.id, action);
   process.stdout.write(`\u2713 ${result.status} \u2014 ${match.task}
 `);
 }
-main().catch((err) => {
+runCliMain(main, (err) => {
   process.stderr.write(
     `memlin handoffs failed: ${err instanceof Error ? err.message : String(err)}
 `
   );
-  process.exit(1);
+  return 1;
 });

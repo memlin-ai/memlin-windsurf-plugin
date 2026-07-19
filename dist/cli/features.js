@@ -405,6 +405,24 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -1312,6 +1330,48 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/cli/args.ts
 function parseSlashArgs(raw) {
   const tokens = [];
@@ -1401,7 +1461,7 @@ async function main() {
   const ctx = await getApi();
   if (!ctx) {
     process.stderr.write("not signed in \u2014 run memlin login first\n");
-    process.exit(1);
+    exitCli(1);
   }
   const args = argvAsSlashArgs();
   const action = args[0];
@@ -1439,7 +1499,7 @@ async function main() {
       if (a?.startsWith("--")) {
         process.stderr.write(`unknown flag: ${a}
 `);
-        process.exit(1);
+        exitCli(1);
       }
       titleParts.push(a ?? "");
     }
@@ -1447,12 +1507,12 @@ async function main() {
       process.stderr.write(
         "memlin features create: no project pinned \u2014 run `memlin add-project` first, pass --project <uuid>, or set MEMLIN_PROJECT_ID.\n"
       );
-      process.exit(2);
+      exitCli(2);
     }
     const title = titleParts.join(" ").trim();
     if (!title) {
       process.stderr.write('usage: memlin features create "<title>" [--summary S] [--project P]\n');
-      process.exit(1);
+      exitCli(1);
     }
     try {
       const result = await ctx.api.createFeature({
@@ -1470,7 +1530,7 @@ async function main() {
         `memlin features create failed: ${err instanceof Error ? err.message : String(err)}
 `
       );
-      process.exit(1);
+      exitCli(1);
     }
   }
   if (action === "add") {
@@ -1479,14 +1539,14 @@ async function main() {
     const itemId = args[3];
     if (!needle || !kind || !itemId) {
       process.stderr.write("usage: memlin features add <feature-id> <kind> <entity-id>\n");
-      process.exit(1);
+      exitCli(1);
     }
     const { features } = await ctx.api.listFeatures({ project_id: pinnedProject });
     const match = matchFeature(features, needle);
     if ("error" in match) {
       process.stderr.write(`${match.error}
 `);
-      process.exit(2);
+      exitCli(2);
     }
     try {
       await ctx.api.addFeatureMember(match.id, { kind, id: itemId });
@@ -1500,18 +1560,18 @@ async function main() {
         `memlin features add failed: ${err instanceof Error ? err.message : String(err)}
 `
       );
-      process.exit(1);
+      exitCli(1);
     }
   }
   process.stderr.write(
     'usage: memlin features [list] | create "<title>" [--summary S] [--project P] | add <feature-id> <kind> <id>\n'
   );
-  process.exit(1);
+  return 1;
 }
-main().catch((err) => {
+runCliMain(main, (err) => {
   process.stderr.write(
     `memlin features failed: ${err instanceof Error ? err.message : String(err)}
 `
   );
-  process.exit(1);
+  return 1;
 });

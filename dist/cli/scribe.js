@@ -411,6 +411,24 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -1318,6 +1336,51 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function rethrowCliExit(err) {
+  if (err instanceof CliExit) throw err;
+}
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/transcript.ts
 function summarizeToolUse(b) {
   const n = b.name || "tool";
@@ -1439,13 +1502,13 @@ async function main() {
   const ctx = await getApi();
   if (!ctx) {
     process.stderr.write("not signed in \u2014 run /memlin-login first\n");
-    process.exit(1);
+    exitCli(1);
   }
   const fileFlagIndex = process.argv.indexOf("--file");
   const explicitFile = fileFlagIndex >= 0 ? process.argv[fileFlagIndex + 1] : null;
   if (fileFlagIndex >= 0 && !explicitFile) {
     process.stderr.write("usage: memlin scribe [--file <transcript path>]\n");
-    process.exit(2);
+    exitCli(2);
   }
   const cwd = runtimeCwd();
   let found;
@@ -1463,7 +1526,7 @@ async function main() {
     process.stderr.write(
       "no transcript found. Claude Code writes them to ~/.claude/projects/<cwd>/<session>.jsonl\nOr pass one explicitly: memlin scribe --file <path>\n"
     );
-    process.exit(2);
+    exitCli(2);
   }
   let transcript;
   try {
@@ -1478,11 +1541,11 @@ ${raw}`;
       `failed to read transcript at ${found.path}: ${err instanceof Error ? err.message : String(err)}
 `
     );
-    process.exit(2);
+    exitCli(2);
   }
   if (transcript.length < 200) {
     process.stderr.write("transcript too short to scribe (< 200 chars)\n");
-    process.exit(0);
+    exitCli(0);
   }
   process.stdout.write(
     `scribing session ${found.sessionId.slice(0, 8)} (${transcript.length.toLocaleString()} chars)\u2026
@@ -1506,9 +1569,14 @@ Review at https://memlin.ai/app/${ctx.config.account_id}/inbox
       );
     }
   } catch (err) {
+    rethrowCliExit(err);
     process.stderr.write(`scribe failed: ${err instanceof Error ? err.message : String(err)}
 `);
-    process.exit(1);
+    return 1;
   }
 }
-void main();
+runCliMain(main, (err) => {
+  process.stderr.write(`scribe failed: ${err instanceof Error ? err.message : String(err)}
+`);
+  return 1;
+});

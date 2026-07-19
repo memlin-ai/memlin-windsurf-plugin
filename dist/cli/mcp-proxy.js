@@ -182,6 +182,94 @@ var init_companion_client = __esm({
 // packages/plugin-core/src/cli/mcp-proxy.ts
 import { createInterface } from "node:readline";
 
+// packages/plugin-core/src/runtime-shared.ts
+var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
+var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
+var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
+var AGENT_CAPABILITIES_HEADER = "Memlin-Agent-Capabilities";
+var AGENT_PLATFORM_HEADER = "Memlin-Agent-Platform";
+var AGENT_ARCHITECTURE_HEADER = "Memlin-Agent-Architecture";
+var AGENT_EXPECTED_CAPABILITIES = {
+  "claude-code": ["cli", "commands", "hooks", "sync", "scribe", "resolve"],
+  cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
+  codex: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
+  windsurf: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
+  // VS Code (apps/vscode-extension): MCP + CLI + copilot-instructions; plain
+  // VS Code has no lifecycle-hook or slash-command surface.
+  vscode: ["mcp", "cli", "rules", "resolve"],
+  gemini: ["mcp", "rules", "resolve"],
+  grok: ["mcp", "rules", "resolve"],
+  hermes: ["mcp", "resolve"],
+  openclaw: ["mcp", "rules", "resolve"],
+  antigravity: ["mcp", "cli", "hooks", "commands", "rules", "sync", "scribe", "resolve"],
+  mcp: ["mcp", "resolve"],
+  "claude-ai": ["mcp", "resolve"],
+  // Companion daemon (apps/companion): background token keeper + realtime
+  // plan sync + local IPC socket other agents delegate to. No hooks/commands
+  // of its own.
+  companion: ["cli", "sync", "realtime", "resolve"]
+};
+var PROVIDER_HOSTS = [
+  "github.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "dev.azure.com",
+  "ssh.dev.azure.com",
+  "codeberg.org",
+  "sr.ht",
+  "git.sr.ht"
+];
+function normalizeGitRemote(raw) {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  s = s.replace(/^git@([^:]+):/, "https://$1/");
+  s = s.replace(/^ssh:\/\//, "");
+  s = s.replace(/^https?:\/\//, "");
+  s = s.replace(/^git@/, "");
+  s = s.replace(/\.git$/, "");
+  s = s.replace(/\/$/, "");
+  const slash = s.indexOf("/");
+  if (slash > 0) {
+    const host = s.slice(0, slash);
+    const rest = s.slice(slash);
+    for (const provider of PROVIDER_HOSTS) {
+      if (host === provider) break;
+      if (host.startsWith(provider + "-")) {
+        s = provider + rest;
+        break;
+      }
+    }
+  }
+  return s || null;
+}
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
+
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+
 // packages/plugin-core/src/client.ts
 import { promises as fs3 } from "node:fs";
 import path5 from "node:path";
@@ -379,68 +467,6 @@ import { readFileSync } from "node:fs";
 import os4 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
-// packages/plugin-core/src/runtime-shared.ts
-var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
-var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
-var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
-var AGENT_CAPABILITIES_HEADER = "Memlin-Agent-Capabilities";
-var AGENT_PLATFORM_HEADER = "Memlin-Agent-Platform";
-var AGENT_ARCHITECTURE_HEADER = "Memlin-Agent-Architecture";
-var AGENT_EXPECTED_CAPABILITIES = {
-  "claude-code": ["cli", "commands", "hooks", "sync", "scribe", "resolve"],
-  cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
-  codex: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
-  windsurf: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
-  // VS Code (apps/vscode-extension): MCP + CLI + copilot-instructions; plain
-  // VS Code has no lifecycle-hook or slash-command surface.
-  vscode: ["mcp", "cli", "rules", "resolve"],
-  gemini: ["mcp", "rules", "resolve"],
-  grok: ["mcp", "rules", "resolve"],
-  hermes: ["mcp", "resolve"],
-  openclaw: ["mcp", "rules", "resolve"],
-  antigravity: ["mcp", "cli", "hooks", "commands", "rules", "sync", "scribe", "resolve"],
-  mcp: ["mcp", "resolve"],
-  "claude-ai": ["mcp", "resolve"],
-  // Companion daemon (apps/companion): background token keeper + realtime
-  // plan sync + local IPC socket other agents delegate to. No hooks/commands
-  // of its own.
-  companion: ["cli", "sync", "realtime", "resolve"]
-};
-var PROVIDER_HOSTS = [
-  "github.com",
-  "gitlab.com",
-  "bitbucket.org",
-  "dev.azure.com",
-  "ssh.dev.azure.com",
-  "codeberg.org",
-  "sr.ht",
-  "git.sr.ht"
-];
-function normalizeGitRemote(raw) {
-  if (!raw) return null;
-  let s = raw.trim();
-  if (!s) return null;
-  s = s.replace(/^git@([^:]+):/, "https://$1/");
-  s = s.replace(/^ssh:\/\//, "");
-  s = s.replace(/^https?:\/\//, "");
-  s = s.replace(/^git@/, "");
-  s = s.replace(/\.git$/, "");
-  s = s.replace(/\/$/, "");
-  const slash = s.indexOf("/");
-  if (slash > 0) {
-    const host = s.slice(0, slash);
-    const rest = s.slice(slash);
-    for (const provider of PROVIDER_HOSTS) {
-      if (host === provider) break;
-      if (host.startsWith(provider + "-")) {
-        s = provider + rest;
-        break;
-      }
-    }
-  }
-  return s || null;
-}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -1558,7 +1584,7 @@ rl.on("line", (raw) => {
   });
 });
 rl.on("close", () => {
-  chain.finally(() => process.exit(0));
+  void chain.finally(() => scheduleProcessExit(0));
 });
 process.on("uncaughtException", (err) => {
   process.stderr.write(`memlin mcp-proxy: uncaught ${err instanceof Error ? err.stack ?? err.message : String(err)}

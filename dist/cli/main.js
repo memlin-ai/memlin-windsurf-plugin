@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { printCommandGuide } from "./command-guide.js";
+import { scheduleProcessExit } from "./cli-runner.js";
 const RUN = {
   login: () => import("./login.js"),
   init: () => import("./init.js"),
@@ -48,13 +49,15 @@ async function main() {
   }
   if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
     printCommandGuide({ write: (line) => process.stdout.write(line + "\n") });
-    process.exit(sub ? 0 : 1);
+    scheduleProcessExit(sub ? 0 : 1);
+    return;
   }
   const run = RUN[sub];
   if (!run) {
     process.stderr.write(`memlin: unknown command '${sub}'. Run 'memlin --help' for the list.
 `);
-    process.exit(1);
+    scheduleProcessExit(1);
+    return;
   }
   process.argv.splice(2, 1);
   await run();
@@ -62,5 +65,5 @@ async function main() {
 main().catch((err) => {
   process.stderr.write(`memlin: ${err instanceof Error ? err.message : String(err)}
 `);
-  process.exit(1);
+  scheduleProcessExit(1);
 });

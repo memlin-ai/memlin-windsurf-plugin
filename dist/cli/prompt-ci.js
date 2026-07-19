@@ -409,6 +409,24 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -1316,6 +1334,48 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/local-scan.ts
 import { promises as fs5 } from "node:fs";
 import { existsSync } from "node:fs";
@@ -1539,12 +1599,12 @@ async function main() {
   const argv = argvAsSlashArgs();
   if (argv.includes("--help") || argv.includes("-h")) {
     printHelp();
-    process.exit(0);
+    exitCli(0);
   }
   const ctx = await getApi();
   if (!ctx) {
     console.error("memlin: not configured. Run `memlin login` first.");
-    process.exit(1);
+    exitCli(1);
   }
   const { api } = ctx;
   const targetPath = argv[0] ? path8.relative(process.cwd(), path8.resolve(argv[0])) : null;
@@ -1557,18 +1617,18 @@ async function main() {
     );
     if (!doc) {
       console.error(`memlin prompt-ci: could not find local file "${targetPath}"`);
-      process.exit(2);
+      exitCli(2);
     }
     if (doc.kind !== "skill") {
       console.error(`memlin prompt-ci: "${targetPath}" is not a skill document.`);
-      process.exit(2);
+      exitCli(2);
     }
     const prev = state.documents[doc.path];
     if (!prev?.document_id) {
       console.error(
         `memlin prompt-ci: "${targetPath}" has not been synchronized yet. Run \`memlin sync\` first.`
       );
-      process.exit(2);
+      exitCli(2);
     }
     skillsToTest.push({
       relPath: doc.path,
@@ -1591,7 +1651,7 @@ async function main() {
   }
   if (skillsToTest.length === 0) {
     console.log("No synchronized local skills found to run CI against.");
-    process.exit(0);
+    exitCli(0);
   }
   console.log(`Running Prompt CI regression suite for ${skillsToTest.length} skill(s)...`);
   let hasRegressions = false;
@@ -1643,13 +1703,13 @@ async function main() {
     console.log(
       `\x1B[31mCI Result: REGRESSIONS DETECTED. Please review the failures above.\x1B[0m`
     );
-    process.exit(1);
+    return 1;
   } else {
     console.log(`\x1B[32mCI Result: SUCCESS. All prompt changes passed regression checks.\x1B[0m`);
-    process.exit(0);
+    return 0;
   }
 }
-main().catch((err) => {
+runCliMain(main, (err) => {
   console.error("memlin prompt-ci failed:", err instanceof Error ? err.message : err);
-  process.exit(1);
+  return 1;
 });

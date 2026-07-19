@@ -358,6 +358,45 @@ function detectGitRemotes(cwd) {
   return out;
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/client.ts
 import { promises as fs3 } from "node:fs";
 import path6 from "node:path";
@@ -1817,11 +1856,7 @@ async function main() {
   }
   return failed > 0 ? 1 : 0;
 }
-main().catch((err) => {
+runCliMain(main, (err) => {
   console.error("memlin doctor failed:", err instanceof Error ? err.message : err);
   return 1;
-}).then((code) => {
-  process.exitCode = code;
-  void closeHttpSockets();
-  setTimeout(() => process.exit(code), 2e3).unref();
 });

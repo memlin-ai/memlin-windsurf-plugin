@@ -180,6 +180,94 @@ var init_companion_client = __esm({
   }
 });
 
+// packages/plugin-core/src/runtime-shared.ts
+var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
+var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
+var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
+var AGENT_CAPABILITIES_HEADER = "Memlin-Agent-Capabilities";
+var AGENT_PLATFORM_HEADER = "Memlin-Agent-Platform";
+var AGENT_ARCHITECTURE_HEADER = "Memlin-Agent-Architecture";
+var AGENT_EXPECTED_CAPABILITIES = {
+  "claude-code": ["cli", "commands", "hooks", "sync", "scribe", "resolve"],
+  cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
+  codex: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
+  windsurf: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
+  // VS Code (apps/vscode-extension): MCP + CLI + copilot-instructions; plain
+  // VS Code has no lifecycle-hook or slash-command surface.
+  vscode: ["mcp", "cli", "rules", "resolve"],
+  gemini: ["mcp", "rules", "resolve"],
+  grok: ["mcp", "rules", "resolve"],
+  hermes: ["mcp", "resolve"],
+  openclaw: ["mcp", "rules", "resolve"],
+  antigravity: ["mcp", "cli", "hooks", "commands", "rules", "sync", "scribe", "resolve"],
+  mcp: ["mcp", "resolve"],
+  "claude-ai": ["mcp", "resolve"],
+  // Companion daemon (apps/companion): background token keeper + realtime
+  // plan sync + local IPC socket other agents delegate to. No hooks/commands
+  // of its own.
+  companion: ["cli", "sync", "realtime", "resolve"]
+};
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
+
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main3, onError) {
+  main3().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/plugin-install.ts
 import { promises as fs } from "node:fs";
 import { existsSync } from "node:fs";
@@ -470,34 +558,6 @@ import { readFileSync } from "node:fs";
 import os5 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
-// packages/plugin-core/src/runtime-shared.ts
-var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
-var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
-var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
-var AGENT_CAPABILITIES_HEADER = "Memlin-Agent-Capabilities";
-var AGENT_PLATFORM_HEADER = "Memlin-Agent-Platform";
-var AGENT_ARCHITECTURE_HEADER = "Memlin-Agent-Architecture";
-var AGENT_EXPECTED_CAPABILITIES = {
-  "claude-code": ["cli", "commands", "hooks", "sync", "scribe", "resolve"],
-  cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
-  codex: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
-  windsurf: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
-  // VS Code (apps/vscode-extension): MCP + CLI + copilot-instructions; plain
-  // VS Code has no lifecycle-hook or slash-command surface.
-  vscode: ["mcp", "cli", "rules", "resolve"],
-  gemini: ["mcp", "rules", "resolve"],
-  grok: ["mcp", "rules", "resolve"],
-  hermes: ["mcp", "resolve"],
-  openclaw: ["mcp", "rules", "resolve"],
-  antigravity: ["mcp", "cli", "hooks", "commands", "rules", "sync", "scribe", "resolve"],
-  mcp: ["mcp", "resolve"],
-  "claude-ai": ["mcp", "resolve"],
-  // Companion daemon (apps/companion): background token keeper + realtime
-  // plan sync + local IPC socket other agents delegate to. No hooks/commands
-  // of its own.
-  companion: ["cli", "sync", "realtime", "resolve"]
-};
 
 // packages/plugin-core/src/host.ts
 import os4 from "node:os";
@@ -1476,7 +1536,7 @@ async function runManageMemory(action) {
   if (result.status === "failed") {
     console.error(`memlin manage-memory: ${result.detail}`);
     console.error(`  (settings file: ${result.settingsFile})`);
-    process.exit(1);
+    exitCli(1);
   }
   if (action === "manage") {
     console.log("\u2713 Memlin now manages your memory.");
@@ -1507,18 +1567,18 @@ async function main() {
   const parsed = parseAction(process.argv.slice(2));
   if (parsed === "help") {
     printHelp();
-    process.exit(0);
+    exitCli(0);
   }
   if (typeof parsed === "object") {
     console.error(`memlin manage-memory: ${parsed.error}`);
     printHelp();
-    process.exit(2);
+    exitCli(2);
   }
   await runManageMemory(parsed);
 }
-main().catch((err) => {
+runCliMain(main, (err) => {
   console.error("memlin manage-memory failed:", err instanceof Error ? err.message : err);
-  process.exit(1);
+  return 1;
 });
 
 // packages/plugin-core/src/cli/managed-memory.ts
@@ -1527,14 +1587,14 @@ async function main2() {
   if (argv.includes("--help") || argv.includes("-h")) {
     console.log("`memlin managed-memory` is now `memlin manage-memory`.");
     console.log("Run: memlin manage-memory --help");
-    process.exit(0);
+    exitCli(0);
   }
   let action = "status";
   if (argv.includes("disable")) action = "manage";
   else if (argv.includes("off") || argv.includes("revert")) action = "revert";
   await runManageMemory(action);
 }
-main2().catch((err) => {
+runCliMain(main2, (err) => {
   console.error("memlin managed-memory failed:", err instanceof Error ? err.message : err);
-  process.exit(1);
+  return 1;
 });

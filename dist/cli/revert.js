@@ -408,6 +408,24 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -1315,17 +1333,59 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/cli/revert.ts
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
     console.error("usage: memlin revert <document-name-or-path> [version-number]");
-    process.exit(2);
+    exitCli(2);
   }
   const ctx = await getApi();
   if (!ctx) {
     console.error("memlin: not configured. Run `memlin login` first.");
-    process.exit(1);
+    exitCli(1);
   }
   const { api } = ctx;
   const needle = args[0];
@@ -1333,7 +1393,7 @@ async function main() {
   const matches = await api.findDocumentsByName(needle, 10);
   if (matches.length === 0) {
     console.error(`no documents match "${needle}"`);
-    process.exit(1);
+    exitCli(1);
   }
   let doc = matches[0];
   if (matches.length > 1) {
@@ -1347,14 +1407,14 @@ async function main() {
     const idx = parseInt(pick, 10);
     if (Number.isNaN(idx) || idx < 0 || idx >= matches.length) {
       console.error("invalid choice");
-      process.exit(1);
+      exitCli(1);
     }
     doc = matches[idx];
   }
   const versions = await api.listVersions(doc.id);
   if (versions.length === 0) {
     console.error("document has no versions (unexpected)");
-    process.exit(1);
+    exitCli(1);
   }
   let target = versions.find((v) => v.version_number === requestedVNum);
   if (!target) {
@@ -1373,12 +1433,12 @@ async function main() {
     target = versions.find((v) => v.version_number === n);
     if (!target) {
       console.error(`no such version: ${pick}`);
-      process.exit(1);
+      exitCli(1);
     }
   }
   if (target.version_number === versions[0].version_number) {
     console.error("that is already the current version");
-    process.exit(0);
+    exitCli(0);
   }
   const commitMessage = `revert to v${target.version_number} via cli`;
   const newVersionId = await api.revertDocument(doc.id, target.id, commitMessage);
@@ -1387,7 +1447,7 @@ async function main() {
   );
   console.log("  run `memlin pull` to update local files.");
 }
-main().catch((err) => {
+runCliMain(main, (err) => {
   console.error("memlin revert failed:", err instanceof Error ? err.message : err);
-  process.exit(1);
+  return 1;
 });

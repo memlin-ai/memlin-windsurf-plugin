@@ -444,6 +444,24 @@ function normalizeGitRemote(raw) {
   }
   return s || null;
 }
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -1351,6 +1369,48 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
@@ -1444,16 +1504,16 @@ async function main() {
   if ("error" in parsed) {
     if (parsed.error === "help") {
       printHelp();
-      process.exit(0);
+      exitCli(0);
     }
     console.error(`memlin push-plan: ${parsed.error}`);
     printHelp();
-    process.exit(2);
+    exitCli(2);
   }
   const ctx = await getApi();
   if (!ctx) {
     console.error("memlin: not configured. Run `memlin login` first.");
-    process.exit(1);
+    exitCli(1);
   }
   const { api } = ctx;
   const filePath = path7.resolve(parsed.file);
@@ -1464,12 +1524,12 @@ async function main() {
     console.error(
       `memlin push-plan: can't read ${filePath}: ${e instanceof Error ? e.message : e}`
     );
-    process.exit(1);
+    exitCli(1);
   }
   const { title, body } = splitTitleAndBody(raw);
   if (!body) {
     console.error(`memlin push-plan: ${filePath} has no body content after the title line`);
-    process.exit(1);
+    exitCli(1);
   }
   const cwd = runtimeCwd();
   const gitRemote = readGitRemote(cwd);
@@ -1485,7 +1545,7 @@ async function main() {
     });
   } catch (e) {
     console.error(`memlin push-plan failed: ${e instanceof Error ? e.message : e}`);
-    process.exit(1);
+    exitCli(1);
   }
   const apiBase = (process.env.MEMLIN_API_URL ?? "https://memlin.ai/api/v1").replace(
     /\/api\/v1\/?$/,
@@ -1497,7 +1557,7 @@ async function main() {
   if (result.project_id) console.log(`  project_id:  ${result.project_id}`);
   console.log(`  ${apiBase}/app/${ctx.config.account_id}/plans/${result.document_id}`);
 }
-main().catch((err) => {
+runCliMain(main, (err) => {
   console.error("memlin push-plan failed:", err instanceof Error ? err.message : err);
-  process.exit(1);
+  return 1;
 });

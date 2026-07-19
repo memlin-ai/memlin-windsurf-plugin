@@ -442,6 +442,24 @@ function normalizeGitRemote(raw) {
   }
   return s || null;
 }
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -1407,6 +1425,48 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
@@ -1529,16 +1589,16 @@ async function main() {
   if ("error" in parsed) {
     if (parsed.error === "help") {
       printHelp();
-      process.exit(0);
+      exitCli(0);
     }
     console.error(`memlin attach-path: ${parsed.error}`);
     printHelp();
-    process.exit(2);
+    exitCli(2);
   }
   const ctx = await getApi();
   if (!ctx) {
     console.error("memlin attach-path: not configured. Run `memlin login` first.");
-    process.exit(1);
+    exitCli(1);
   }
   const { api, config } = ctx;
   const targetPath = path8.resolve(parsed.targetPath ?? runtimeCwd());
@@ -1549,7 +1609,7 @@ async function main() {
     const match = me.accounts.find((a) => a.id === parsed.org) ?? me.accounts.find((a) => a.name.toLowerCase().includes(lower));
     if (!match) {
       console.error(`memlin attach-path: no account matching "${parsed.org}".`);
-      process.exit(2);
+      exitCli(2);
     }
     accountId = match.id;
   }
@@ -1565,7 +1625,7 @@ async function main() {
         byName.length > 1 ? `memlin attach-path: "${parsed.project}" matches ${byName.length} projects \u2014 use the id.` : `memlin attach-path: no project matching "${parsed.project}" in this account.`
       );
       for (const p of projects.slice(0, 20)) console.error(`  ${p.id}  ${p.name}`);
-      process.exit(2);
+      exitCli(2);
     }
     projectId = target.id;
   } else {
@@ -1582,7 +1642,7 @@ async function main() {
     );
     const projects = await api.listProjects({ accountId });
     for (const p of projects.slice(0, 20)) console.error(`  ${p.id}  ${p.name}`);
-    process.exit(2);
+    exitCli(2);
   }
   try {
     const updated = await api.patchProject(
@@ -1607,10 +1667,10 @@ async function main() {
     } else {
       console.error(`memlin attach-path: attach failed: ${msg}`);
     }
-    process.exit(1);
+    return 1;
   }
 }
-main().catch((err) => {
+runCliMain(main, (err) => {
   console.error("memlin attach-path failed:", err instanceof Error ? err.message : err);
-  process.exit(1);
+  return 1;
 });

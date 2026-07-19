@@ -3786,23 +3786,6 @@ function decodeJwtPayload(jwt) {
   return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
 }
 
-// packages/plugin-core/src/login-bootstrap.ts
-import { promises as fs4 } from "node:fs";
-import path5 from "node:path";
-import { randomUUID as randomUUID4 } from "node:crypto";
-
-// packages/plugin-core/src/client.ts
-import { promises as fs3 } from "node:fs";
-import path4 from "node:path";
-import os4 from "node:os";
-import { randomUUID as randomUUID3 } from "node:crypto";
-
-// packages/plugin-core/src/memlin-api-client.ts
-import { readFileSync } from "node:fs";
-import os3 from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
 // packages/plugin-core/src/runtime-shared.ts
 var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
 var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
@@ -3830,6 +3813,83 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
+
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
+// packages/plugin-core/src/login-bootstrap.ts
+import { promises as fs4 } from "node:fs";
+import path5 from "node:path";
+import { randomUUID as randomUUID4 } from "node:crypto";
+
+// packages/plugin-core/src/client.ts
+import { promises as fs3 } from "node:fs";
+import path4 from "node:path";
+import os4 from "node:os";
+import { randomUUID as randomUUID3 } from "node:crypto";
+
+// packages/plugin-core/src/memlin-api-client.ts
+import { readFileSync } from "node:fs";
+import os3 from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // packages/plugin-core/src/host.ts
 import os2 from "node:os";
@@ -9562,10 +9622,10 @@ async function main() {
       console.log("Authenticate to Memlin and pin the active account.");
       console.log("  --account <v>   Override server-side default_account_id with this account");
       console.log("                  (must be one you're a member of)");
-      process.exit(0);
+      exitCli(0);
     }
     console.error(`memlin login: ${parsed.error}`);
-    process.exit(2);
+    exitCli(2);
   }
   const { requestedAccount } = parsed;
   console.log("memlin login");
@@ -9594,8 +9654,7 @@ async function main() {
     if (error instanceof LoginBootstrapError && error.code === "account-setup-required") {
       console.error("Open https://memlin.ai/app/onboarding to finish setup.");
     }
-    process.exit(1);
-    return;
+    exitCli(1);
   }
   const displayName = login.user.displayName ?? login.user.email ?? login.user.id.slice(0, 8) + "\u2026";
   console.log(`  \u2713 signed in as ${displayName}`);
@@ -9636,9 +9695,9 @@ async function main() {
   console.log("  Run `memlin pull` to fetch your memory, skills, and goals.");
   printCommandGuide({ intro: true });
 }
-main().catch((err) => {
+runCliMain(main, (err) => {
   console.error("memlin login failed:", err instanceof Error ? err.message : err);
-  process.exit(1);
+  return 1;
 });
 /*! Bundled license information:
 

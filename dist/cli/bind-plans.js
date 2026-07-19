@@ -444,6 +444,24 @@ function normalizeGitRemote(raw) {
   }
   return s || null;
 }
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
@@ -1351,6 +1369,48 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function exitCli(code) {
+  throw new CliExit(code);
+}
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
@@ -1676,7 +1736,7 @@ async function main() {
   const ctx = await getApi();
   if (!ctx) {
     process.stderr.write("not signed in \u2014 run /memlin-login first\n");
-    process.exit(1);
+    exitCli(1);
   }
   const argv = process.argv.slice(2);
   const all = argv.includes("--all");
@@ -1687,7 +1747,7 @@ async function main() {
       process.stdout.write(
         "No unbound plans \u2014 everything in ~/.claude/plans/ is synced or stamped.\n"
       );
-      process.exit(0);
+      exitCli(0);
     }
     process.stdout.write(`${unbound.length} unbound plan(s) in ~/.claude/plans/:
 
@@ -1701,7 +1761,7 @@ async function main() {
     process.stdout.write(
       "\nThese have no known project. To bind:\n  \u2022 cd into the relevant repo, then: memlin bind-plans <file.md>\n  \u2022 or bind everything to the current repo: memlin bind-plans --all\n\nNothing is sent to Memlin until you bind it.\n"
     );
-    process.exit(0);
+    exitCli(0);
   }
   const cwd = runtimeCwd();
   const gitRemote = readGitRemote2(cwd);
@@ -1713,7 +1773,7 @@ async function main() {
       `could not resolve a project from ${cwd}: ${err instanceof Error ? err.message : String(err)}
 `
     );
-    process.exit(1);
+    exitCli(1);
   }
   if (!resolved.project_id) {
     process.stderr.write(
@@ -1721,12 +1781,12 @@ async function main() {
 cd into the repo whose project these plans belong to, then re-run.
 `
     );
-    process.exit(1);
+    exitCli(1);
   }
   const targets = all ? unbound.map((p) => p.file) : [fileArg].map((f) => path9.basename(f));
   if (targets.length === 0) {
     process.stdout.write("Nothing to bind.\n");
-    process.exit(0);
+    exitCli(0);
   }
   process.stdout.write(
     `Binding ${targets.length} plan(s) to project ${resolved.project_id.slice(0, 8)}\u2026 (${resolved.project_name ?? "unnamed"})
@@ -1750,6 +1810,9 @@ cd into the repo whose project these plans belong to, then re-run.
   process.stdout.write(`
 done \u2014 bound ${bound}, failed ${failed}.
 `);
-  process.exit(failed > 0 ? 1 : 0);
+  return failed > 0 ? 1 : 0;
 }
-void main();
+runCliMain(main, (err) => {
+  console.error("memlin bind-plans failed:", err instanceof Error ? err.message : err);
+  return 1;
+});
