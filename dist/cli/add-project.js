@@ -1507,6 +1507,7 @@ function runtimeCwd(fallback = process.cwd()) {
 function readGitRemote(cwd) {
   try {
     const url = execSync("git remote get-url origin", {
+      windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8"
@@ -1573,6 +1574,7 @@ function childGitRemotes(cwd, deps = {}) {
     try {
       if (!existsSync2(path7.join(repoPath, ".git"))) return null;
       const url = execSync2("git remote get-url origin", {
+        windowsHide: true,
         cwd: repoPath,
         stdio: ["ignore", "pipe", "ignore"],
         encoding: "utf8"
@@ -1703,6 +1705,7 @@ function printHelp() {
 function readGitRemote2(cwd) {
   try {
     const url = execSync3("git remote get-url origin", {
+      windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8"

@@ -9569,6 +9569,7 @@ async function resolveProject(api, cwd, configProjectId) {
 function readGitRemote(cwd) {
   try {
     const url = execSync("git remote get-url origin", {
+      windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8"
@@ -9614,6 +9615,7 @@ function editedPathsFromHook(toolName, toolInput) {
 function repoRelativePath(absPath, cwd) {
   try {
     const top = execSync2("git rev-parse --show-toplevel", {
+      windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8",
@@ -9643,6 +9645,7 @@ function inferEnvFromBranch(branch) {
 function getRawBranchName(cwd) {
   try {
     return execSync3("git rev-parse --abbrev-ref HEAD", {
+      windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8",
@@ -9664,6 +9667,7 @@ function detectEnv(cwd) {
   let env = null;
   try {
     const branch = execSync3("git rev-parse --abbrev-ref HEAD", {
+      windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8",

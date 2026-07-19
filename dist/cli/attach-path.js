@@ -1521,6 +1521,7 @@ function childGitRemotes(cwd, deps = {}) {
     try {
       if (!existsSync2(path7.join(repoPath, ".git"))) return null;
       const url = execSync2("git remote get-url origin", {
+        windowsHide: true,
         cwd: repoPath,
         stdio: ["ignore", "pipe", "ignore"],
         encoding: "utf8"

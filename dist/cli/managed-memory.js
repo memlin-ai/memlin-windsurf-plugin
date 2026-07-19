@@ -5090,6 +5090,7 @@ async function resolveProject(api, cwd, configProjectId) {
 function readGitRemote(cwd) {
   try {
     const url = execSync("git remote get-url origin", {
+      windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8"
@@ -9658,7 +9659,7 @@ function gitMainRoot(cwd) {
     const common = execFileSync(
       "git",
       ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+      { windowsHide: true, cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
     ).trim();
     return common ? path8.dirname(common) : null;
   } catch {

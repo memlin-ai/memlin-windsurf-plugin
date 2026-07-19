@@ -9651,7 +9651,7 @@ function gitMainRoot(cwd) {
     const common = execFileSync(
       "git",
       ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+      { windowsHide: true, cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
     ).trim();
     return common ? path9.dirname(common) : null;
   } catch {
