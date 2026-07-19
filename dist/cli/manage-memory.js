@@ -765,6 +765,20 @@ var MemlinApiClient = class {
     return this.request("GET", "/me", void 0, { includeAccount: false });
   }
   /**
+   * GET /report — account-scoped usage aggregates (tokens saved, resolves,
+   * hit rate). The route nests the window (`window: { from, days }` — no
+   * top-level days field) and clamps days to [1, 31] server-side (default 1);
+   * `projectId` maps to the `?project=` query param. Consumed by the
+   * Companion's Memory panel for its tokens-saved counter.
+   */
+  async report(opts = {}) {
+    const q = new URLSearchParams();
+    if (opts.days !== void 0) q.set("days", String(opts.days));
+    if (opts.projectId) q.set("project", opts.projectId);
+    const qs = q.toString();
+    return this.request("GET", `/report${qs ? `?${qs}` : ""}`);
+  }
+  /**
    * GET /realtime/config — Supabase connection info for the caller's
    * effective account. The client config file is deliberately
    * backend-agnostic (no Supabase URL / anon key), so Realtime subscribers
@@ -1609,22 +1623,43 @@ function findNativeMemoryDir(cwd, opts = {}) {
   const candidates = opts.explicitDir ? [path8.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
   return candidates.find((d) => isMemoryDir(d, opts.forRestore ?? false)) ?? null;
 }
-async function countOtherNativeMemoryDirs(excludeDir) {
+async function archiveHasFiles(memoryDir) {
+  const root = path8.join(memoryDir, ARCHIVE_ROOT);
+  let dates;
+  try {
+    dates = await fs5.readdir(root);
+  } catch {
+    return false;
+  }
+  for (const d of dates) {
+    try {
+      if ((await fs5.readdir(path8.join(root, d))).length > 0) return true;
+    } catch {
+    }
+  }
+  return false;
+}
+async function scanNativeMemoryGlobal() {
   const projects = path8.join(os7.homedir(), ".claude", "projects");
   let entries;
   try {
     entries = await fs5.readdir(projects);
   } catch {
-    return 0;
+    return { liveDirs: [], archivedDirs: [] };
   }
-  const excluded = excludeDir ? path8.resolve(excludeDir) : null;
-  let count = 0;
+  const liveDirs = [];
+  const archivedDirs = [];
   for (const entry of entries) {
     const dir = path8.join(projects, entry, "memory");
-    if (excluded && path8.resolve(dir) === excluded) continue;
-    if (existsSync3(path8.join(dir, "MEMORY.md"))) count += 1;
+    if (existsSync3(path8.join(dir, "MEMORY.md"))) liveDirs.push(dir);
+    if (await archiveHasFiles(dir)) archivedDirs.push(dir);
   }
-  return count;
+  return { liveDirs, archivedDirs };
+}
+async function countOtherNativeMemoryDirs(excludeDir) {
+  const excluded = excludeDir ? path8.resolve(excludeDir) : null;
+  const { liveDirs } = await scanNativeMemoryGlobal();
+  return liveDirs.filter((d) => !excluded || path8.resolve(d) !== excluded).length;
 }
 async function readNativeMemory(memoryDir) {
   const indexRaw = await fs5.readFile(path8.join(memoryDir, "MEMORY.md"), "utf8");

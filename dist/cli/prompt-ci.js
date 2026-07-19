@@ -636,6 +636,20 @@ var MemlinApiClient = class {
     return this.request("GET", "/me", void 0, { includeAccount: false });
   }
   /**
+   * GET /report — account-scoped usage aggregates (tokens saved, resolves,
+   * hit rate). The route nests the window (`window: { from, days }` — no
+   * top-level days field) and clamps days to [1, 31] server-side (default 1);
+   * `projectId` maps to the `?project=` query param. Consumed by the
+   * Companion's Memory panel for its tokens-saved counter.
+   */
+  async report(opts = {}) {
+    const q = new URLSearchParams();
+    if (opts.days !== void 0) q.set("days", String(opts.days));
+    if (opts.projectId) q.set("project", opts.projectId);
+    const qs = q.toString();
+    return this.request("GET", `/report${qs ? `?${qs}` : ""}`);
+  }
+  /**
    * GET /realtime/config — Supabase connection info for the caller's
    * effective account. The client config file is deliberately
    * backend-agnostic (no Supabase URL / anon key), so Realtime subscribers
