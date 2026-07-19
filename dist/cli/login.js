@@ -4964,94 +4964,6 @@ import { existsSync as existsSync3, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import os7 from "node:os";
 import path9 from "node:path";
-function gitMainRoot(cwd) {
-  try {
-    const common = execFileSync(
-      "git",
-      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
-    ).trim();
-    return common ? path9.dirname(common) : null;
-  } catch {
-    return null;
-  }
-}
-function encodings(p) {
-  return [
-    p.replace(/[:\\/.]/g, "-"),
-    p.replace(/[/.]/g, "-"),
-    p.replace(/\//g, "-")
-  ];
-}
-function nativeMemoryDirCandidates(cwd) {
-  const projects = path9.join(os7.homedir(), ".claude", "projects");
-  const roots = [gitMainRoot(cwd), cwd].filter((x) => !!x);
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  for (const r of roots) {
-    for (const enc of encodings(r)) {
-      const dir = path9.join(projects, enc, "memory");
-      if (!seen.has(dir)) {
-        seen.add(dir);
-        out.push(dir);
-      }
-    }
-  }
-  return out;
-}
-function isMemoryDir(dir, forRestore) {
-  if (existsSync3(path9.join(dir, "MEMORY.md"))) return true;
-  if (!forRestore) return false;
-  const archived = path9.join(dir, ".archived");
-  try {
-    return statSync(archived).isDirectory();
-  } catch {
-    return false;
-  }
-}
-function findNativeMemoryDir(cwd, opts = {}) {
-  const candidates = opts.explicitDir ? [path9.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
-  return candidates.find((d) => isMemoryDir(d, opts.forRestore ?? false)) ?? null;
-}
-var NATIVE_MEMORY_SESSION_READ_CAP_BYTES = 25e3;
-async function summarizeNativeMemory(cwd, opts = {}) {
-  const memoryDir = findNativeMemoryDir(cwd, { explicitDir: opts.explicitDir });
-  if (!memoryDir) return null;
-  let indexBytes = 0;
-  let totalBytes = 0;
-  let fileCount = 0;
-  for (const name of await fs7.readdir(memoryDir)) {
-    if (!name.endsWith(".md") || name.startsWith(".")) continue;
-    let bytes;
-    try {
-      const st = await fs7.stat(path9.join(memoryDir, name));
-      if (!st.isFile()) continue;
-      bytes = st.size;
-    } catch {
-      continue;
-    }
-    fileCount += 1;
-    totalBytes += bytes;
-    if (name === "MEMORY.md") indexBytes = bytes;
-  }
-  return {
-    memoryDir,
-    fileCount,
-    approxSessionTokens: Math.ceil(
-      Math.min(indexBytes, NATIVE_MEMORY_SESSION_READ_CAP_BYTES) / 4
-    ),
-    approxCorpusTokens: Math.ceil(totalBytes / 4)
-  };
-}
-function formatTokens(n) {
-  if (n < 1e3) return String(n);
-  return `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}k`;
-}
-function nativeMemoryNudgeLines(summary, policy) {
-  const first = `Native auto-memory found: ${summary.fileCount} file(s) \u2014 \u2248${formatTokens(summary.approxSessionTokens)} tokens loaded into every Claude Code session (\u2248${formatTokens(summary.approxCorpusTokens)} tokens of memory on this machine).`;
-  const action = policy === "required" ? "  \u26A0 Your org REQUIRES Memlin-managed memory \u2014 run: memlin manage-memory --archive" : policy === "recommended" ? "  Your workspace recommends letting Memlin manage memory: memlin manage-memory --archive" : "  Move it into Memlin (reversible \u2014 nothing is deleted): memlin manage-memory --archive";
-  return [first, action];
-}
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
@@ -9732,6 +9644,97 @@ var FEATURE_DISCOVERY_SYSTEM = [
   '{ "features": [ { "name": string, "summary": string, "members": string[] } ] }',
   "where each members entry is an id from the inventory. No prose outside the JSON."
 ].join("\n");
+
+// packages/plugin-core/src/native-memory.ts
+function gitMainRoot(cwd) {
+  try {
+    const common = execFileSync(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    ).trim();
+    return common ? path9.dirname(common) : null;
+  } catch {
+    return null;
+  }
+}
+function encodings(p) {
+  return [
+    p.replace(/[:\\/.]/g, "-"),
+    p.replace(/[/.]/g, "-"),
+    p.replace(/\//g, "-")
+  ];
+}
+function nativeMemoryDirCandidates(cwd) {
+  const projects = path9.join(os7.homedir(), ".claude", "projects");
+  const roots = [gitMainRoot(cwd), cwd].filter((x) => !!x);
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const r of roots) {
+    for (const enc of encodings(r)) {
+      const dir = path9.join(projects, enc, "memory");
+      if (!seen.has(dir)) {
+        seen.add(dir);
+        out.push(dir);
+      }
+    }
+  }
+  return out;
+}
+function isMemoryDir(dir, forRestore) {
+  if (existsSync3(path9.join(dir, "MEMORY.md"))) return true;
+  if (!forRestore) return false;
+  const archived = path9.join(dir, ".archived");
+  try {
+    return statSync(archived).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function findNativeMemoryDir(cwd, opts = {}) {
+  const candidates = opts.explicitDir ? [path9.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
+  return candidates.find((d) => isMemoryDir(d, opts.forRestore ?? false)) ?? null;
+}
+var NATIVE_MEMORY_SESSION_READ_CAP_BYTES = 25e3;
+async function summarizeNativeMemory(cwd, opts = {}) {
+  const memoryDir = findNativeMemoryDir(cwd, { explicitDir: opts.explicitDir });
+  if (!memoryDir) return null;
+  let indexBytes = 0;
+  let totalBytes = 0;
+  let fileCount = 0;
+  for (const name of await fs7.readdir(memoryDir)) {
+    if (!name.endsWith(".md") || name.startsWith(".")) continue;
+    let bytes;
+    try {
+      const st = await fs7.stat(path9.join(memoryDir, name));
+      if (!st.isFile()) continue;
+      bytes = st.size;
+    } catch {
+      continue;
+    }
+    fileCount += 1;
+    totalBytes += bytes;
+    if (name === "MEMORY.md") indexBytes = bytes;
+  }
+  return {
+    memoryDir,
+    fileCount,
+    approxSessionTokens: Math.ceil(
+      Math.min(indexBytes, NATIVE_MEMORY_SESSION_READ_CAP_BYTES) / 4
+    ),
+    approxCorpusTokens: Math.ceil(totalBytes / 4)
+  };
+}
+function formatTokens(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
+  if (n < 1e3) return String(n);
+  return `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}k`;
+}
+function nativeMemoryNudgeLines(summary, policy) {
+  const first = `Native auto-memory found: ${summary.fileCount} file(s) \u2014 \u2248${formatTokens(summary.approxSessionTokens)} tokens loaded into every Claude Code session (\u2248${formatTokens(summary.approxCorpusTokens)} tokens of memory on this machine).`;
+  const action = policy === "required" ? "  \u26A0 Your org REQUIRES Memlin-managed memory \u2014 run: memlin manage-memory --archive" : policy === "recommended" ? "  Your workspace recommends letting Memlin manage memory: memlin manage-memory --archive" : "  Move it into Memlin (reversible \u2014 nothing is deleted): memlin manage-memory --archive";
+  return [first, action];
+}
 
 // packages/plugin-core/src/cli/command-guide.ts
 function printCommandGuide(opts = {}) {
