@@ -61206,8 +61206,11 @@ function filterClientMetadata(raw, kind2) {
   }
   return out;
 }
+var DecisionWriteArgs = WriteArgs.extend({ kind: external_exports.literal("decision") });
 async function writeMemory(ctx, rawArgs) {
-  const args = WriteArgs.parse(rawArgs);
+  return executeDocumentWrite(ctx, WriteArgs.parse(rawArgs));
+}
+async function executeDocumentWrite(ctx, args) {
   const projectId = args.project_id ?? ctx.projectId ?? null;
   if (args.document_id) {
     const { data: existing, error: ownErr } = await ctx.supabase.from("documents").select("account_id, kind").eq("id", args.document_id).maybeSingle();
