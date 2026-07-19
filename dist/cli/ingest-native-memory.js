@@ -181,10 +181,7 @@ var init_companion_client = __esm({
 });
 
 // packages/plugin-core/src/cli/ingest-native-memory.ts
-import { promises as fs4 } from "node:fs";
-import { existsSync as existsSync2 } from "node:fs";
-import os6 from "node:os";
-import path7 from "node:path";
+import path8 from "node:path";
 
 // packages/plugin-core/src/client.ts
 import { promises as fs3 } from "node:fs";
@@ -1412,9 +1409,6 @@ function runCliMain(main2, onError) {
   );
 }
 
-// packages/plugin-core/src/cli/ingest-native-memory.ts
-import { execFileSync } from "node:child_process";
-
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
@@ -1506,7 +1500,12 @@ function detectGitRemotes(cwd) {
   return out;
 }
 
-// packages/plugin-core/src/cli/ingest-native-memory.ts
+// packages/plugin-core/src/native-memory.ts
+import { promises as fs4 } from "node:fs";
+import { existsSync as existsSync2, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import os6 from "node:os";
+import path7 from "node:path";
 function gitMainRoot(cwd) {
   try {
     const common = execFileSync(
@@ -1520,7 +1519,11 @@ function gitMainRoot(cwd) {
   }
 }
 function encodings(p) {
-  return [p.replace(/[/.]/g, "-"), p.replace(/\//g, "-")];
+  return [
+    p.replace(/[:\\/.]/g, "-"),
+    p.replace(/[/.]/g, "-"),
+    p.replace(/\//g, "-")
+  ];
 }
 function nativeMemoryDirCandidates(cwd) {
   const projects = path7.join(os6.homedir(), ".claude", "projects");
@@ -1538,6 +1541,37 @@ function nativeMemoryDirCandidates(cwd) {
   }
   return out;
 }
+function isMemoryDir(dir, forRestore) {
+  if (existsSync2(path7.join(dir, "MEMORY.md"))) return true;
+  if (!forRestore) return false;
+  const archived = path7.join(dir, ".archived");
+  try {
+    return statSync(archived).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function findNativeMemoryDir(cwd, opts = {}) {
+  const candidates = opts.explicitDir ? [path7.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
+  return candidates.find((d) => isMemoryDir(d, opts.forRestore ?? false)) ?? null;
+}
+async function readNativeMemory(memoryDir) {
+  const indexRaw = await fs4.readFile(path7.join(memoryDir, "MEMORY.md"), "utf8");
+  const satelliteNames = (await fs4.readdir(memoryDir)).filter(
+    (f) => f.endsWith(".md") && f !== "MEMORY.md"
+  );
+  const satellites = [];
+  for (const name of satelliteNames.slice(0, 1e3)) {
+    try {
+      const content = await fs4.readFile(path7.join(memoryDir, name), "utf8");
+      if (content.length <= 1e5) satellites.push({ name, content });
+    } catch {
+    }
+  }
+  return { memoryDir, indexRaw, satellites };
+}
+
+// packages/plugin-core/src/cli/ingest-native-memory.ts
 async function main() {
   const ctx = await getApi();
   if (!ctx) {
@@ -1552,26 +1586,15 @@ async function main() {
     exitCli(2);
   }
   const cwd = runtimeCwd();
-  const candidates = explicitDir ? [path7.resolve(cwd, explicitDir)] : nativeMemoryDirCandidates(cwd);
-  const memoryDir = candidates.find((d) => existsSync2(path7.join(d, "MEMORY.md")));
+  const memoryDir = findNativeMemoryDir(cwd, { explicitDir });
   if (!memoryDir) {
+    const candidates = explicitDir ? [path8.resolve(cwd, explicitDir)] : nativeMemoryDirCandidates(cwd);
     console.log("No native auto-memory found. Looked for MEMORY.md in:");
     for (const d of candidates) console.log(`  ${d}`);
     console.log("Nothing to ingest \u2014 native auto-memory may be off or empty.");
     return;
   }
-  const indexRaw = await fs4.readFile(path7.join(memoryDir, "MEMORY.md"), "utf8");
-  const satelliteNames = (await fs4.readdir(memoryDir)).filter(
-    (f) => f.endsWith(".md") && f !== "MEMORY.md"
-  );
-  const satellites = [];
-  for (const name of satelliteNames.slice(0, 1e3)) {
-    try {
-      const content = await fs4.readFile(path7.join(memoryDir, name), "utf8");
-      if (content.length <= 1e5) satellites.push({ name, content });
-    } catch {
-    }
-  }
+  const { indexRaw, satellites } = await readNativeMemory(memoryDir);
   const resolved = await resolveProject(api, cwd, config.project_id);
   console.log(
     `memlin ingest-native-memory \u2014 ${memoryDir}

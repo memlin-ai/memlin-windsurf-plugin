@@ -180,6 +180,9 @@ var init_companion_client = __esm({
   }
 });
 
+// packages/plugin-core/src/cli/manage-memory.ts
+import { promises as fs6 } from "node:fs";
+
 // packages/plugin-core/src/plugin-install.ts
 import { promises as fs } from "node:fs";
 import { existsSync } from "node:fs";
@@ -498,6 +501,40 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+var PROVIDER_HOSTS = [
+  "github.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "dev.azure.com",
+  "ssh.dev.azure.com",
+  "codeberg.org",
+  "sr.ht",
+  "git.sr.ht"
+];
+function normalizeGitRemote(raw) {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  s = s.replace(/^git@([^:]+):/, "https://$1/");
+  s = s.replace(/^ssh:\/\//, "");
+  s = s.replace(/^https?:\/\//, "");
+  s = s.replace(/^git@/, "");
+  s = s.replace(/\.git$/, "");
+  s = s.replace(/\/$/, "");
+  const slash = s.indexOf("/");
+  if (slash > 0) {
+    const host = s.slice(0, slash);
+    const rest = s.slice(slash);
+    for (const provider of PROVIDER_HOSTS) {
+      if (host === provider) break;
+      if (host.startsWith(provider + "-")) {
+        s = provider + rest;
+        break;
+      }
+    }
+  }
+  return s || null;
+}
 async function closeHttpSockets() {
   try {
     const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
@@ -1423,6 +1460,304 @@ function applyWorkspaceOverlay(config, overlay) {
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
 }
 
+// packages/plugin-core/src/project-resolver.ts
+import { execSync } from "node:child_process";
+import { existsSync as existsSync2, readdirSync } from "node:fs";
+import path7 from "node:path";
+var WORKSPACE_ENV_VARS = [
+  // Claude Code exposes the original project dir to hooks/plugin commands.
+  "CLAUDE_PROJECT_DIR",
+  // Cursor/plugin shims and local tests can set this explicitly.
+  "CURSOR_WORKSPACE_ROOT",
+  "CURSOR_PROJECT_ROOT",
+  "MEMLIN_WORKSPACE_ROOT",
+  // npm/pnpm set INIT_CWD to the directory where the user invoked a script.
+  "INIT_CWD"
+];
+function runtimeCwd(fallback = process.cwd()) {
+  for (const name of WORKSPACE_ENV_VARS) {
+    const raw = process.env[name]?.trim();
+    if (raw && path7.isAbsolute(raw)) return path7.resolve(raw);
+  }
+  return path7.resolve(fallback);
+}
+async function resolveProject(api, cwd, configProjectId) {
+  const absCwd = path7.resolve(cwd);
+  const remotes = detectGitRemotes(cwd);
+  const hasGitRemote = remotes.length > 0;
+  try {
+    const result = await api.resolveProject({
+      // Primary remote (back-compat with the single-remote server path).
+      git_remote: remotes[0] ?? null,
+      // All detected remotes — for the workspace-root-of-repos case, this is
+      // every sibling repo so the server resolves to the owning project.
+      git_remotes: remotes,
+      cwd: absCwd
+    });
+    if (result.project_id) {
+      return {
+        project_id: result.project_id,
+        project_name: result.name,
+        account_id: result.account_id,
+        reason: result.reason === "none" ? "config" : result.reason,
+        hasGitRemote
+      };
+    }
+  } catch {
+  }
+  if (configProjectId) {
+    return {
+      project_id: configProjectId,
+      project_name: null,
+      account_id: null,
+      reason: "config",
+      hasGitRemote
+    };
+  }
+  return { project_id: null, project_name: null, account_id: null, reason: "none", hasGitRemote };
+}
+function readGitRemote(cwd) {
+  try {
+    const url = execSync("git remote get-url origin", {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8"
+    }).trim();
+    return normalizeGitRemote(url);
+  } catch {
+    return null;
+  }
+}
+var MAX_WORKSPACE_SCAN = 64;
+function detectGitRemotes(cwd) {
+  const enclosing = readGitRemote(cwd);
+  if (enclosing) return [enclosing];
+  const out = [];
+  try {
+    let scanned = 0;
+    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
+      if (scanned >= MAX_WORKSPACE_SCAN) break;
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+      scanned++;
+      const child = path7.join(cwd, entry.name);
+      if (!existsSync2(path7.join(child, ".git"))) continue;
+      const remote = readGitRemote(child);
+      if (remote && !out.includes(remote)) out.push(remote);
+    }
+  } catch {
+  }
+  return out;
+}
+
+// packages/plugin-core/src/native-memory.ts
+import { promises as fs5 } from "node:fs";
+import { existsSync as existsSync3, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import os7 from "node:os";
+import path8 from "node:path";
+function gitMainRoot(cwd) {
+  try {
+    const common = execFileSync(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    ).trim();
+    return common ? path8.dirname(common) : null;
+  } catch {
+    return null;
+  }
+}
+function encodings(p) {
+  return [
+    p.replace(/[:\\/.]/g, "-"),
+    p.replace(/[/.]/g, "-"),
+    p.replace(/\//g, "-")
+  ];
+}
+function nativeMemoryDirCandidates(cwd) {
+  const projects = path8.join(os7.homedir(), ".claude", "projects");
+  const roots = [gitMainRoot(cwd), cwd].filter((x) => !!x);
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const r of roots) {
+    for (const enc of encodings(r)) {
+      const dir = path8.join(projects, enc, "memory");
+      if (!seen.has(dir)) {
+        seen.add(dir);
+        out.push(dir);
+      }
+    }
+  }
+  return out;
+}
+function isMemoryDir(dir, forRestore) {
+  if (existsSync3(path8.join(dir, "MEMORY.md"))) return true;
+  if (!forRestore) return false;
+  const archived = path8.join(dir, ".archived");
+  try {
+    return statSync(archived).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function findNativeMemoryDir(cwd, opts = {}) {
+  const candidates = opts.explicitDir ? [path8.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
+  return candidates.find((d) => isMemoryDir(d, opts.forRestore ?? false)) ?? null;
+}
+async function countOtherNativeMemoryDirs(excludeDir) {
+  const projects = path8.join(os7.homedir(), ".claude", "projects");
+  let entries;
+  try {
+    entries = await fs5.readdir(projects);
+  } catch {
+    return 0;
+  }
+  const excluded = excludeDir ? path8.resolve(excludeDir) : null;
+  let count = 0;
+  for (const entry of entries) {
+    const dir = path8.join(projects, entry, "memory");
+    if (excluded && path8.resolve(dir) === excluded) continue;
+    if (existsSync3(path8.join(dir, "MEMORY.md"))) count += 1;
+  }
+  return count;
+}
+async function readNativeMemory(memoryDir) {
+  const indexRaw = await fs5.readFile(path8.join(memoryDir, "MEMORY.md"), "utf8");
+  const satelliteNames = (await fs5.readdir(memoryDir)).filter(
+    (f) => f.endsWith(".md") && f !== "MEMORY.md"
+  );
+  const satellites = [];
+  for (const name of satelliteNames.slice(0, 1e3)) {
+    try {
+      const content = await fs5.readFile(path8.join(memoryDir, name), "utf8");
+      if (content.length <= 1e5) satellites.push({ name, content });
+    } catch {
+    }
+  }
+  return { memoryDir, indexRaw, satellites };
+}
+var ARCHIVE_ROOT = ".archived";
+var ARCHIVE_NAME_RE = /^(\d{4}-\d{2}-\d{2})(?:-(\d+))?$/;
+function archiveSortKey(name) {
+  const m = ARCHIVE_NAME_RE.exec(name);
+  return m ? [m[1], m[2] ? Number(m[2]) : 1] : [name, 0];
+}
+async function listArchiveDirs(memoryDir) {
+  const root = path8.join(memoryDir, ARCHIVE_ROOT);
+  let entries;
+  try {
+    entries = await fs5.readdir(root);
+  } catch {
+    return [];
+  }
+  return entries.filter((e) => {
+    try {
+      return statSync(path8.join(root, e)).isDirectory();
+    } catch {
+      return false;
+    }
+  }).sort((a, b) => {
+    const [da, na] = archiveSortKey(a);
+    const [db, nb] = archiveSortKey(b);
+    return da === db ? na - nb : da < db ? -1 : 1;
+  }).map((e) => path8.join(root, e));
+}
+async function latestArchiveDir(memoryDir) {
+  const dirs = await listArchiveDirs(memoryDir);
+  return dirs.length ? dirs[dirs.length - 1] : null;
+}
+async function archiveNativeMemory(memoryDir, basenames) {
+  const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const root = path8.join(memoryDir, ARCHIVE_ROOT);
+  let archiveDir = path8.join(root, date);
+  for (let n = 2; existsSync3(archiveDir); n += 1) {
+    archiveDir = path8.join(root, `${date}-${n}`);
+  }
+  await fs5.mkdir(archiveDir, { recursive: true });
+  const moved = [];
+  for (const name of basenames) {
+    const from = path8.join(memoryDir, name);
+    if (!existsSync3(from)) continue;
+    await fs5.rename(from, path8.join(archiveDir, name));
+    moved.push(name);
+  }
+  const skippedLive = (await fs5.readdir(memoryDir)).filter((f) => f.endsWith(".md")).sort();
+  return { archiveDir, moved, skippedLive };
+}
+async function restoreNativeMemory(memoryDir) {
+  const archiveDirs = (await listArchiveDirs(memoryDir)).reverse();
+  const restored = [];
+  const kept = [];
+  const handled = /* @__PURE__ */ new Set();
+  for (const dir of archiveDirs) {
+    const files = (await fs5.readdir(dir)).filter((f) => f.endsWith(".md"));
+    for (const name of files) {
+      if (handled.has(name)) continue;
+      const live = path8.join(memoryDir, name);
+      if (existsSync3(live)) {
+        handled.add(name);
+        kept.push({ name, at: dir });
+        continue;
+      }
+      await fs5.rename(path8.join(dir, name), live);
+      handled.add(name);
+      restored.push({ name, from: dir });
+    }
+  }
+  return { restored, kept, archiveDirs };
+}
+function isTrivial(snap) {
+  for (const sat of snap.satellites) {
+    if (sat.content.trim().length >= 8) return false;
+  }
+  for (const line of snap.indexRaw.split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    if (t.length >= 8) return false;
+  }
+  return true;
+}
+async function runTakeover(opts) {
+  if (!opts.memoryDir) {
+    const d2 = await opts.disable();
+    return { status: "no-native-memory", disabled: d2.ok };
+  }
+  const snap = await readNativeMemory(opts.memoryDir);
+  let summary;
+  if (isTrivial(snap)) {
+    summary = "nothing above the ingest threshold (all content under 8 chars) \u2014 nothing to lose";
+  } else {
+    let outcome;
+    try {
+      outcome = await opts.ingest(snap);
+    } catch (err) {
+      outcome = { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+    if (!outcome.ok) {
+      return { status: "ingest-refused", reason: outcome.reason };
+    }
+    summary = outcome.summary;
+  }
+  const basenames = ["MEMORY.md", ...snap.satellites.map((s) => s.name)];
+  const archiveFn = opts.archive ?? archiveNativeMemory;
+  let receipt;
+  try {
+    receipt = await archiveFn(opts.memoryDir, basenames);
+  } catch (err) {
+    const d2 = await opts.disable();
+    return {
+      status: "archive-failed",
+      ingestSummary: summary,
+      error: err instanceof Error ? err.message : String(err),
+      disabled: d2.ok
+    };
+  }
+  const d = await opts.disable();
+  return { status: "done", ingestSummary: summary, receipt, disabled: d.ok };
+}
+
 // packages/plugin-core/src/cli/cli-runner.ts
 var WATCHDOG_MS = 2e3;
 var CliExit = class extends Error {
@@ -1488,8 +1823,16 @@ function printHelp() {
       "",
       "Usage:",
       "  memlin manage-memory            Memlin takes over (editor native auto-memory off)",
+      "  memlin manage-memory --archive  Ingest native memory into Memlin, archive the MD",
+      "                                  files (moved to .archived/, never deleted), then",
+      "                                  turn native auto-memory off. If archiving fails",
+      "                                  after a successful ingest, the command still turns",
+      "                                  native memory off and exits 0 (your content IS in",
+      "                                  Memlin) \u2014 it names any files left in place.",
       "  memlin manage-memory --status   Show current state, change nothing",
-      "  memlin manage-memory --revert   Hand memory back to the editor (native on)",
+      "  memlin manage-memory --revert   Hand memory back to the editor (native on) and",
+      "                                  restore any archived MD files (never overwrites",
+      "                                  files the editor has recreated)",
       "",
       "Turning the editor's native memory off only stops it from keeping a redundant",
       "copy \u2014 Memlin keeps capturing, and everything it stores is fully exportable",
@@ -1525,6 +1868,25 @@ async function runManageMemory(action) {
     }
     printPolicy();
     console.log(`  Settings file: ${paths.settingsFile}`);
+    const memoryDir = findNativeMemoryDir(runtimeCwd(), { forRestore: true });
+    if (memoryDir) {
+      const archive = await latestArchiveDir(memoryDir);
+      if (archive) {
+        const count = (await fs6.readdir(archive)).filter((f) => f.endsWith(".md")).length;
+        console.log(`  Archive: ${archive} (${count} file${count === 1 ? "" : "s"})`);
+        console.log("  Restore them: memlin manage-memory --revert");
+      }
+    }
+    const others = await countOtherNativeMemoryDirs(memoryDir);
+    if (others > 0) {
+      console.log(
+        `  \u26A0 ${others} other project(s) still keep native memory on disk \u2014 run \`memlin manage-memory --archive\` from those repos too, or ignore if intentional.`
+      );
+    }
+    return;
+  }
+  if (action === "archive") {
+    await runArchiveTakeover(paths);
     return;
   }
   if (action === "revert" && policy === "required") {
@@ -1548,8 +1910,97 @@ async function runManageMemory(action) {
     console.log("\u2713 Memory handed back to the editor \u2014 its native auto-memory is ON again.");
     console.log("  Memlin still works; it just no longer manages the native toggle.");
     console.log("  Let Memlin manage it again: memlin manage-memory");
+    const memoryDir = findNativeMemoryDir(runtimeCwd(), { forRestore: true });
+    if (memoryDir) {
+      const report = await restoreNativeMemory(memoryDir);
+      if (report.archiveDirs.length > 0) {
+        for (const r of report.restored) console.log(`  \u2713 restored ${r.name} (from ${r.from})`);
+        for (const k of report.kept) {
+          console.log(`  ! kept live ${k.name} \u2014 the editor recreated it; archived copy stays at ${k.at}`);
+        }
+        if (report.restored.length === 0 && report.kept.length === 0) {
+          console.log("  (archive present but empty \u2014 nothing to restore)");
+        }
+      }
+    }
   }
   console.log(`  ${result.status === "applied" ? "wrote" : "unchanged"}: ${result.settingsFile}`);
+}
+async function runArchiveTakeover(paths) {
+  const ctx = await getApi();
+  if (!ctx) {
+    console.error("memlin: not configured. Run `memlin login` first.");
+    exitCli(1);
+  }
+  const { api, config } = ctx;
+  const cwd = runtimeCwd();
+  const memoryDir = findNativeMemoryDir(cwd);
+  const ingest = async (snap) => {
+    try {
+      const resolved = await resolveProject(api, cwd, config.project_id);
+      const result2 = await api.ingestNativeMemory(
+        {
+          memory_index_md: snap.indexRaw,
+          satellites: snap.satellites,
+          project_id: resolved.project_id,
+          cwd
+        },
+        { accountId: config.account_id }
+      );
+      if (result2.skipped) return { ok: false, reason: result2.reason ?? "skipped" };
+      return {
+        ok: true,
+        summary: `Ingested: ${result2.proposals_persisted} new, ${result2.proposals_corroborated ?? 0} corroborated existing, ${result2.proposals_auto_activated ?? 0} auto-activated (from ${result2.entries_parsed} index entries, ${result2.proposals_built} candidates).`
+      };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+  };
+  const disable = async () => {
+    const r = await applyManagedMemoryMode("disable", paths);
+    return r.status === "failed" ? { ok: false, detail: r.detail } : { ok: true };
+  };
+  const result = await runTakeover({ memoryDir, ingest, disable });
+  if (result.status === "ingest-refused") {
+    console.error(`memlin manage-memory: ingest refused \u2014 ${result.reason}`);
+    console.error("  Nothing was moved and native auto-memory is unchanged.");
+    console.error("  Fix the issue and re-run `memlin manage-memory --archive`.");
+    exitCli(1);
+  }
+  if (result.status === "no-native-memory") {
+    console.log("No native auto-memory found for this repo \u2014 nothing to ingest or archive.");
+  } else {
+    console.log(`  ${result.ingestSummary}`);
+    if (result.status === "done") {
+      const { receipt } = result;
+      console.log(`  \u2713 archived ${receipt.moved.length} file(s) \u2192 ${receipt.archiveDir}`);
+      for (const name of receipt.skippedLive) {
+        console.log(`  ! left live (not ingested \u2014 over the read caps): ${name}`);
+      }
+      console.log("  Restore anytime: memlin manage-memory --revert");
+    } else {
+      console.log(`  \u26A0 couldn't archive the MD files: ${result.error}`);
+      console.log("  They remain in place (nothing deleted); your memory IS ingested in Memlin.");
+    }
+  }
+  if (!result.disabled) {
+    const succeeded = result.status === "done" ? "Ingest and archive succeeded" : result.status === "archive-failed" ? "Ingest succeeded (archive failed)" : "Nothing needed ingesting";
+    console.error("memlin manage-memory: couldn't turn the editor's native auto-memory off.");
+    console.error(`  ${succeeded}; native auto-memory is still ON.`);
+    console.error("  Re-running `memlin manage-memory --archive` is safe.");
+    exitCli(1);
+  }
+  console.log("\u2713 Memlin now manages your memory.");
+  console.log("  The editor's native auto-memory is OFF \u2014 Memlin stays on as your single");
+  console.log("  store and keeps capturing. Restart the agent to apply.");
+  console.log("  Hand it back anytime: memlin manage-memory --revert");
+  const others = await countOtherNativeMemoryDirs(memoryDir);
+  if (others > 0) {
+    console.log(
+      `  \u26A0 ${others} other project(s) still keep native memory on disk \u2014 native loading is now off globally; run \`memlin manage-memory --archive\` from those repos to ingest`
+    );
+    console.log("    and archive them too, or ignore if intentional.");
+  }
 }
 function parseAction(argv) {
   let action = "manage";
@@ -1557,6 +2008,7 @@ function parseAction(argv) {
     if (a === "--help" || a === "-h") return "help";
     else if (a === "--status" || a === "status") action = "status";
     else if (a === "--revert" || a === "--off" || a === "revert" || a === "off") action = "revert";
+    else if (a === "--archive" || a === "archive") action = "archive";
     else if (a === "on" || a === "manage") action = "manage";
     else if (a?.startsWith("-")) return { error: `unknown flag: ${a}` };
     else if (a) return { error: `unknown argument: ${a}` };
