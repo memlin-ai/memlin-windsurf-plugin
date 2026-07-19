@@ -63181,7 +63181,7 @@ async function hydrateCandidateBodies(ctx, candidateIds, functionBodyById, funct
 }
 function matchPathPattern(cwd, pattern) {
   if (!cwd || !pattern) return null;
-  const c2 = cwd.replace(/\/+$/, "");
+  const c2 = cwd.replace(/\\/g, "/").replace(/\/+$/, "");
   let p2 = pattern.replace(/\/+$/, "");
   p2 = p2.replace(/\/?\*{1,2}$/, "");
   let anchored = true;
@@ -63209,7 +63209,7 @@ function inferActiveRepo(args) {
     if (hits.length === 1) return hits[0] ?? null;
   }
   if (args.cwd) {
-    const segments = new Set(args.cwd.toLowerCase().split("/").filter(Boolean));
+    const segments = new Set(args.cwd.toLowerCase().split(/[\\/]/).filter(Boolean));
     const hits = repoNames.filter((r2) => {
       const base = r2.split("/").pop()?.toLowerCase();
       return !!base && segments.has(base);

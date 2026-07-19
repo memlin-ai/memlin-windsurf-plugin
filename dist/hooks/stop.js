@@ -5178,6 +5178,10 @@ function isWorkspaceActive(input) {
 }
 
 // packages/plugin-core/dist/transcript.js
+function sessionIdFromTranscriptPath(p) {
+  const stem = p?.split(/[\\/]/).pop()?.replace(/\.jsonl$/, "");
+  return stem || null;
+}
 function summarizeToolUse(b) {
   const n = b.name || "tool";
   const i = b.input ?? {};
@@ -10298,7 +10302,7 @@ async function maybeProposeMemory(ctx, payload) {
 }
 async function maybeRecordOutcome(ctx, payload) {
   const state = await readState();
-  const transcriptSessionId = payload.transcript_path?.split("/").pop()?.replace(/\.jsonl$/, "");
+  const transcriptSessionId = sessionIdFromTranscriptPath(payload.transcript_path);
   const sessionId = payload.session_id ?? transcriptSessionId ?? null;
   const lastResolve = getLastResolveForSession(state, sessionId);
   if (!isResolveEligibleForOutcome(lastResolve)) return;
@@ -10423,7 +10427,7 @@ async function maybeScribeSession(ctx, payload) {
     return;
   }
   if (raw.length < SCRIBE_MIN_TRANSCRIPT_CHARS) return;
-  const sessionId = payload.transcript_path.split("/").pop()?.replace(/\.jsonl$/, "") ?? "session";
+  const sessionId = sessionIdFromTranscriptPath(payload.transcript_path) ?? "session";
   const state = await readState();
   const prev = state.session_scribe;
   const now = Date.now();
@@ -10554,7 +10558,7 @@ function truncateWorkingText(text, max) {
   return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}\u2026`;
 }
 async function maybeUpsertWorkingMemory(ctx, payload) {
-  const transcriptSessionId = payload.transcript_path?.split("/").pop()?.replace(/\.jsonl$/, "");
+  const transcriptSessionId = sessionIdFromTranscriptPath(payload.transcript_path);
   const sessionId = payload.session_id ?? transcriptSessionId ?? null;
   if (!sessionId) {
     log("working memory: skipped \u2014 no session_id");
