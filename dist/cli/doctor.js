@@ -251,6 +251,24 @@ function normalizeGitRemote(raw) {
   }
   return s || null;
 }
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
 
 // packages/plugin-core/src/project-resolver.ts
 var WORKSPACE_ENV_VARS = [
@@ -1794,12 +1812,16 @@ async function main() {
   console.log("");
   if (failed === 0 && warned === 0) {
     console.log("  all checks pass.");
-    process.exit(0);
+  } else {
+    console.log(`  ${results.length - failed - warned} pass \xB7 ${warned} warn \xB7 ${failed} fail`);
   }
-  console.log(`  ${results.length - failed - warned} pass \xB7 ${warned} warn \xB7 ${failed} fail`);
-  process.exit(failed > 0 ? 1 : 0);
+  return failed > 0 ? 1 : 0;
 }
 main().catch((err) => {
   console.error("memlin doctor failed:", err instanceof Error ? err.message : err);
-  process.exit(1);
+  return 1;
+}).then((code) => {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(code), 2e3).unref();
 });
