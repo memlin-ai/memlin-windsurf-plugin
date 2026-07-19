@@ -208,6 +208,9 @@ async function readClaudeUserSettings(paths) {
     return null;
   }
 }
+function normalizeManagedMemoryPolicy(s) {
+  return s === "recommended" || s === "required" ? s : "off";
+}
 async function applyManagedMemoryMode(mode, paths) {
   const p = paths ?? defaultUserSettingsPaths();
   try {
@@ -1807,8 +1810,7 @@ async function fetchOrgPolicy() {
     if (!ctx) return "off";
     const me = await ctx.api.me();
     const acct = me.accounts.find((a) => a.id === ctx.config.account_id) ?? me.accounts[0];
-    const p = acct?.managed_memory_policy;
-    return p === "recommended" || p === "required" ? p : "off";
+    return normalizeManagedMemoryPolicy(acct?.managed_memory_policy);
   } catch {
     return "off";
   }

@@ -151,9 +151,17 @@ function accessTokenSubject(accessToken) {
 }
 
 // packages/plugin-core/src/login-bootstrap.ts
-import { promises as fs4 } from "node:fs";
-import path5 from "node:path";
+import { promises as fs5 } from "node:fs";
+import path6 from "node:path";
 import { randomUUID as randomUUID4 } from "node:crypto";
+
+// packages/plugin-core/src/plugin-install.ts
+import { promises as fs4 } from "node:fs";
+import { existsSync } from "node:fs";
+import path5 from "node:path";
+import os5 from "node:os";
+
+// packages/plugin-core/src/login-bootstrap.ts
 var LoginBootstrapError = class extends Error {
   constructor(code, message, options = {}) {
     super(message, options);
@@ -168,7 +176,7 @@ var DEFAULT_PUBLICATION_DEPENDENCIES = {
 };
 async function readSnapshot(file) {
   try {
-    return await fs4.readFile(file);
+    return await fs5.readFile(file);
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -176,18 +184,18 @@ async function readSnapshot(file) {
 }
 async function restoreSnapshot(file, snapshot) {
   if (snapshot === null) {
-    await fs4.rm(file, { force: true });
+    await fs5.rm(file, { force: true });
     return;
   }
-  await fs4.mkdir(path5.dirname(file), { recursive: true });
-  const tmp = path5.join(
-    path5.dirname(file),
-    `${path5.basename(file)}.rollback-${process.pid}-${randomUUID4()}`
+  await fs5.mkdir(path6.dirname(file), { recursive: true });
+  const tmp = path6.join(
+    path6.dirname(file),
+    `${path6.basename(file)}.rollback-${process.pid}-${randomUUID4()}`
   );
-  await fs4.writeFile(tmp, snapshot, { mode: 384 });
-  await fs4.chmod(tmp, 384).catch(() => {
+  await fs5.writeFile(tmp, snapshot, { mode: 384 });
+  await fs5.chmod(tmp, 384).catch(() => {
   });
-  await fs4.rename(tmp, file);
+  await fs5.rename(tmp, file);
 }
 async function publishMemlinLoginPair(config, token, dependencies = {}) {
   if (!config.auth0_sub || accessTokenSubject(token.access_token) !== config.auth0_sub) {

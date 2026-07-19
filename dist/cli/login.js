@@ -3412,7 +3412,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs7 = __require("fs");
+    var fs8 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3496,7 +3496,7 @@ var require_gray_matter = __commonJS({
       return stringify(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs7.readFileSync(filepath, "utf8");
+      const str2 = fs8.readFileSync(filepath, "utf8");
       const file = matter3(str2, options2);
       file.path = filepath;
       return file;
@@ -3526,15 +3526,15 @@ var require_gray_matter = __commonJS({
 
 // packages/plugin-core/src/companion-client.ts
 import http from "node:http";
-import os7 from "node:os";
-import path8 from "node:path";
+import os8 from "node:os";
+import path10 from "node:path";
 function companionSocketPath(env = process.env) {
   const override = env[COMPANION_SOCKET_ENV];
   if (override) return override;
   if (process.platform === "win32") {
-    return `\\\\.\\pipe\\memlin-companion-${os7.userInfo().username}`;
+    return `\\\\.\\pipe\\memlin-companion-${os8.userInfo().username}`;
   }
-  return path8.join(os7.homedir(), ".config", "memlin", "run", "companion.sock");
+  return path10.join(os8.homedir(), ".config", "memlin", "run", "companion.sock");
 }
 function companionDisabled(env = process.env) {
   const off = env[NO_COMPANION_ENV];
@@ -3875,8 +3875,8 @@ function runCliMain(main2, onError) {
 }
 
 // packages/plugin-core/src/login-bootstrap.ts
-import { promises as fs4 } from "node:fs";
-import path5 from "node:path";
+import { promises as fs5 } from "node:fs";
+import path6 from "node:path";
 import { randomUUID as randomUUID4 } from "node:crypto";
 
 // packages/plugin-core/src/client.ts
@@ -4560,6 +4560,104 @@ function accessTokenSubject(accessToken) {
   }
 }
 
+// packages/plugin-core/src/plugin-install.ts
+import { promises as fs4 } from "node:fs";
+import { existsSync } from "node:fs";
+import path5 from "node:path";
+import os5 from "node:os";
+var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
+var MEMLIN_MARKETPLACE_KEY = "memlin-ai";
+var MEMLIN_MARKETPLACE_SOURCE = {
+  source: "github",
+  repo: "memlin-ai/memlin-claude-plugin"
+};
+function defaultUserSettingsPaths() {
+  const claudeDir = path5.join(os5.homedir(), ".claude");
+  return { claudeDir, settingsFile: path5.join(claudeDir, "settings.json") };
+}
+async function readClaudeUserSettings(paths) {
+  const p = paths ?? defaultUserSettingsPaths();
+  if (!existsSync(p.settingsFile)) return null;
+  let raw;
+  try {
+    raw = await fs4.readFile(p.settingsFile, "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+async function ensureUserScopePluginEnabled(paths) {
+  const p = paths ?? defaultUserSettingsPaths();
+  try {
+    await fs4.mkdir(p.claudeDir, { recursive: true });
+    let current = {};
+    if (existsSync(p.settingsFile)) {
+      const raw = await fs4.readFile(p.settingsFile, "utf8");
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") current = parsed;
+      } catch (err) {
+        return {
+          status: "failed",
+          settingsFile: p.settingsFile,
+          detail: `existing settings.json isn't valid JSON: ${err instanceof Error ? err.message : String(err)}`
+        };
+      }
+    }
+    const alreadyEnabled = current.enabledPlugins?.[MEMLIN_PLUGIN_KEY] === true;
+    const marketplaceKnown = !!current.extraKnownMarketplaces?.[MEMLIN_MARKETPLACE_KEY];
+    if (alreadyEnabled && marketplaceKnown) {
+      return {
+        status: "already-enabled",
+        settingsFile: p.settingsFile,
+        detail: "plugin already enabled at user scope"
+      };
+    }
+    const next = {
+      ...current,
+      enabledPlugins: {
+        ...current.enabledPlugins ?? {},
+        [MEMLIN_PLUGIN_KEY]: true
+      }
+    };
+    let touchedMarketplace = false;
+    if (!marketplaceKnown) {
+      next.extraKnownMarketplaces = {
+        ...current.extraKnownMarketplaces ?? {},
+        [MEMLIN_MARKETPLACE_KEY]: { source: { ...MEMLIN_MARKETPLACE_SOURCE } }
+      };
+      touchedMarketplace = true;
+    }
+    await fs4.writeFile(p.settingsFile, JSON.stringify(next, null, 2) + "\n", "utf8");
+    return {
+      status: touchedMarketplace ? "enabled-with-marketplace" : "enabled",
+      settingsFile: p.settingsFile,
+      detail: touchedMarketplace ? "enabled plugin + registered Memlin marketplace" : "enabled plugin (marketplace already registered)"
+    };
+  } catch (err) {
+    return {
+      status: "failed",
+      settingsFile: p.settingsFile,
+      detail: err instanceof Error ? err.message : String(err)
+    };
+  }
+}
+function normalizeManagedMemoryPolicy(s) {
+  return s === "recommended" || s === "required" ? s : "off";
+}
+function inspectManagedMemory(settings) {
+  if (!settings) return { autoMemoryDisabled: false, autoMemoryConfigured: false };
+  return {
+    autoMemoryDisabled: settings.autoMemoryEnabled === false,
+    autoMemoryConfigured: "autoMemoryEnabled" in settings
+  };
+}
+
 // packages/plugin-core/src/login-bootstrap.ts
 var DISCOVERY_ACCOUNT_ID = "00000000-0000-0000-0000-000000000000";
 var LoginBootstrapError = class extends Error {
@@ -4576,7 +4674,7 @@ var DEFAULT_PUBLICATION_DEPENDENCIES = {
 };
 async function readSnapshot(file) {
   try {
-    return await fs4.readFile(file);
+    return await fs5.readFile(file);
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -4584,18 +4682,18 @@ async function readSnapshot(file) {
 }
 async function restoreSnapshot(file, snapshot) {
   if (snapshot === null) {
-    await fs4.rm(file, { force: true });
+    await fs5.rm(file, { force: true });
     return;
   }
-  await fs4.mkdir(path5.dirname(file), { recursive: true });
-  const tmp = path5.join(
-    path5.dirname(file),
-    `${path5.basename(file)}.rollback-${process.pid}-${randomUUID4()}`
+  await fs5.mkdir(path6.dirname(file), { recursive: true });
+  const tmp = path6.join(
+    path6.dirname(file),
+    `${path6.basename(file)}.rollback-${process.pid}-${randomUUID4()}`
   );
-  await fs4.writeFile(tmp, snapshot, { mode: 384 });
-  await fs4.chmod(tmp, 384).catch(() => {
+  await fs5.writeFile(tmp, snapshot, { mode: 384 });
+  await fs5.chmod(tmp, 384).catch(() => {
   });
-  await fs4.rename(tmp, file);
+  await fs5.rename(tmp, file);
 }
 async function publishMemlinLoginPair(config, token, dependencies = {}) {
   if (!config.auth0_sub || accessTokenSubject(token.access_token) !== config.auth0_sub) {
@@ -4702,7 +4800,11 @@ async function bootstrapMemlinLogin(token, options2 = {}) {
   await publishMemlinLoginPair(config, token);
   return {
     config,
-    account: { id: account.id, name: account.name },
+    account: {
+      id: account.id,
+      name: account.name,
+      managed_memory_policy: normalizeManagedMemoryPolicy(account.managed_memory_policy)
+    },
     user: {
       id: me.user_id,
       email: me.email,
@@ -4713,11 +4815,11 @@ async function bootstrapMemlinLogin(token, options2 = {}) {
 
 // packages/plugin-core/src/resolver-skill.ts
 import { createHash } from "node:crypto";
-import { promises as fs5 } from "node:fs";
-import os5 from "node:os";
-import path6 from "node:path";
-var RESOLVER_SKILL_DIR = path6.join(os5.homedir(), ".claude", "skills", "memlin");
-var RESOLVER_SKILL_FILE = path6.join(RESOLVER_SKILL_DIR, "SKILL.md");
+import { promises as fs6 } from "node:fs";
+import os6 from "node:os";
+import path7 from "node:path";
+var RESOLVER_SKILL_DIR = path7.join(os6.homedir(), ".claude", "skills", "memlin");
+var RESOLVER_SKILL_FILE = path7.join(RESOLVER_SKILL_DIR, "SKILL.md");
 var LEGACY_RESOLVER_SKILL_HASHES = [
   // v1: 2026-06-09 → 2026-06-17. Before the "Writing your own memories"
   // section was added.
@@ -4727,7 +4829,7 @@ async function ensureResolverSkill() {
   try {
     let existing = null;
     try {
-      existing = await fs5.readFile(RESOLVER_SKILL_FILE, "utf8");
+      existing = await fs6.readFile(RESOLVER_SKILL_FILE, "utf8");
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
@@ -4739,11 +4841,11 @@ async function ensureResolverSkill() {
       if (!LEGACY_RESOLVER_SKILL_HASHES.includes(hash)) {
         return { status: "kept", path: RESOLVER_SKILL_FILE };
       }
-      await fs5.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+      await fs6.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
       return { status: "upgraded", path: RESOLVER_SKILL_FILE };
     }
-    await fs5.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
-    await fs5.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+    await fs6.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
+    await fs6.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
     return { status: "installed", path: RESOLVER_SKILL_FILE };
   } catch (e) {
     return {
@@ -4820,76 +4922,121 @@ do autonomous memory writes. That's the source of truth; this file stays
 focused on the reader side.
 `;
 
-// packages/plugin-core/src/plugin-install.ts
-import { promises as fs6 } from "node:fs";
-import { existsSync } from "node:fs";
-import path7 from "node:path";
-import os6 from "node:os";
-var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
-var MEMLIN_MARKETPLACE_KEY = "memlin-ai";
-var MEMLIN_MARKETPLACE_SOURCE = {
-  source: "github",
-  repo: "memlin-ai/memlin-claude-plugin"
-};
-function defaultUserSettingsPaths() {
-  const claudeDir = path7.join(os6.homedir(), ".claude");
-  return { claudeDir, settingsFile: path7.join(claudeDir, "settings.json") };
-}
-async function ensureUserScopePluginEnabled(paths) {
-  const p = paths ?? defaultUserSettingsPaths();
-  try {
-    await fs6.mkdir(p.claudeDir, { recursive: true });
-    let current = {};
-    if (existsSync(p.settingsFile)) {
-      const raw = await fs6.readFile(p.settingsFile, "utf8");
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object") current = parsed;
-      } catch (err) {
-        return {
-          status: "failed",
-          settingsFile: p.settingsFile,
-          detail: `existing settings.json isn't valid JSON: ${err instanceof Error ? err.message : String(err)}`
-        };
-      }
-    }
-    const alreadyEnabled = current.enabledPlugins?.[MEMLIN_PLUGIN_KEY] === true;
-    const marketplaceKnown = !!current.extraKnownMarketplaces?.[MEMLIN_MARKETPLACE_KEY];
-    if (alreadyEnabled && marketplaceKnown) {
-      return {
-        status: "already-enabled",
-        settingsFile: p.settingsFile,
-        detail: "plugin already enabled at user scope"
-      };
-    }
-    const next = {
-      ...current,
-      enabledPlugins: {
-        ...current.enabledPlugins ?? {},
-        [MEMLIN_PLUGIN_KEY]: true
-      }
-    };
-    let touchedMarketplace = false;
-    if (!marketplaceKnown) {
-      next.extraKnownMarketplaces = {
-        ...current.extraKnownMarketplaces ?? {},
-        [MEMLIN_MARKETPLACE_KEY]: { source: { ...MEMLIN_MARKETPLACE_SOURCE } }
-      };
-      touchedMarketplace = true;
-    }
-    await fs6.writeFile(p.settingsFile, JSON.stringify(next, null, 2) + "\n", "utf8");
-    return {
-      status: touchedMarketplace ? "enabled-with-marketplace" : "enabled",
-      settingsFile: p.settingsFile,
-      detail: touchedMarketplace ? "enabled plugin + registered Memlin marketplace" : "enabled plugin (marketplace already registered)"
-    };
-  } catch (err) {
-    return {
-      status: "failed",
-      settingsFile: p.settingsFile,
-      detail: err instanceof Error ? err.message : String(err)
-    };
+// packages/plugin-core/src/project-resolver.ts
+import { execSync } from "node:child_process";
+import { existsSync as existsSync2, readdirSync } from "node:fs";
+import path8 from "node:path";
+var WORKSPACE_ENV_VARS = [
+  // Claude Code exposes the original project dir to hooks/plugin commands.
+  "CLAUDE_PROJECT_DIR",
+  // Cursor/plugin shims and local tests can set this explicitly.
+  "CURSOR_WORKSPACE_ROOT",
+  "CURSOR_PROJECT_ROOT",
+  "MEMLIN_WORKSPACE_ROOT",
+  // npm/pnpm set INIT_CWD to the directory where the user invoked a script.
+  "INIT_CWD"
+];
+function runtimeCwd(fallback = process.cwd()) {
+  for (const name of WORKSPACE_ENV_VARS) {
+    const raw = process.env[name]?.trim();
+    if (raw && path8.isAbsolute(raw)) return path8.resolve(raw);
   }
+  return path8.resolve(fallback);
+}
+
+// packages/plugin-core/src/native-memory.ts
+import { promises as fs7 } from "node:fs";
+import { existsSync as existsSync3, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import os7 from "node:os";
+import path9 from "node:path";
+function gitMainRoot(cwd) {
+  try {
+    const common = execFileSync(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    ).trim();
+    return common ? path9.dirname(common) : null;
+  } catch {
+    return null;
+  }
+}
+function encodings(p) {
+  return [
+    p.replace(/[:\\/.]/g, "-"),
+    p.replace(/[/.]/g, "-"),
+    p.replace(/\//g, "-")
+  ];
+}
+function nativeMemoryDirCandidates(cwd) {
+  const projects = path9.join(os7.homedir(), ".claude", "projects");
+  const roots = [gitMainRoot(cwd), cwd].filter((x) => !!x);
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const r of roots) {
+    for (const enc of encodings(r)) {
+      const dir = path9.join(projects, enc, "memory");
+      if (!seen.has(dir)) {
+        seen.add(dir);
+        out.push(dir);
+      }
+    }
+  }
+  return out;
+}
+function isMemoryDir(dir, forRestore) {
+  if (existsSync3(path9.join(dir, "MEMORY.md"))) return true;
+  if (!forRestore) return false;
+  const archived = path9.join(dir, ".archived");
+  try {
+    return statSync(archived).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function findNativeMemoryDir(cwd, opts = {}) {
+  const candidates = opts.explicitDir ? [path9.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
+  return candidates.find((d) => isMemoryDir(d, opts.forRestore ?? false)) ?? null;
+}
+var NATIVE_MEMORY_SESSION_READ_CAP_BYTES = 25e3;
+async function summarizeNativeMemory(cwd, opts = {}) {
+  const memoryDir = findNativeMemoryDir(cwd, { explicitDir: opts.explicitDir });
+  if (!memoryDir) return null;
+  let indexBytes = 0;
+  let totalBytes = 0;
+  let fileCount = 0;
+  for (const name of await fs7.readdir(memoryDir)) {
+    if (!name.endsWith(".md") || name.startsWith(".")) continue;
+    let bytes;
+    try {
+      const st = await fs7.stat(path9.join(memoryDir, name));
+      if (!st.isFile()) continue;
+      bytes = st.size;
+    } catch {
+      continue;
+    }
+    fileCount += 1;
+    totalBytes += bytes;
+    if (name === "MEMORY.md") indexBytes = bytes;
+  }
+  return {
+    memoryDir,
+    fileCount,
+    approxSessionTokens: Math.ceil(
+      Math.min(indexBytes, NATIVE_MEMORY_SESSION_READ_CAP_BYTES) / 4
+    ),
+    approxCorpusTokens: Math.ceil(totalBytes / 4)
+  };
+}
+function formatTokens(n) {
+  if (n < 1e3) return String(n);
+  return `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}k`;
+}
+function nativeMemoryNudgeLines(summary, policy) {
+  const first = `Native auto-memory found: ${summary.fileCount} file(s) \u2014 \u2248${formatTokens(summary.approxSessionTokens)} tokens loaded into every Claude Code session (\u2248${formatTokens(summary.approxCorpusTokens)} tokens of memory on this machine).`;
+  const action = policy === "required" ? "  \u26A0 Your org REQUIRES Memlin-managed memory \u2014 run: memlin manage-memory --archive" : policy === "recommended" ? "  Your workspace recommends letting Memlin manage memory: memlin manage-memory --archive" : "  Move it into Memlin (reversible \u2014 nothing is deleted): memlin manage-memory --archive";
+  return [first, action];
 }
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
@@ -5370,8 +5517,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path9, errorMaps, issueData } = params;
-  const fullPath = [...path9, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5487,11 +5634,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path9, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path9;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -9690,6 +9837,19 @@ async function main() {
     console.log("  Optional: the Memlin Companion app keeps this machine signed in,");
     console.log("  links new repos automatically, and syncs plans in the background.");
     console.log("  Download: https://memlin.ai/download");
+  }
+  try {
+    const settings = await readClaudeUserSettings(defaultUserSettingsPaths());
+    if (!inspectManagedMemory(settings).autoMemoryDisabled) {
+      const summary = await summarizeNativeMemory(runtimeCwd());
+      if (summary) {
+        console.log("");
+        for (const line of nativeMemoryNudgeLines(summary, login.account.managed_memory_policy)) {
+          console.log(`  ${line}`);
+        }
+      }
+    }
+  } catch {
   }
   console.log("");
   console.log("  Run `memlin pull` to fetch your memory, skills, and goals.");
