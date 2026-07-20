@@ -37,17 +37,17 @@ __export(companion_client_exports, {
 });
 import http from "node:http";
 import os3 from "node:os";
-import path5 from "node:path";
+import path6 from "node:path";
 function companionSocketPath(env = process.env) {
   const override = env[COMPANION_SOCKET_ENV];
   if (override) return override;
   if (process.platform === "win32") {
     return `\\\\.\\pipe\\memlin-companion-${os3.userInfo().username}`;
   }
-  return path5.join(os3.homedir(), ".config", "memlin", "run", "companion.sock");
+  return path6.join(os3.homedir(), ".config", "memlin", "run", "companion.sock");
 }
 function companionRunDir() {
-  return path5.join(os3.homedir(), ".config", "memlin", "run");
+  return path6.join(os3.homedir(), ".config", "memlin", "run");
 }
 function companionDisabled(env = process.env) {
   const off = env[NO_COMPANION_ENV];
@@ -386,20 +386,57 @@ function effectiveAccountId(input) {
 }
 
 // packages/plugin-core/src/local-scan.ts
-import { promises as fs2 } from "node:fs";
+import { promises as fs3 } from "node:fs";
 import { existsSync as existsSync2 } from "node:fs";
-import path4 from "node:path";
+import path5 from "node:path";
 
 // packages/plugin-core/src/state.ts
-import { promises as fs } from "node:fs";
-import path2 from "node:path";
+import { promises as fs2 } from "node:fs";
+import path3 from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-var STATE_FILE = path2.join(os.homedir(), ".config", "memlin", "state.json");
+
+// packages/plugin-core/src/atomic-rename.ts
+import { promises as fs } from "node:fs";
+import path2 from "node:path";
+var RETRYABLE_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
+var MAX_ATTEMPTS = 10;
+var BASE_DELAY_MS = 10;
+var MAX_DELAY_MS = 100;
+var renameQueues = /* @__PURE__ */ new Map();
+async function renameWithRetry(from, to, rename) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = error.code;
+      if (attempt >= MAX_ATTEMPTS || !code || !RETRYABLE_CODES.has(code)) throw error;
+      const cap = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
+      const delay2 = cap / 2 + Math.random() * (cap / 2);
+      await new Promise((resolve) => setTimeout(resolve, delay2));
+    }
+  }
+}
+async function atomicRename(from, to, dependencies = {}) {
+  const rename = dependencies.rename ?? fs.rename;
+  const queueKey = path2.resolve(to);
+  const previous = renameQueues.get(queueKey) ?? Promise.resolve();
+  const run = previous.catch(() => void 0).then(() => renameWithRetry(from, to, rename));
+  renameQueues.set(queueKey, run);
+  try {
+    await run;
+  } finally {
+    if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
+  }
+}
+
+// packages/plugin-core/src/state.ts
+var STATE_FILE = path3.join(os.homedir(), ".config", "memlin", "state.json");
 var EMPTY = { documents: {} };
 async function readState() {
   try {
-    const raw = await fs.readFile(STATE_FILE, "utf8");
+    const raw = await fs2.readFile(STATE_FILE, "utf8");
     return JSON.parse(raw);
   } catch {
     return { ...EMPTY };
@@ -428,7 +465,7 @@ function diffStates(prev, current) {
 
 // packages/plugin-core/src/host.ts
 import os2 from "node:os";
-import path3 from "node:path";
+import path4 from "node:path";
 var BaseHost = class {
   constructor(kind, home) {
     this.kind = kind;
@@ -440,42 +477,42 @@ var BaseHost = class {
     return this.home;
   }
   plansDir() {
-    return path3.join(this.home, "plans");
+    return path4.join(this.home, "plans");
   }
 };
 var ClaudeCodeHost = class extends BaseHost {
   constructor() {
-    super("claude-code", path3.join(os2.homedir(), ".claude"));
+    super("claude-code", path4.join(os2.homedir(), ".claude"));
   }
 };
 var CursorHost = class extends BaseHost {
   constructor() {
-    super("cursor", path3.join(os2.homedir(), ".config", "memlin"));
+    super("cursor", path4.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var CodexHost = class extends BaseHost {
   constructor() {
-    super("codex", path3.join(os2.homedir(), ".config", "memlin"));
+    super("codex", path4.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var WindsurfHost = class extends BaseHost {
   constructor() {
-    super("windsurf", path3.join(os2.homedir(), ".config", "memlin"));
+    super("windsurf", path4.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var AntigravityHost = class extends BaseHost {
   constructor() {
-    super("antigravity", path3.join(os2.homedir(), ".config", "memlin"));
+    super("antigravity", path4.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var VSCodeHost = class extends BaseHost {
   constructor() {
-    super("vscode", path3.join(os2.homedir(), ".config", "memlin"));
+    super("vscode", path4.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var CompanionHost = class extends BaseHost {
   constructor() {
-    super("companion", path3.join(os2.homedir(), ".config", "memlin"));
+    super("companion", path4.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var HOSTS = {
@@ -497,12 +534,12 @@ function resolveHost() {
 async function scanLocal(opts = {}) {
   const out = [];
   const root = opts.rootOverride ?? resolveHost().homeDir();
-  const memDir = path4.join(root, "memory");
+  const memDir = path5.join(root, "memory");
   if (existsSync2(memDir)) {
-    for (const file of await fs2.readdir(memDir)) {
+    for (const file of await fs3.readdir(memDir)) {
       if (!file.endsWith(".md") || file === "MEMORY.md") continue;
-      const abs = path4.join(memDir, file);
-      const content = await fs2.readFile(abs, "utf8");
+      const abs = path5.join(memDir, file);
+      const content = await fs3.readFile(abs, "utf8");
       out.push({
         path: `memory/${file}`,
         abs_path: abs,
@@ -512,14 +549,14 @@ async function scanLocal(opts = {}) {
       });
     }
   }
-  const skillsDir = path4.join(root, "skills");
+  const skillsDir = path5.join(root, "skills");
   if (existsSync2(skillsDir)) {
-    const entries = await fs2.readdir(skillsDir, { withFileTypes: true });
+    const entries = await fs3.readdir(skillsDir, { withFileTypes: true });
     for (const e of entries) {
       if (!e.isDirectory()) continue;
-      const skillMd = path4.join(skillsDir, e.name, "SKILL.md");
+      const skillMd = path5.join(skillsDir, e.name, "SKILL.md");
       if (!existsSync2(skillMd)) continue;
-      const content = await fs2.readFile(skillMd, "utf8");
+      const content = await fs3.readFile(skillMd, "utf8");
       out.push({
         path: `skills/${e.name}/SKILL.md`,
         abs_path: skillMd,
@@ -529,12 +566,12 @@ async function scanLocal(opts = {}) {
       });
     }
   }
-  const goalsDir = path4.join(root, "goals");
+  const goalsDir = path5.join(root, "goals");
   if (existsSync2(goalsDir)) {
-    for (const file of await fs2.readdir(goalsDir)) {
+    for (const file of await fs3.readdir(goalsDir)) {
       if (!file.endsWith(".md")) continue;
-      const abs = path4.join(goalsDir, file);
-      const content = await fs2.readFile(abs, "utf8");
+      const abs = path5.join(goalsDir, file);
+      const content = await fs3.readFile(abs, "utf8");
       out.push({
         path: `goals/${file}`,
         abs_path: abs,
@@ -544,12 +581,12 @@ async function scanLocal(opts = {}) {
       });
     }
   }
-  const schemasDir = path4.join(root, "schemas");
+  const schemasDir = path5.join(root, "schemas");
   if (existsSync2(schemasDir)) {
-    for (const file of await fs2.readdir(schemasDir)) {
+    for (const file of await fs3.readdir(schemasDir)) {
       if (!file.endsWith(".json")) continue;
-      const abs = path4.join(schemasDir, file);
-      const content = await fs2.readFile(abs, "utf8");
+      const abs = path5.join(schemasDir, file);
+      const content = await fs3.readFile(abs, "utf8");
       out.push({
         path: `schemas/${file}`,
         abs_path: abs,
@@ -562,10 +599,10 @@ async function scanLocal(opts = {}) {
   if (opts.includePlans) {
     const plansDir2 = resolveHost().plansDir();
     if (existsSync2(plansDir2)) {
-      for (const file of await fs2.readdir(plansDir2)) {
+      for (const file of await fs3.readdir(plansDir2)) {
         if (!file.endsWith(".md")) continue;
-        const abs = path4.join(plansDir2, file);
-        const content = await fs2.readFile(abs, "utf8");
+        const abs = path5.join(plansDir2, file);
+        const content = await fs3.readFile(abs, "utf8");
         out.push({
           path: `plans/${file}`,
           abs_path: abs,
@@ -581,9 +618,9 @@ async function scanLocal(opts = {}) {
     for (const [relPath, meta] of Object.entries(opts.trackedDocs)) {
       if (seen.has(relPath)) continue;
       if (relPath.startsWith("plans/")) continue;
-      const abs = path4.join(root, relPath);
+      const abs = path5.join(root, relPath);
       if (!existsSync2(abs)) continue;
-      const content = await fs2.readFile(abs, "utf8");
+      const content = await fs3.readFile(abs, "utf8");
       out.push({
         path: relPath,
         abs_path: abs,
@@ -597,18 +634,18 @@ async function scanLocal(opts = {}) {
 }
 function filterAbsentOnDisk(paths, rootOverride) {
   const root = rootOverride ?? resolveHost().homeDir();
-  return paths.filter((p) => !existsSync2(path4.join(root, p)));
+  return paths.filter((p) => !existsSync2(path5.join(root, p)));
 }
 
 // packages/plugin-core/src/client.ts
-import { promises as fs5 } from "node:fs";
-import path8 from "node:path";
+import { promises as fs6 } from "node:fs";
+import path9 from "node:path";
 import os6 from "node:os";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
-import { promises as fs3 } from "node:fs";
-import path6 from "node:path";
+import { promises as fs4 } from "node:fs";
+import path7 from "node:path";
 import os4 from "node:os";
 import { randomUUID } from "node:crypto";
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
@@ -617,7 +654,7 @@ var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
 function persistedTokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path6.join(os4.homedir(), ".config", "memlin", "token.json");
+  return process.env.MEMLIN_TOKEN_FILE || path7.join(os4.homedir(), ".config", "memlin", "token.json");
 }
 var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
 var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
@@ -628,18 +665,18 @@ function authFileLockPath() {
 async function acquireAuthFileLock() {
   const file = authFileLockPath();
   const owner = `${process.pid}:${randomUUID()}`;
-  await fs3.mkdir(path6.dirname(file), { recursive: true });
+  await fs4.mkdir(path7.dirname(file), { recursive: true });
   const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
-      const handle = await fs3.open(file, "wx", 384);
+      const handle = await fs4.open(file, "wx", 384);
       try {
         await handle.writeFile(owner, "utf8");
         await handle.sync();
       } catch (error) {
         await handle.close().catch(() => {
         });
-        await fs3.rm(file, { force: true }).catch(() => {
+        await fs4.rm(file, { force: true }).catch(() => {
         });
         throw error;
       }
@@ -649,16 +686,16 @@ async function acquireAuthFileLock() {
         released = true;
         await handle.close().catch(() => {
         });
-        const currentOwner = await fs3.readFile(file, "utf8").catch(() => null);
-        if (currentOwner === owner) await fs3.rm(file, { force: true }).catch(() => {
+        const currentOwner = await fs4.readFile(file, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs4.rm(file, { force: true }).catch(() => {
         });
       };
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
       try {
-        const stat = await fs3.stat(file);
+        const stat = await fs4.stat(file);
         if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
-          await fs3.rm(file, { force: true });
+          await fs4.rm(file, { force: true });
           continue;
         }
       } catch (statError) {
@@ -682,7 +719,7 @@ async function withAuthFileLock(operation) {
 }
 async function readPersistedToken() {
   try {
-    const raw = await fs3.readFile(persistedTokenFilePath(), "utf8");
+    const raw = await fs4.readFile(persistedTokenFilePath(), "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -690,15 +727,15 @@ async function readPersistedToken() {
 }
 async function writePersistedToken(t) {
   const file = persistedTokenFilePath();
-  await fs3.mkdir(path6.dirname(file), { recursive: true });
-  const tmp = path6.join(
-    path6.dirname(file),
-    `${path6.basename(file)}.tmp-${process.pid}-${randomUUID()}`
+  await fs4.mkdir(path7.dirname(file), { recursive: true });
+  const tmp = path7.join(
+    path7.dirname(file),
+    `${path7.basename(file)}.tmp-${process.pid}-${randomUUID()}`
   );
-  await fs3.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
-  await fs3.chmod(tmp, 384).catch(() => {
+  await fs4.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
+  await fs4.chmod(tmp, 384).catch(() => {
   });
-  await fs3.rename(tmp, file);
+  await atomicRename(tmp, file);
 }
 async function refreshAccessToken(refreshToken) {
   requireClientId();
@@ -1381,17 +1418,17 @@ function resolveApiUrl() {
 
 // packages/plugin-core/src/workspace-binding.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { constants, promises as fs4 } from "node:fs";
-import path7 from "node:path";
+import { constants, promises as fs5 } from "node:fs";
+import path8 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
 var WORKSPACE_BINDING_FILE = "config.json";
 var GIT_POINTER_MAX_BYTES = 8 * 1024;
 async function walkForWorkspaceBinding(startDir) {
-  let dir = path7.resolve(startDir);
+  let dir = path8.resolve(startDir);
   for (let i = 0; i < 64; i++) {
-    const candidate = path7.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
+    const candidate = path8.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
     try {
-      const raw = await fs4.readFile(candidate, "utf8");
+      const raw = await fs5.readFile(candidate, "utf8");
       const parsed = JSON.parse(raw);
       if (typeof parsed.account_id === "string" && parsed.account_id) {
         return {
@@ -1405,7 +1442,7 @@ async function walkForWorkspaceBinding(startDir) {
       }
     } catch {
     }
-    const parent = path7.dirname(dir);
+    const parent = path8.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
@@ -1414,7 +1451,7 @@ async function walkForWorkspaceBinding(startDir) {
 async function readSmallRegularFile(file) {
   let before;
   try {
-    before = await fs4.lstat(file);
+    before = await fs5.lstat(file);
   } catch (error) {
     return isFileNotFound(error) ? { kind: "missing" } : { kind: "invalid" };
   }
@@ -1423,14 +1460,14 @@ async function readSmallRegularFile(file) {
       return { kind: "invalid" };
     }
     const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-    const handle = await fs4.open(file, constants.O_RDONLY | noFollow);
+    const handle = await fs5.open(file, constants.O_RDONLY | noFollow);
     try {
       const opened = await handle.stat();
       if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size || opened.size > GIT_POINTER_MAX_BYTES) {
         return { kind: "invalid" };
       }
       const bytes = await handle.readFile();
-      const [after, afterPath] = await Promise.all([handle.stat(), fs4.lstat(file)]);
+      const [after, afterPath] = await Promise.all([handle.stat(), fs5.lstat(file)]);
       if (afterPath.isSymbolicLink() || !afterPath.isFile() || after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size || bytes.byteLength !== opened.size || bytes.includes(0)) {
         return { kind: "invalid" };
       }
@@ -1443,16 +1480,16 @@ async function readSmallRegularFile(file) {
   }
 }
 function containedBy(parent, child) {
-  const relative = path7.relative(parent, child);
-  return relative === "" || relative !== ".." && !relative.startsWith(`..${path7.sep}`) && !path7.isAbsolute(relative);
+  const relative = path8.relative(parent, child);
+  return relative === "" || relative !== ".." && !relative.startsWith(`..${path8.sep}`) && !path8.isAbsolute(relative);
 }
 async function canonicalSafeDirectory(candidate) {
   try {
-    const before = await fs4.lstat(candidate);
+    const before = await fs5.lstat(candidate);
     if (before.isSymbolicLink() || !before.isDirectory()) return null;
-    await fs4.access(candidate, constants.R_OK | constants.X_OK);
-    const canonical = await fs4.realpath(candidate);
-    const after = await fs4.lstat(candidate);
+    await fs5.access(candidate, constants.R_OK | constants.X_OK);
+    const canonical = await fs5.realpath(candidate);
+    const after = await fs5.lstat(candidate);
     if (after.isSymbolicLink() || !after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) {
       return null;
     }
@@ -1469,24 +1506,24 @@ function gitIdentity(checkoutRoot, state, repositoryRoot = checkoutRoot) {
   };
 }
 async function resolveGitWorkspaceIdentity(startDir) {
-  const requested = path7.resolve(startDir);
+  const requested = path8.resolve(startDir);
   let canonicalStart;
   try {
-    canonicalStart = await fs4.realpath(requested);
-    const startEntry = await fs4.stat(canonicalStart);
+    canonicalStart = await fs5.realpath(requested);
+    const startEntry = await fs5.stat(canonicalStart);
     if (!startEntry.isDirectory()) return gitIdentity(canonicalStart, "unknown");
   } catch {
     return gitIdentity(requested, "unknown");
   }
   let dir = canonicalStart;
   for (let i = 0; i < 64; i++) {
-    const gitEntry = path7.join(dir, ".git");
+    const gitEntry = path8.join(dir, ".git");
     let entry;
     try {
-      entry = await fs4.lstat(gitEntry);
+      entry = await fs5.lstat(gitEntry);
     } catch (error) {
       if (!isFileNotFound(error)) return gitIdentity(dir, "unknown");
-      const parent = path7.dirname(dir);
+      const parent = path8.dirname(dir);
       if (parent === dir) return gitIdentity(canonicalStart, "none");
       dir = parent;
       continue;
@@ -1507,16 +1544,16 @@ async function resolveGitWorkspaceIdentity(startDir) {
     if (!pointerValue) return gitIdentity(checkoutRoot, "unknown");
     let gitDirCandidate;
     try {
-      gitDirCandidate = path7.isAbsolute(pointerValue) ? pointerValue : path7.resolve(checkoutRoot, pointerValue);
+      gitDirCandidate = path8.isAbsolute(pointerValue) ? pointerValue : path8.resolve(checkoutRoot, pointerValue);
     } catch {
       return gitIdentity(checkoutRoot, "unknown");
     }
     const gitDir = await canonicalSafeDirectory(gitDirCandidate);
     if (!gitDir) return gitIdentity(checkoutRoot, "unknown");
-    const commonRead = await readSmallRegularFile(path7.join(gitDir, "commondir"));
+    const commonRead = await readSmallRegularFile(path8.join(gitDir, "commondir"));
     if (commonRead.kind === "missing") {
-      const gitDirParent = path7.dirname(gitDir);
-      const looksLikeWorktreeAdmin = path7.basename(gitDirParent) === "worktrees" && path7.basename(path7.dirname(gitDirParent)) === ".git";
+      const gitDirParent = path8.dirname(gitDir);
+      const looksLikeWorktreeAdmin = path8.basename(gitDirParent) === "worktrees" && path8.basename(path8.dirname(gitDirParent)) === ".git";
       if (looksLikeWorktreeAdmin) return gitIdentity(checkoutRoot, "unknown");
       return gitIdentity(checkoutRoot, "main");
     }
@@ -1528,22 +1565,22 @@ async function resolveGitWorkspaceIdentity(startDir) {
     if (!commonValue) return gitIdentity(checkoutRoot, "unknown");
     let commonCandidate;
     try {
-      commonCandidate = path7.isAbsolute(commonValue) ? commonValue : path7.resolve(gitDir, commonValue);
+      commonCandidate = path8.isAbsolute(commonValue) ? commonValue : path8.resolve(gitDir, commonValue);
     } catch {
       return gitIdentity(checkoutRoot, "unknown");
     }
     const commonDir = await canonicalSafeDirectory(commonCandidate);
     if (!commonDir) return gitIdentity(checkoutRoot, "unknown");
-    const worktreesDir = path7.join(commonDir, "worktrees");
-    if (path7.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
+    const worktreesDir = path8.join(commonDir, "worktrees");
+    if (path8.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
       return gitIdentity(checkoutRoot, "unknown");
     }
-    const repositoryRoot = path7.dirname(commonDir);
-    const repositoryGitDir = await canonicalSafeDirectory(path7.join(repositoryRoot, ".git"));
+    const repositoryRoot = path8.dirname(commonDir);
+    const repositoryGitDir = await canonicalSafeDirectory(path8.join(repositoryRoot, ".git"));
     if (!repositoryGitDir || repositoryGitDir !== commonDir) {
       return gitIdentity(checkoutRoot, "unknown");
     }
-    const reverseRead = await readSmallRegularFile(path7.join(gitDir, "gitdir"));
+    const reverseRead = await readSmallRegularFile(path8.join(gitDir, "gitdir"));
     if (reverseRead.kind !== "ok" || reverseRead.value.includes("\0")) {
       return gitIdentity(checkoutRoot, "unknown");
     }
@@ -1551,10 +1588,10 @@ async function resolveGitWorkspaceIdentity(startDir) {
     const reverseValue = reverseMatch?.[1];
     if (!reverseValue) return gitIdentity(checkoutRoot, "unknown");
     try {
-      const reverseCandidate = path7.isAbsolute(reverseValue) ? reverseValue : path7.resolve(gitDir, reverseValue);
+      const reverseCandidate = path8.isAbsolute(reverseValue) ? reverseValue : path8.resolve(gitDir, reverseValue);
       const [reverseTarget, checkoutGitFile] = await Promise.all([
-        fs4.realpath(reverseCandidate),
-        fs4.realpath(gitEntry)
+        fs5.realpath(reverseCandidate),
+        fs5.realpath(gitEntry)
       ]);
       if (reverseTarget !== checkoutGitFile) return gitIdentity(checkoutRoot, "unknown");
     } catch {
@@ -1569,7 +1606,7 @@ async function findWorkspaceBinding(startDir) {
   const gitIdentity2 = await resolveGitWorkspaceIdentity(startDir);
   if (gitIdentity2.state !== "worktree") return direct;
   if (direct) {
-    const bindingRoot = await fs4.realpath(direct.workspaceRoot).catch(() => path7.resolve(direct.workspaceRoot));
+    const bindingRoot = await fs5.realpath(direct.workspaceRoot).catch(() => path8.resolve(direct.workspaceRoot));
     if (containedBy(gitIdentity2.checkout_root, bindingRoot)) return direct;
   }
   return walkForWorkspaceBinding(gitIdentity2.repository_root);
@@ -1580,13 +1617,13 @@ function isFileNotFound(error) {
 
 // packages/plugin-core/src/client.ts
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path8.join(os6.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path9.join(os6.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path8.join(os6.homedir(), ".config", "memlin");
-var TOKEN_FILE = path8.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path9.join(os6.homedir(), ".config", "memlin");
+var TOKEN_FILE = path9.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
-    const raw = await fs5.readFile(globalConfigFilePath(), "utf8");
+    const raw = await fs6.readFile(globalConfigFilePath(), "utf8");
     const parsed = JSON.parse(raw);
     if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
       return null;
@@ -1650,8 +1687,8 @@ function applyWorkspaceOverlay(config, overlay) {
 }
 
 // packages/plugin-core/src/plan-sync.ts
-import { promises as fs6 } from "node:fs";
-import path9 from "node:path";
+import { promises as fs7 } from "node:fs";
+import path10 from "node:path";
 function homeBase(host) {
   return (host ?? resolveHost()).homeDir();
 }
@@ -1662,25 +1699,25 @@ async function listUnboundPlans(host) {
   const out = [];
   let entries;
   try {
-    entries = await fs6.readdir(plansDir(host));
+    entries = await fs7.readdir(plansDir(host));
   } catch {
     return out;
   }
   const state = await readState();
   for (const f of entries) {
     if (!f.endsWith(".md")) continue;
-    const abs = path9.join(plansDir(host), f);
+    const abs = path10.join(plansDir(host), f);
     let raw;
     let size = 0;
     try {
-      const st = await fs6.stat(abs);
+      const st = await fs7.stat(abs);
       if (!st.isFile() || st.size === 0) continue;
       size = st.size;
-      raw = await fs6.readFile(abs, "utf8");
+      raw = await fs7.readFile(abs, "utf8");
     } catch {
       continue;
     }
-    const relPath = path9.relative(homeBase(host), abs);
+    const relPath = path10.relative(homeBase(host), abs);
     const { title, binding } = parsePlanFile(raw);
     if (state.documents[relPath]?.document_id || binding?.documentId) continue;
     out.push({ file: f, title, size });

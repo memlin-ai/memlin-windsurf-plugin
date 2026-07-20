@@ -3412,7 +3412,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs8 = __require("fs");
+    var fs9 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3496,7 +3496,7 @@ var require_gray_matter = __commonJS({
       return stringify(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs8.readFileSync(filepath, "utf8");
+      const str2 = fs9.readFileSync(filepath, "utf8");
       const file = matter3(str2, options2);
       file.path = filepath;
       return file;
@@ -3527,14 +3527,14 @@ var require_gray_matter = __commonJS({
 // packages/plugin-core/src/companion-client.ts
 import http from "node:http";
 import os8 from "node:os";
-import path10 from "node:path";
+import path11 from "node:path";
 function companionSocketPath(env = process.env) {
   const override = env[COMPANION_SOCKET_ENV];
   if (override) return override;
   if (process.platform === "win32") {
     return `\\\\.\\pipe\\memlin-companion-${os8.userInfo().username}`;
   }
-  return path10.join(os8.homedir(), ".config", "memlin", "run", "companion.sock");
+  return path11.join(os8.homedir(), ".config", "memlin", "run", "companion.sock");
 }
 function companionDisabled(env = process.env) {
   const off = env[NO_COMPANION_ENV];
@@ -3635,10 +3635,47 @@ var init_companion_client = __esm({
 import { writeSync } from "node:fs";
 
 // packages/plugin-core/src/auth.ts
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import { promises as fs2 } from "node:fs";
+import path2 from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
+
+// packages/plugin-core/src/atomic-rename.ts
+import { promises as fs } from "node:fs";
+import path from "node:path";
+var RETRYABLE_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
+var MAX_ATTEMPTS = 10;
+var BASE_DELAY_MS = 10;
+var MAX_DELAY_MS = 100;
+var renameQueues = /* @__PURE__ */ new Map();
+async function renameWithRetry(from, to, rename) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = error.code;
+      if (attempt >= MAX_ATTEMPTS || !code || !RETRYABLE_CODES.has(code)) throw error;
+      const cap = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
+      const delay2 = cap / 2 + Math.random() * (cap / 2);
+      await new Promise((resolve) => setTimeout(resolve, delay2));
+    }
+  }
+}
+async function atomicRename(from, to, dependencies = {}) {
+  const rename = dependencies.rename ?? fs.rename;
+  const queueKey = path.resolve(to);
+  const previous = renameQueues.get(queueKey) ?? Promise.resolve();
+  const run = previous.catch(() => void 0).then(() => renameWithRetry(from, to, rename));
+  renameQueues.set(queueKey, run);
+  try {
+    await run;
+  } finally {
+    if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
+  }
+}
+
+// packages/plugin-core/src/auth.ts
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
 var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
@@ -3646,7 +3683,7 @@ var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CL
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
 var SCOPE = "openid profile email offline_access";
 function persistedTokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path.join(os.homedir(), ".config", "memlin", "token.json");
+  return process.env.MEMLIN_TOKEN_FILE || path2.join(os.homedir(), ".config", "memlin", "token.json");
 }
 var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
 var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
@@ -3657,18 +3694,18 @@ function authFileLockPath() {
 async function acquireAuthFileLock() {
   const file = authFileLockPath();
   const owner = `${process.pid}:${randomUUID()}`;
-  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs2.mkdir(path2.dirname(file), { recursive: true });
   const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
-      const handle = await fs.open(file, "wx", 384);
+      const handle = await fs2.open(file, "wx", 384);
       try {
         await handle.writeFile(owner, "utf8");
         await handle.sync();
       } catch (error) {
         await handle.close().catch(() => {
         });
-        await fs.rm(file, { force: true }).catch(() => {
+        await fs2.rm(file, { force: true }).catch(() => {
         });
         throw error;
       }
@@ -3678,16 +3715,16 @@ async function acquireAuthFileLock() {
         released = true;
         await handle.close().catch(() => {
         });
-        const currentOwner = await fs.readFile(file, "utf8").catch(() => null);
-        if (currentOwner === owner) await fs.rm(file, { force: true }).catch(() => {
+        const currentOwner = await fs2.readFile(file, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs2.rm(file, { force: true }).catch(() => {
         });
       };
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
       try {
-        const stat = await fs.stat(file);
+        const stat = await fs2.stat(file);
         if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
-          await fs.rm(file, { force: true });
+          await fs2.rm(file, { force: true });
           continue;
         }
       } catch (statError) {
@@ -3711,15 +3748,15 @@ async function withAuthFileLock(operation) {
 }
 async function writePersistedToken(t) {
   const file = persistedTokenFilePath();
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const tmp = path.join(
-    path.dirname(file),
-    `${path.basename(file)}.tmp-${process.pid}-${randomUUID()}`
+  await fs2.mkdir(path2.dirname(file), { recursive: true });
+  const tmp = path2.join(
+    path2.dirname(file),
+    `${path2.basename(file)}.tmp-${process.pid}-${randomUUID()}`
   );
-  await fs.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
-  await fs.chmod(tmp, 384).catch(() => {
+  await fs2.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
+  await fs2.chmod(tmp, 384).catch(() => {
   });
-  await fs.rename(tmp, file);
+  await atomicRename(tmp, file);
 }
 async function startDeviceFlow() {
   requireClientId();
@@ -3875,13 +3912,13 @@ function runCliMain(main2, onError) {
 }
 
 // packages/plugin-core/src/login-bootstrap.ts
-import { promises as fs5 } from "node:fs";
-import path6 from "node:path";
+import { promises as fs6 } from "node:fs";
+import path7 from "node:path";
 import { randomUUID as randomUUID4 } from "node:crypto";
 
 // packages/plugin-core/src/client.ts
-import { promises as fs3 } from "node:fs";
-import path4 from "node:path";
+import { promises as fs4 } from "node:fs";
+import path5 from "node:path";
 import os4 from "node:os";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
@@ -3893,7 +3930,7 @@ import { fileURLToPath } from "node:url";
 
 // packages/plugin-core/src/host.ts
 import os2 from "node:os";
-import path2 from "node:path";
+import path3 from "node:path";
 var BaseHost = class {
   constructor(kind, home) {
     this.kind = kind;
@@ -3905,42 +3942,42 @@ var BaseHost = class {
     return this.home;
   }
   plansDir() {
-    return path2.join(this.home, "plans");
+    return path3.join(this.home, "plans");
   }
 };
 var ClaudeCodeHost = class extends BaseHost {
   constructor() {
-    super("claude-code", path2.join(os2.homedir(), ".claude"));
+    super("claude-code", path3.join(os2.homedir(), ".claude"));
   }
 };
 var CursorHost = class extends BaseHost {
   constructor() {
-    super("cursor", path2.join(os2.homedir(), ".config", "memlin"));
+    super("cursor", path3.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var CodexHost = class extends BaseHost {
   constructor() {
-    super("codex", path2.join(os2.homedir(), ".config", "memlin"));
+    super("codex", path3.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var WindsurfHost = class extends BaseHost {
   constructor() {
-    super("windsurf", path2.join(os2.homedir(), ".config", "memlin"));
+    super("windsurf", path3.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var AntigravityHost = class extends BaseHost {
   constructor() {
-    super("antigravity", path2.join(os2.homedir(), ".config", "memlin"));
+    super("antigravity", path3.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var VSCodeHost = class extends BaseHost {
   constructor() {
-    super("vscode", path2.join(os2.homedir(), ".config", "memlin"));
+    super("vscode", path3.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var CompanionHost = class extends BaseHost {
   constructor() {
-    super("companion", path2.join(os2.homedir(), ".config", "memlin"));
+    super("companion", path3.join(os2.homedir(), ".config", "memlin"));
   }
 };
 var HOSTS = {
@@ -4543,27 +4580,27 @@ function resolveApiUrl() {
 
 // packages/plugin-core/src/workspace-binding.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { constants, promises as fs2 } from "node:fs";
-import path3 from "node:path";
+import { constants, promises as fs3 } from "node:fs";
+import path4 from "node:path";
 var GIT_POINTER_MAX_BYTES = 8 * 1024;
 
 // packages/plugin-core/src/client.ts
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path4.join(os4.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path5.join(os4.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path4.join(os4.homedir(), ".config", "memlin");
-var TOKEN_FILE = path4.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path5.join(os4.homedir(), ".config", "memlin");
+var TOKEN_FILE = path5.join(CONFIG_DIR, "token.json");
 async function writeGlobalConfig(config) {
   const file = globalConfigFilePath();
-  await fs3.mkdir(path4.dirname(file), { recursive: true });
-  const tmp = path4.join(
-    path4.dirname(file),
-    `${path4.basename(file)}.tmp-${process.pid}-${randomUUID3()}`
+  await fs4.mkdir(path5.dirname(file), { recursive: true });
+  const tmp = path5.join(
+    path5.dirname(file),
+    `${path5.basename(file)}.tmp-${process.pid}-${randomUUID3()}`
   );
-  await fs3.writeFile(tmp, JSON.stringify(config, null, 2), { mode: 384 });
-  await fs3.chmod(tmp, 384).catch(() => {
+  await fs4.writeFile(tmp, JSON.stringify(config, null, 2), { mode: 384 });
+  await fs4.chmod(tmp, 384).catch(() => {
   });
-  await fs3.rename(tmp, file);
+  await atomicRename(tmp, file);
 }
 function accessTokenSubject(accessToken) {
   try {
@@ -4575,9 +4612,9 @@ function accessTokenSubject(accessToken) {
 }
 
 // packages/plugin-core/src/plugin-install.ts
-import { promises as fs4 } from "node:fs";
+import { promises as fs5 } from "node:fs";
 import { existsSync } from "node:fs";
-import path5 from "node:path";
+import path6 from "node:path";
 import os5 from "node:os";
 var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
 var MEMLIN_MARKETPLACE_KEY = "memlin-ai";
@@ -4586,15 +4623,15 @@ var MEMLIN_MARKETPLACE_SOURCE = {
   repo: "memlin-ai/memlin-claude-plugin"
 };
 function defaultUserSettingsPaths() {
-  const claudeDir = path5.join(os5.homedir(), ".claude");
-  return { claudeDir, settingsFile: path5.join(claudeDir, "settings.json") };
+  const claudeDir = path6.join(os5.homedir(), ".claude");
+  return { claudeDir, settingsFile: path6.join(claudeDir, "settings.json") };
 }
 async function readClaudeUserSettings(paths) {
   const p = paths ?? defaultUserSettingsPaths();
   if (!existsSync(p.settingsFile)) return null;
   let raw;
   try {
-    raw = await fs4.readFile(p.settingsFile, "utf8");
+    raw = await fs5.readFile(p.settingsFile, "utf8");
   } catch {
     return null;
   }
@@ -4608,10 +4645,10 @@ async function readClaudeUserSettings(paths) {
 async function ensureUserScopePluginEnabled(paths) {
   const p = paths ?? defaultUserSettingsPaths();
   try {
-    await fs4.mkdir(p.claudeDir, { recursive: true });
+    await fs5.mkdir(p.claudeDir, { recursive: true });
     let current = {};
     if (existsSync(p.settingsFile)) {
-      const raw = await fs4.readFile(p.settingsFile, "utf8");
+      const raw = await fs5.readFile(p.settingsFile, "utf8");
       try {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === "object") current = parsed;
@@ -4647,7 +4684,7 @@ async function ensureUserScopePluginEnabled(paths) {
       };
       touchedMarketplace = true;
     }
-    await fs4.writeFile(p.settingsFile, JSON.stringify(next, null, 2) + "\n", "utf8");
+    await fs5.writeFile(p.settingsFile, JSON.stringify(next, null, 2) + "\n", "utf8");
     return {
       status: touchedMarketplace ? "enabled-with-marketplace" : "enabled",
       settingsFile: p.settingsFile,
@@ -4688,7 +4725,7 @@ var DEFAULT_PUBLICATION_DEPENDENCIES = {
 };
 async function readSnapshot(file) {
   try {
-    return await fs5.readFile(file);
+    return await fs6.readFile(file);
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -4696,18 +4733,18 @@ async function readSnapshot(file) {
 }
 async function restoreSnapshot(file, snapshot) {
   if (snapshot === null) {
-    await fs5.rm(file, { force: true });
+    await fs6.rm(file, { force: true });
     return;
   }
-  await fs5.mkdir(path6.dirname(file), { recursive: true });
-  const tmp = path6.join(
-    path6.dirname(file),
-    `${path6.basename(file)}.rollback-${process.pid}-${randomUUID4()}`
+  await fs6.mkdir(path7.dirname(file), { recursive: true });
+  const tmp = path7.join(
+    path7.dirname(file),
+    `${path7.basename(file)}.rollback-${process.pid}-${randomUUID4()}`
   );
-  await fs5.writeFile(tmp, snapshot, { mode: 384 });
-  await fs5.chmod(tmp, 384).catch(() => {
+  await fs6.writeFile(tmp, snapshot, { mode: 384 });
+  await fs6.chmod(tmp, 384).catch(() => {
   });
-  await fs5.rename(tmp, file);
+  await atomicRename(tmp, file);
 }
 async function publishMemlinLoginPair(config, token, dependencies = {}) {
   if (!config.auth0_sub || accessTokenSubject(token.access_token) !== config.auth0_sub) {
@@ -4829,11 +4866,11 @@ async function bootstrapMemlinLogin(token, options2 = {}) {
 
 // packages/plugin-core/src/resolver-skill.ts
 import { createHash } from "node:crypto";
-import { promises as fs6 } from "node:fs";
+import { promises as fs7 } from "node:fs";
 import os6 from "node:os";
-import path7 from "node:path";
-var RESOLVER_SKILL_DIR = path7.join(os6.homedir(), ".claude", "skills", "memlin");
-var RESOLVER_SKILL_FILE = path7.join(RESOLVER_SKILL_DIR, "SKILL.md");
+import path8 from "node:path";
+var RESOLVER_SKILL_DIR = path8.join(os6.homedir(), ".claude", "skills", "memlin");
+var RESOLVER_SKILL_FILE = path8.join(RESOLVER_SKILL_DIR, "SKILL.md");
 var LEGACY_RESOLVER_SKILL_HASHES = [
   // v1: 2026-06-09 → 2026-06-17. Before the "Writing your own memories"
   // section was added.
@@ -4843,7 +4880,7 @@ async function ensureResolverSkill() {
   try {
     let existing = null;
     try {
-      existing = await fs6.readFile(RESOLVER_SKILL_FILE, "utf8");
+      existing = await fs7.readFile(RESOLVER_SKILL_FILE, "utf8");
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
@@ -4855,11 +4892,11 @@ async function ensureResolverSkill() {
       if (!LEGACY_RESOLVER_SKILL_HASHES.includes(hash)) {
         return { status: "kept", path: RESOLVER_SKILL_FILE };
       }
-      await fs6.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+      await fs7.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
       return { status: "upgraded", path: RESOLVER_SKILL_FILE };
     }
-    await fs6.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
-    await fs6.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+    await fs7.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
+    await fs7.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
     return { status: "installed", path: RESOLVER_SKILL_FILE };
   } catch (e) {
     return {
@@ -4939,7 +4976,7 @@ focused on the reader side.
 // packages/plugin-core/src/project-resolver.ts
 import { execSync } from "node:child_process";
 import { existsSync as existsSync2, readdirSync } from "node:fs";
-import path8 from "node:path";
+import path9 from "node:path";
 var WORKSPACE_ENV_VARS = [
   // Claude Code exposes the original project dir to hooks/plugin commands.
   "CLAUDE_PROJECT_DIR",
@@ -4953,17 +4990,17 @@ var WORKSPACE_ENV_VARS = [
 function runtimeCwd(fallback = process.cwd()) {
   for (const name of WORKSPACE_ENV_VARS) {
     const raw = process.env[name]?.trim();
-    if (raw && path8.isAbsolute(raw)) return path8.resolve(raw);
+    if (raw && path9.isAbsolute(raw)) return path9.resolve(raw);
   }
-  return path8.resolve(fallback);
+  return path9.resolve(fallback);
 }
 
 // packages/plugin-core/src/native-memory.ts
-import { promises as fs7 } from "node:fs";
+import { promises as fs8 } from "node:fs";
 import { existsSync as existsSync3, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import os7 from "node:os";
-import path9 from "node:path";
+import path10 from "node:path";
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
@@ -5443,8 +5480,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path11, errorMaps, issueData } = params;
-  const fullPath = [...path11, ...issueData.path || []];
+  const { data, path: path12, errorMaps, issueData } = params;
+  const fullPath = [...path12, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5560,11 +5597,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path11, key) {
+  constructor(parent, value, path12, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path11;
+    this._path = path12;
     this._key = key;
   }
   get path() {
@@ -9653,7 +9690,7 @@ function gitMainRoot(cwd) {
       ["rev-parse", "--path-format=absolute", "--git-common-dir"],
       { windowsHide: true, cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
     ).trim();
-    return common ? path9.dirname(common) : null;
+    return common ? path10.dirname(common) : null;
   } catch {
     return null;
   }
@@ -9666,13 +9703,13 @@ function encodings(p) {
   ];
 }
 function nativeMemoryDirCandidates(cwd) {
-  const projects = path9.join(os7.homedir(), ".claude", "projects");
+  const projects = path10.join(os7.homedir(), ".claude", "projects");
   const roots = [gitMainRoot(cwd), cwd].filter((x) => !!x);
   const seen = /* @__PURE__ */ new Set();
   const out = [];
   for (const r of roots) {
     for (const enc of encodings(r)) {
-      const dir = path9.join(projects, enc, "memory");
+      const dir = path10.join(projects, enc, "memory");
       if (!seen.has(dir)) {
         seen.add(dir);
         out.push(dir);
@@ -9682,9 +9719,9 @@ function nativeMemoryDirCandidates(cwd) {
   return out;
 }
 function isMemoryDir(dir, forRestore) {
-  if (existsSync3(path9.join(dir, "MEMORY.md"))) return true;
+  if (existsSync3(path10.join(dir, "MEMORY.md"))) return true;
   if (!forRestore) return false;
-  const archived = path9.join(dir, ".archived");
+  const archived = path10.join(dir, ".archived");
   try {
     return statSync(archived).isDirectory();
   } catch {
@@ -9692,7 +9729,7 @@ function isMemoryDir(dir, forRestore) {
   }
 }
 function findNativeMemoryDir(cwd, opts = {}) {
-  const candidates = opts.explicitDir ? [path9.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
+  const candidates = opts.explicitDir ? [path10.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
   return candidates.find((d) => isMemoryDir(d, opts.forRestore ?? false)) ?? null;
 }
 var NATIVE_MEMORY_SESSION_READ_CAP_BYTES = 25e3;
@@ -9702,11 +9739,11 @@ async function summarizeNativeMemory(cwd, opts = {}) {
   let indexBytes = 0;
   let totalBytes = 0;
   let fileCount = 0;
-  for (const name of await fs7.readdir(memoryDir)) {
+  for (const name of await fs8.readdir(memoryDir)) {
     if (!name.endsWith(".md") || name.startsWith(".")) continue;
     let bytes;
     try {
-      const st = await fs7.stat(path9.join(memoryDir, name));
+      const st = await fs8.stat(path10.join(memoryDir, name));
       if (!st.isFile()) continue;
       bytes = st.size;
     } catch {

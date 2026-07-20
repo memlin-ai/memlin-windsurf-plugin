@@ -7,23 +7,60 @@ const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
 import readline from "node:readline/promises";
 
 // packages/plugin-core/src/client.ts
-import { promises as fs3 } from "node:fs";
-import path4 from "node:path";
+import { promises as fs4 } from "node:fs";
+import path5 from "node:path";
 import os4 from "node:os";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import { promises as fs2 } from "node:fs";
+import path2 from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
+
+// packages/plugin-core/src/atomic-rename.ts
+import { promises as fs } from "node:fs";
+import path from "node:path";
+var RETRYABLE_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
+var MAX_ATTEMPTS = 10;
+var BASE_DELAY_MS = 10;
+var MAX_DELAY_MS = 100;
+var renameQueues = /* @__PURE__ */ new Map();
+async function renameWithRetry(from, to, rename) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = error.code;
+      if (attempt >= MAX_ATTEMPTS || !code || !RETRYABLE_CODES.has(code)) throw error;
+      const cap = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
+      const delay = cap / 2 + Math.random() * (cap / 2);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+async function atomicRename(from, to, dependencies = {}) {
+  const rename = dependencies.rename ?? fs.rename;
+  const queueKey = path.resolve(to);
+  const previous = renameQueues.get(queueKey) ?? Promise.resolve();
+  const run = previous.catch(() => void 0).then(() => renameWithRetry(from, to, rename));
+  renameQueues.set(queueKey, run);
+  try {
+    await run;
+  } finally {
+    if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
+  }
+}
+
+// packages/plugin-core/src/auth.ts
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
 var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
 function persistedTokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path.join(os.homedir(), ".config", "memlin", "token.json");
+  return process.env.MEMLIN_TOKEN_FILE || path2.join(os.homedir(), ".config", "memlin", "token.json");
 }
 var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
 var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
@@ -34,18 +71,18 @@ function authFileLockPath() {
 async function acquireAuthFileLock() {
   const file = authFileLockPath();
   const owner = `${process.pid}:${randomUUID()}`;
-  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs2.mkdir(path2.dirname(file), { recursive: true });
   const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
-      const handle = await fs.open(file, "wx", 384);
+      const handle = await fs2.open(file, "wx", 384);
       try {
         await handle.writeFile(owner, "utf8");
         await handle.sync();
       } catch (error) {
         await handle.close().catch(() => {
         });
-        await fs.rm(file, { force: true }).catch(() => {
+        await fs2.rm(file, { force: true }).catch(() => {
         });
         throw error;
       }
@@ -55,16 +92,16 @@ async function acquireAuthFileLock() {
         released = true;
         await handle.close().catch(() => {
         });
-        const currentOwner = await fs.readFile(file, "utf8").catch(() => null);
-        if (currentOwner === owner) await fs.rm(file, { force: true }).catch(() => {
+        const currentOwner = await fs2.readFile(file, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs2.rm(file, { force: true }).catch(() => {
         });
       };
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
       try {
-        const stat = await fs.stat(file);
+        const stat = await fs2.stat(file);
         if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
-          await fs.rm(file, { force: true });
+          await fs2.rm(file, { force: true });
           continue;
         }
       } catch (statError) {
@@ -88,15 +125,15 @@ async function withAuthFileLock(operation) {
 }
 async function writePersistedToken(t) {
   const file = persistedTokenFilePath();
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  const tmp = path.join(
-    path.dirname(file),
-    `${path.basename(file)}.tmp-${process.pid}-${randomUUID()}`
+  await fs2.mkdir(path2.dirname(file), { recursive: true });
+  const tmp = path2.join(
+    path2.dirname(file),
+    `${path2.basename(file)}.tmp-${process.pid}-${randomUUID()}`
   );
-  await fs.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
-  await fs.chmod(tmp, 384).catch(() => {
+  await fs2.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
+  await fs2.chmod(tmp, 384).catch(() => {
   });
-  await fs.rename(tmp, file);
+  await atomicRename(tmp, file);
 }
 function decodeJwtPayload(jwt) {
   const parts = jwt.split(".");
@@ -112,34 +149,34 @@ import { fileURLToPath } from "node:url";
 
 // packages/plugin-core/src/host.ts
 import os2 from "node:os";
-import path2 from "node:path";
+import path3 from "node:path";
 
 // packages/plugin-core/src/memlin-api-client.ts
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 
 // packages/plugin-core/src/workspace-binding.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { constants, promises as fs2 } from "node:fs";
-import path3 from "node:path";
+import { constants, promises as fs3 } from "node:fs";
+import path4 from "node:path";
 var GIT_POINTER_MAX_BYTES = 8 * 1024;
 
 // packages/plugin-core/src/client.ts
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path4.join(os4.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path5.join(os4.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path4.join(os4.homedir(), ".config", "memlin");
-var TOKEN_FILE = path4.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path5.join(os4.homedir(), ".config", "memlin");
+var TOKEN_FILE = path5.join(CONFIG_DIR, "token.json");
 async function writeGlobalConfig(config) {
   const file = globalConfigFilePath();
-  await fs3.mkdir(path4.dirname(file), { recursive: true });
-  const tmp = path4.join(
-    path4.dirname(file),
-    `${path4.basename(file)}.tmp-${process.pid}-${randomUUID3()}`
+  await fs4.mkdir(path5.dirname(file), { recursive: true });
+  const tmp = path5.join(
+    path5.dirname(file),
+    `${path5.basename(file)}.tmp-${process.pid}-${randomUUID3()}`
   );
-  await fs3.writeFile(tmp, JSON.stringify(config, null, 2), { mode: 384 });
-  await fs3.chmod(tmp, 384).catch(() => {
+  await fs4.writeFile(tmp, JSON.stringify(config, null, 2), { mode: 384 });
+  await fs4.chmod(tmp, 384).catch(() => {
   });
-  await fs3.rename(tmp, file);
+  await atomicRename(tmp, file);
 }
 function accessTokenSubject(accessToken) {
   try {
@@ -151,14 +188,14 @@ function accessTokenSubject(accessToken) {
 }
 
 // packages/plugin-core/src/login-bootstrap.ts
-import { promises as fs5 } from "node:fs";
-import path6 from "node:path";
+import { promises as fs6 } from "node:fs";
+import path7 from "node:path";
 import { randomUUID as randomUUID4 } from "node:crypto";
 
 // packages/plugin-core/src/plugin-install.ts
-import { promises as fs4 } from "node:fs";
+import { promises as fs5 } from "node:fs";
 import { existsSync } from "node:fs";
-import path5 from "node:path";
+import path6 from "node:path";
 import os5 from "node:os";
 
 // packages/plugin-core/src/login-bootstrap.ts
@@ -176,7 +213,7 @@ var DEFAULT_PUBLICATION_DEPENDENCIES = {
 };
 async function readSnapshot(file) {
   try {
-    return await fs5.readFile(file);
+    return await fs6.readFile(file);
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -184,18 +221,18 @@ async function readSnapshot(file) {
 }
 async function restoreSnapshot(file, snapshot) {
   if (snapshot === null) {
-    await fs5.rm(file, { force: true });
+    await fs6.rm(file, { force: true });
     return;
   }
-  await fs5.mkdir(path6.dirname(file), { recursive: true });
-  const tmp = path6.join(
-    path6.dirname(file),
-    `${path6.basename(file)}.rollback-${process.pid}-${randomUUID4()}`
+  await fs6.mkdir(path7.dirname(file), { recursive: true });
+  const tmp = path7.join(
+    path7.dirname(file),
+    `${path7.basename(file)}.rollback-${process.pid}-${randomUUID4()}`
   );
-  await fs5.writeFile(tmp, snapshot, { mode: 384 });
-  await fs5.chmod(tmp, 384).catch(() => {
+  await fs6.writeFile(tmp, snapshot, { mode: 384 });
+  await fs6.chmod(tmp, 384).catch(() => {
   });
-  await fs5.rename(tmp, file);
+  await atomicRename(tmp, file);
 }
 async function publishMemlinLoginPair(config, token, dependencies = {}) {
   if (!config.auth0_sub || accessTokenSubject(token.access_token) !== config.auth0_sub) {

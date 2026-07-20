@@ -4,9 +4,9 @@ import { fileURLToPath as __ftp } from 'node:url'; import { dirname as __dn } fr
 const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
 
 // apps/windsurf-plugin/src/hooks/user-prompt-submit.ts
-import { promises as fs3 } from "node:fs";
+import { promises as fs4 } from "node:fs";
 import os3 from "node:os";
-import path3 from "node:path";
+import path4 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // apps/windsurf-plugin/src/hook-io.ts
@@ -37,25 +37,62 @@ function readHookInput() {
 }
 
 // packages/plugin-core/dist/state.js
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import { promises as fs2 } from "node:fs";
+import path2 from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-var STATE_FILE = path.join(os.homedir(), ".config", "memlin", "state.json");
+
+// packages/plugin-core/dist/atomic-rename.js
+import { promises as fs } from "node:fs";
+import path from "node:path";
+var RETRYABLE_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
+var MAX_ATTEMPTS = 10;
+var BASE_DELAY_MS = 10;
+var MAX_DELAY_MS = 100;
+var renameQueues = /* @__PURE__ */ new Map();
+async function renameWithRetry(from, to, rename) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      const code = error.code;
+      if (attempt >= MAX_ATTEMPTS || !code || !RETRYABLE_CODES.has(code)) throw error;
+      const cap = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
+      const delay = cap / 2 + Math.random() * (cap / 2);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+async function atomicRename(from, to, dependencies = {}) {
+  const rename = dependencies.rename ?? fs.rename;
+  const queueKey = path.resolve(to);
+  const previous = renameQueues.get(queueKey) ?? Promise.resolve();
+  const run = previous.catch(() => void 0).then(() => renameWithRetry(from, to, rename));
+  renameQueues.set(queueKey, run);
+  try {
+    await run;
+  } finally {
+    if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
+  }
+}
+
+// packages/plugin-core/dist/state.js
+var STATE_FILE = path2.join(os.homedir(), ".config", "memlin", "state.json");
 var EMPTY = { documents: {} };
 async function readState() {
   try {
-    const raw = await fs.readFile(STATE_FILE, "utf8");
+    const raw = await fs2.readFile(STATE_FILE, "utf8");
     return JSON.parse(raw);
   } catch {
     return { ...EMPTY };
   }
 }
 async function writeState(state) {
-  await fs.mkdir(path.dirname(STATE_FILE), { recursive: true });
+  await fs2.mkdir(path2.dirname(STATE_FILE), { recursive: true });
   const tmp = `${STATE_FILE}.${process.pid}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
-  await fs.rename(tmp, STATE_FILE);
+  await fs2.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
+  await atomicRename(tmp, STATE_FILE);
 }
 var LOCK_DIR = `${STATE_FILE}.lock`;
 var LOCK_STALE_MS = 2e3;
@@ -65,13 +102,13 @@ async function acquireStateLock() {
   const deadline = Date.now() + LOCK_WAIT_MS;
   for (; ; ) {
     try {
-      await fs.mkdir(LOCK_DIR);
+      await fs2.mkdir(LOCK_DIR);
       return true;
     } catch {
       try {
-        const stat = await fs.stat(LOCK_DIR);
+        const stat = await fs2.stat(LOCK_DIR);
         if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-          await fs.rmdir(LOCK_DIR).catch(() => {
+          await fs2.rmdir(LOCK_DIR).catch(() => {
           });
           continue;
         }
@@ -84,7 +121,7 @@ async function acquireStateLock() {
   }
 }
 async function releaseStateLock() {
-  await fs.rmdir(LOCK_DIR).catch(() => {
+  await fs2.rmdir(LOCK_DIR).catch(() => {
   });
 }
 async function updateState(mutate) {
@@ -180,29 +217,29 @@ function buildContinuityMarker(auditId) {
 
 // packages/plugin-core/dist/pending-bundle.js
 import { spawn } from "node:child_process";
-import { promises as fs2 } from "node:fs";
-import path2 from "node:path";
+import { promises as fs3 } from "node:fs";
+import path3 from "node:path";
 import os2 from "node:os";
 var PENDING_BUNDLE_MAX_AGE_MS = 10 * 60 * 1e3;
 function pendingBundlePath() {
-  return process.env.MEMLIN_RESOLVE_OUT ?? path2.join(os2.homedir(), ".config", "memlin", "pending-bundle.json");
+  return process.env.MEMLIN_RESOLVE_OUT ?? path3.join(os2.homedir(), ".config", "memlin", "pending-bundle.json");
 }
 async function takePendingBundle(cwd, host, match) {
   const file = pendingBundlePath();
   let bundle;
   try {
-    bundle = JSON.parse(await fs2.readFile(file, "utf8"));
+    bundle = JSON.parse(await fs3.readFile(file, "utf8"));
   } catch {
     return null;
   }
   if (typeof bundle !== "object" || bundle === null || typeof bundle.rendered !== "string" || bundle.rendered.length === 0) {
-    await fs2.rm(file, { force: true }).catch(() => {
+    await fs3.rm(file, { force: true }).catch(() => {
     });
     return null;
   }
   const expired = Date.now() - bundle.completed_at > PENDING_BUNDLE_MAX_AGE_MS;
   if (expired) {
-    await fs2.rm(file, { force: true }).catch(() => {
+    await fs3.rm(file, { force: true }).catch(() => {
     });
     return null;
   }
@@ -215,7 +252,7 @@ async function takePendingBundle(cwd, host, match) {
   if (match?.task !== void 0 && bundle.task !== match.task) {
     return null;
   }
-  await fs2.rm(file, { force: true }).catch(() => {
+  await fs3.rm(file, { force: true }).catch(() => {
   });
   return bundle;
 }
@@ -343,15 +380,15 @@ async function takeCorrectionNotice(currentSessionId) {
 }
 
 // apps/windsurf-plugin/src/hooks/user-prompt-submit.ts
-var HOOK_DIR = path3.dirname(fileURLToPath(import.meta.url));
-var RESOLVE_BIN = path3.resolve(HOOK_DIR, "../cli/resolve.js");
+var HOOK_DIR = path4.dirname(fileURLToPath(import.meta.url));
+var RESOLVE_BIN = path4.resolve(HOOK_DIR, "../cli/resolve.js");
 function allow() {
   process.stdout.write(JSON.stringify({ continue: true }));
 }
 async function hasToken() {
   try {
-    const raw = await fs3.readFile(
-      path3.join(os3.homedir(), ".config", "memlin", "token.json"),
+    const raw = await fs4.readFile(
+      path4.join(os3.homedir(), ".config", "memlin", "token.json"),
       "utf8"
     );
     return Boolean(JSON.parse(raw).access_token);

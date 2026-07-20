@@ -3239,8 +3239,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path12) {
-      let input = path12;
+    function removeDotSegments(path13) {
+      let input = path13;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3492,8 +3492,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path12, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
+        const [path13, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path13 && path13 !== "/" ? path13 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6886,12 +6886,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f2;
     };
-    function addFormats(ajv, list, fs7, exportName) {
+    function addFormats(ajv, list, fs8, exportName) {
       var _a2;
       var _b;
       (_a2 = (_b = ajv.opts.code).formats) !== null && _a2 !== void 0 ? _a2 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f2 of list)
-        ajv.addFormat(f2, fs7[f2]);
+        ajv.addFormat(f2, fs8[f2]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -7328,13 +7328,13 @@ function __disposeResources(env) {
   }
   return next();
 }
-function __rewriteRelativeImportExtension(path12, preserveJsx) {
-  if (typeof path12 === "string" && /^\.\.?\//.test(path12)) {
-    return path12.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function(m2, tsx, d2, ext, cm) {
+function __rewriteRelativeImportExtension(path13, preserveJsx) {
+  if (typeof path13 === "string" && /^\.\.?\//.test(path13)) {
+    return path13.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function(m2, tsx, d2, ext, cm) {
       return tsx ? preserveJsx ? ".jsx" : ".js" : d2 && (!ext || !cm) ? m2 : d2 + ext + "." + cm.toLowerCase() + "js";
     });
   }
-  return path12;
+  return path13;
 }
 var extendStatics, __assign, __createBinding, __setModuleDefault, ownKeys, _SuppressedError, tslib_es6_default;
 var init_tslib_es6 = __esm({
@@ -20632,14 +20632,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path12 = url.path;
-      if (path12.length === 0) {
+      const path13 = url.path;
+      if (path13.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path12.length === 1 && isNormalizedWindowsDriveLetter(path12[0])) {
+      if (url.scheme === "file" && path13.length === 1 && isNormalizedWindowsDriveLetter(path13[0])) {
         return;
       }
-      path12.pop();
+      path13.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -26220,14 +26220,14 @@ __export(fileFromPath_exports, {
 });
 import { statSync, createReadStream, promises as fs } from "fs";
 import { basename } from "path";
-function createFileFromPath(path12, { mtimeMs, size }, filenameOrOptions, options2 = {}) {
+function createFileFromPath(path13, { mtimeMs, size }, filenameOrOptions, options2 = {}) {
   let filename;
   if (isPlainObject_default2(filenameOrOptions)) {
     [options2, filename] = [filenameOrOptions, void 0];
   } else {
     filename = filenameOrOptions;
   }
-  const file = new FileFromPath({ path: path12, size, lastModified: mtimeMs });
+  const file = new FileFromPath({ path: path13, size, lastModified: mtimeMs });
   if (!filename) {
     filename = file.name;
   }
@@ -26236,13 +26236,13 @@ function createFileFromPath(path12, { mtimeMs, size }, filenameOrOptions, option
     lastModified: file.lastModified
   });
 }
-function fileFromPathSync(path12, filenameOrOptions, options2 = {}) {
-  const stats = statSync(path12);
-  return createFileFromPath(path12, stats, filenameOrOptions, options2);
+function fileFromPathSync(path13, filenameOrOptions, options2 = {}) {
+  const stats = statSync(path13);
+  return createFileFromPath(path13, stats, filenameOrOptions, options2);
 }
-async function fileFromPath2(path12, filenameOrOptions, options2) {
-  const stats = await fs.stat(path12);
-  return createFileFromPath(path12, stats, filenameOrOptions, options2);
+async function fileFromPath2(path13, filenameOrOptions, options2) {
+  const stats = await fs.stat(path13);
+  return createFileFromPath(path13, stats, filenameOrOptions, options2);
 }
 var import_node_domexception, __classPrivateFieldSet5, __classPrivateFieldGet6, _FileFromPath_path, _FileFromPath_start, MESSAGE, FileFromPath;
 var init_fileFromPath = __esm({
@@ -29671,7 +29671,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs7 = __require("fs");
+    var fs8 = __require("fs");
     var sections = require_section_matter();
     var defaults2 = require_defaults2();
     var stringify2 = require_stringify();
@@ -29755,7 +29755,7 @@ var require_gray_matter = __commonJS({
       return stringify2(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str4 = fs7.readFileSync(filepath, "utf8");
+      const str4 = fs8.readFileSync(filepath, "utf8");
       const file = matter3(str4, options2);
       file.path = filepath;
       return file;
@@ -31268,17 +31268,17 @@ __export(companion_client_exports, {
 });
 import http from "node:http";
 import os from "node:os";
-import path from "node:path";
+import path2 from "node:path";
 function companionSocketPath(env = process.env) {
   const override = env[COMPANION_SOCKET_ENV];
   if (override) return override;
   if (process.platform === "win32") {
     return `\\\\.\\pipe\\memlin-companion-${os.userInfo().username}`;
   }
-  return path.join(os.homedir(), ".config", "memlin", "run", "companion.sock");
+  return path2.join(os.homedir(), ".config", "memlin", "run", "companion.sock");
 }
 function companionRunDir() {
-  return path.join(os.homedir(), ".config", "memlin", "run");
+  return path2.join(os.homedir(), ".config", "memlin", "run");
 }
 function companionDisabled(env = process.env) {
   const off = env[NO_COMPANION_ENV];
@@ -31413,7 +31413,7 @@ var init_companion_client = __esm({
 
 // apps/mcp-server/src/index.ts
 import { execSync as execSync4 } from "node:child_process";
-import path11 from "node:path";
+import path12 from "node:path";
 import os8 from "node:os";
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
@@ -31894,8 +31894,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path13, errorMaps, issueData } = params;
+  const fullPath = [...path13, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -32011,11 +32011,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path13, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path13;
     this._key = key;
   }
   get path() {
@@ -35652,10 +35652,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path12) {
-  if (!path12)
+function getElementAtPath(obj, path13) {
+  if (!path13)
     return obj;
-  return path12.reduce((acc, key) => acc?.[key], obj);
+  return path13.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -35975,11 +35975,11 @@ function aborted(x2, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path12, issues) {
+function prefixIssues(path13, issues) {
   return issues.map((iss) => {
     var _a2;
     (_a2 = iss).path ?? (_a2.path = []);
-    iss.path.unshift(path12);
+    iss.path.unshift(path13);
     return iss;
   });
 }
@@ -47521,8 +47521,8 @@ var IcebergError = class extends Error {
     return this.status === 419;
   }
 };
-function buildUrl(baseUrl, path12, query) {
-  const url = new URL(path12, baseUrl);
+function buildUrl(baseUrl, path13, query) {
+  const url = new URL(path13, baseUrl);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== void 0) {
@@ -47552,12 +47552,12 @@ function createFetchClient(options2) {
   return {
     async request({
       method,
-      path: path12,
+      path: path13,
       query,
       body,
       headers
     }) {
-      const url = buildUrl(options2.baseUrl, path12, query);
+      const url = buildUrl(options2.baseUrl, path13, query);
       const authHeaders2 = await buildAuthHeaders(options2.auth);
       const res = await fetchFn(url, {
         method,
@@ -48405,7 +48405,7 @@ var StorageFileApi = class extends BaseApiClient {
   * @param path The relative file path. Should be of the format `folder/subfolder/filename.png`. The bucket must already exist before attempting to upload.
   * @param fileBody The body of the file to be stored in the bucket.
   */
-  async uploadOrUpdate(method, path12, fileBody, fileOptions) {
+  async uploadOrUpdate(method, path13, fileBody, fileOptions) {
     var _this = this;
     return _this.handleOperation(async () => {
       let body;
@@ -48429,7 +48429,7 @@ var StorageFileApi = class extends BaseApiClient {
         if ((typeof ReadableStream !== "undefined" && body instanceof ReadableStream || body && typeof body === "object" && "pipe" in body && typeof body.pipe === "function") && !options2.duplex) options2.duplex = "half";
       }
       if (fileOptions === null || fileOptions === void 0 ? void 0 : fileOptions.headers) for (const [key, value] of Object.entries(fileOptions.headers)) headers = setHeader(headers, key, value);
-      const cleanPath = _this._removeEmptyFolders(path12);
+      const cleanPath = _this._removeEmptyFolders(path13);
       const _path = _this._getFinalPath(cleanPath);
       const data = await (method == "PUT" ? put : post)(_this.fetch, `${_this.url}/object/${_path}`, body, _objectSpread22({ headers }, (options2 === null || options2 === void 0 ? void 0 : options2.duplex) ? { duplex: options2.duplex } : {}));
       return {
@@ -48491,8 +48491,8 @@ var StorageFileApi = class extends BaseApiClient {
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   * - For React Native, using either `Blob`, `File` or `FormData` does not work as intended. Upload file using `ArrayBuffer` from base64 file data instead, see example below.
   */
-  async upload(path12, fileBody, fileOptions) {
-    return this.uploadOrUpdate("POST", path12, fileBody, fileOptions);
+  async upload(path13, fileBody, fileOptions) {
+    return this.uploadOrUpdate("POST", path13, fileBody, fileOptions);
   }
   /**
   * Upload a file with a token generated from `createSignedUploadUrl`.
@@ -48532,9 +48532,9 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: none
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  async uploadToSignedUrl(path12, token, fileBody, fileOptions) {
+  async uploadToSignedUrl(path13, token, fileBody, fileOptions) {
     var _this3 = this;
-    const cleanPath = _this3._removeEmptyFolders(path12);
+    const cleanPath = _this3._removeEmptyFolders(path13);
     const _path = _this3._getFinalPath(cleanPath);
     const url = new URL(_this3.url + `/object/upload/sign/${_path}`);
     url.searchParams.set("token", token);
@@ -48603,10 +48603,10 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: `insert`
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  async createSignedUploadUrl(path12, options2) {
+  async createSignedUploadUrl(path13, options2) {
     var _this4 = this;
     return _this4.handleOperation(async () => {
-      let _path = _this4._getFinalPath(path12);
+      let _path = _this4._getFinalPath(path13);
       const headers = _objectSpread22({}, _this4.headers);
       if (options2 === null || options2 === void 0 ? void 0 : options2.upsert) headers["x-upsert"] = "true";
       const data = await post(_this4.fetch, `${_this4.url}/object/upload/sign/${_path}`, {}, { headers });
@@ -48615,7 +48615,7 @@ var StorageFileApi = class extends BaseApiClient {
       if (!token) throw new StorageError("No token returned by API");
       return {
         signedUrl: url.toString(),
-        path: path12,
+        path: path13,
         token
       };
     });
@@ -48675,8 +48675,8 @@ var StorageFileApi = class extends BaseApiClient {
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   * - For React Native, using either `Blob`, `File` or `FormData` does not work as intended. Update file using `ArrayBuffer` from base64 file data instead, see example below.
   */
-  async update(path12, fileBody, fileOptions) {
-    return this.uploadOrUpdate("PUT", path12, fileBody, fileOptions);
+  async update(path13, fileBody, fileOptions) {
+    return this.uploadOrUpdate("PUT", path13, fileBody, fileOptions);
   }
   /**
   * Moves an existing file to a new path in the same bucket.
@@ -48827,10 +48827,10 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: `select`
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  async createSignedUrl(path12, expiresIn, options2) {
+  async createSignedUrl(path13, expiresIn, options2) {
     var _this8 = this;
     return _this8.handleOperation(async () => {
-      let _path = _this8._getFinalPath(path12);
+      let _path = _this8._getFinalPath(path13);
       const hasTransform = typeof (options2 === null || options2 === void 0 ? void 0 : options2.transform) === "object" && options2.transform !== null && Object.keys(options2.transform).length > 0;
       let data = await post(_this8.fetch, `${_this8.url}/object/sign/${_path}`, _objectSpread22({ expiresIn }, hasTransform ? { transform: options2.transform } : {}), { headers: _this8.headers });
       const query = new URLSearchParams();
@@ -48966,13 +48966,13 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: `select`
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  download(path12, options2, parameters) {
+  download(path13, options2, parameters) {
     const renderPath = typeof (options2 === null || options2 === void 0 ? void 0 : options2.transform) === "object" && options2.transform !== null && Object.keys(options2.transform).length > 0 ? "render/image/authenticated" : "object";
     const query = new URLSearchParams();
     if (options2 === null || options2 === void 0 ? void 0 : options2.transform) this.applyTransformOptsToQuery(query, options2.transform);
     if ((options2 === null || options2 === void 0 ? void 0 : options2.cacheNonce) != null) query.set("cacheNonce", String(options2.cacheNonce));
     const queryString = query.toString();
-    const _path = this._getFinalPath(path12);
+    const _path = this._getFinalPath(path13);
     const downloadFn = () => get(this.fetch, `${this.url}/${renderPath}/${_path}${queryString ? `?${queryString}` : ""}`, {
       headers: this.headers,
       noResolveJson: true
@@ -49003,9 +49003,9 @@ var StorageFileApi = class extends BaseApiClient {
   * }
   * ```
   */
-  async info(path12) {
+  async info(path13) {
     var _this10 = this;
-    const _path = _this10._getFinalPath(path12);
+    const _path = _this10._getFinalPath(path13);
     return _this10.handleOperation(async () => {
       return recursiveToCamel(await get(_this10.fetch, `${_this10.url}/object/info/${_path}`, { headers: _this10.headers }));
     });
@@ -49026,9 +49026,9 @@ var StorageFileApi = class extends BaseApiClient {
   *   .exists('folder/avatar1.png')
   * ```
   */
-  async exists(path12) {
+  async exists(path13) {
     var _this11 = this;
-    const _path = _this11._getFinalPath(path12);
+    const _path = _this11._getFinalPath(path13);
     try {
       await head(_this11.fetch, `${_this11.url}/object/${_path}`, { headers: _this11.headers });
       return {
@@ -49107,8 +49107,8 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: none
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  getPublicUrl(path12, options2) {
-    const _path = this._getFinalPath(path12);
+  getPublicUrl(path13, options2) {
+    const _path = this._getFinalPath(path13);
     const query = new URLSearchParams();
     if (options2 === null || options2 === void 0 ? void 0 : options2.download) query.set("download", options2.download === true ? "" : options2.download);
     if (options2 === null || options2 === void 0 ? void 0 : options2.transform) this.applyTransformOptsToQuery(query, options2.transform);
@@ -49247,10 +49247,10 @@ var StorageFileApi = class extends BaseApiClient {
   *   - `objects` table permissions: `select`
   * - Refer to the [Storage guide](/docs/guides/storage/security/access-control) on how access control works
   */
-  async list(path12, options2, parameters) {
+  async list(path13, options2, parameters) {
     var _this13 = this;
     return _this13.handleOperation(async () => {
-      const body = _objectSpread22(_objectSpread22(_objectSpread22({}, DEFAULT_SEARCH_OPTIONS), options2), {}, { prefix: path12 || "" });
+      const body = _objectSpread22(_objectSpread22(_objectSpread22({}, DEFAULT_SEARCH_OPTIONS), options2), {}, { prefix: path13 || "" });
       return await post(_this13.fetch, `${_this13.url}/object/list/${_this13.bucketId}`, body, { headers: _this13.headers }, parameters);
     });
   }
@@ -49315,11 +49315,11 @@ var StorageFileApi = class extends BaseApiClient {
     if (typeof Buffer !== "undefined") return Buffer.from(data).toString("base64");
     return btoa(data);
   }
-  _getFinalPath(path12) {
-    return `${this.bucketId}/${path12.replace(/^\/+/, "")}`;
+  _getFinalPath(path13) {
+    return `${this.bucketId}/${path13.replace(/^\/+/, "")}`;
   }
-  _removeEmptyFolders(path12) {
-    return path12.replace(/^\/|\/$/g, "").replace(/\/+/g, "/");
+  _removeEmptyFolders(path13) {
+    return path13.replace(/^\/|\/$/g, "").replace(/\/+/g, "/");
   }
   /** Modifies the `query`, appending values the from `transform` */
   applyTransformOptsToQuery(query, transform2) {
@@ -51975,13 +51975,13 @@ var MultipartBody = class {
 // node_modules/.pnpm/openai@4.104.0_ws@8.20.1_zod@3.25.76/node_modules/openai/_shims/node-runtime.mjs
 import { ReadableStream as ReadableStream4 } from "node:stream/web";
 var fileFromPathWarned = false;
-async function fileFromPath3(path12, ...args) {
+async function fileFromPath3(path13, ...args) {
   const { fileFromPath: _fileFromPath } = await Promise.resolve().then(() => (init_fileFromPath(), fileFromPath_exports));
   if (!fileFromPathWarned) {
-    console.warn(`fileFromPath is deprecated; use fs.createReadStream(${JSON.stringify(path12)}) instead`);
+    console.warn(`fileFromPath is deprecated; use fs.createReadStream(${JSON.stringify(path13)}) instead`);
     fileFromPathWarned = true;
   }
-  return await _fileFromPath(path12, ...args);
+  return await _fileFromPath(path13, ...args);
 }
 var defaultHttpAgent = new import_agentkeepalive.default({ keepAlive: true, timeout: 5 * 60 * 1e3 });
 var defaultHttpsAgent = new import_agentkeepalive.default.HttpsAgent({ keepAlive: true, timeout: 5 * 60 * 1e3 });
@@ -52765,29 +52765,29 @@ var APIClient = class {
   defaultIdempotencyKey() {
     return `stainless-node-retry-${uuid4()}`;
   }
-  get(path12, opts) {
-    return this.methodRequest("get", path12, opts);
+  get(path13, opts) {
+    return this.methodRequest("get", path13, opts);
   }
-  post(path12, opts) {
-    return this.methodRequest("post", path12, opts);
+  post(path13, opts) {
+    return this.methodRequest("post", path13, opts);
   }
-  patch(path12, opts) {
-    return this.methodRequest("patch", path12, opts);
+  patch(path13, opts) {
+    return this.methodRequest("patch", path13, opts);
   }
-  put(path12, opts) {
-    return this.methodRequest("put", path12, opts);
+  put(path13, opts) {
+    return this.methodRequest("put", path13, opts);
   }
-  delete(path12, opts) {
-    return this.methodRequest("delete", path12, opts);
+  delete(path13, opts) {
+    return this.methodRequest("delete", path13, opts);
   }
-  methodRequest(method, path12, opts) {
+  methodRequest(method, path13, opts) {
     return this.request(Promise.resolve(opts).then(async (opts2) => {
       const body = opts2 && isBlobLike(opts2?.body) ? new DataView(await opts2.body.arrayBuffer()) : opts2?.body instanceof DataView ? opts2.body : opts2?.body instanceof ArrayBuffer ? new DataView(opts2.body) : opts2 && ArrayBuffer.isView(opts2?.body) ? new DataView(opts2.body.buffer) : opts2?.body;
-      return { method, path: path12, ...opts2, body };
+      return { method, path: path13, ...opts2, body };
     }));
   }
-  getAPIList(path12, Page2, opts) {
-    return this.requestAPIList(Page2, { method: "get", path: path12, ...opts });
+  getAPIList(path13, Page2, opts) {
+    return this.requestAPIList(Page2, { method: "get", path: path13, ...opts });
   }
   calculateContentLength(body) {
     if (typeof body === "string") {
@@ -52806,10 +52806,10 @@ var APIClient = class {
   }
   buildRequest(inputOptions, { retryCount = 0 } = {}) {
     const options2 = { ...inputOptions };
-    const { method, path: path12, query, headers = {} } = options2;
+    const { method, path: path13, query, headers = {} } = options2;
     const body = ArrayBuffer.isView(options2.body) || options2.__binaryRequest && typeof options2.body === "string" ? options2.body : isMultipartBody(options2.body) ? options2.body.body : options2.body ? JSON.stringify(options2.body, null, 2) : null;
     const contentLength = this.calculateContentLength(body);
-    const url = this.buildURL(path12, query);
+    const url = this.buildURL(path13, query);
     if ("timeout" in options2)
       validatePositiveInteger("timeout", options2.timeout);
     options2.timeout = options2.timeout ?? this.timeout;
@@ -52925,8 +52925,8 @@ var APIClient = class {
     const request = this.makeRequest(options2, null);
     return new PagePromise(this, request, Page2);
   }
-  buildURL(path12, query) {
-    const url = isAbsoluteURL(path12) ? new URL(path12) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path12.startsWith("/") ? path12.slice(1) : path12));
+  buildURL(path13, query) {
+    const url = isAbsoluteURL(path13) ? new URL(path13) : new URL(this.baseURL + (this.baseURL.endsWith("/") && path13.startsWith("/") ? path13.slice(1) : path13));
     const defaultQuery = this.defaultQuery();
     if (!isEmptyObj(defaultQuery)) {
       query = { ...defaultQuery, ...query };
@@ -58661,8 +58661,8 @@ function validateActionInput(input, schema) {
   return { valid: errors.length === 0, errors };
 }
 function renderPromptTemplate(template, input) {
-  return template.replace(/\{\{\s*input\.([a-zA-Z0-9_.]+)\s*\}\}/g, (_match, path12) => {
-    const parts = String(path12).split(".");
+  return template.replace(/\{\{\s*input\.([a-zA-Z0-9_.]+)\s*\}\}/g, (_match, path13) => {
+    const parts = String(path13).split(".");
     let cur = input;
     for (const p2 of parts) {
       if (cur && typeof cur === "object" && p2 in cur) {
@@ -65834,10 +65834,10 @@ async function assembleBrandGuidelines(ctx, args) {
       ["primary_dark", logos.primary_dark?.storage_path],
       ["favicon", logos.favicon?.storage_path]
     ];
-    for (const [slot, path12] of slots) {
-      if (!path12) continue;
+    for (const [slot, path13] of slots) {
+      if (!path13) continue;
       try {
-        const { data, error: error2 } = await ctx.supabase.storage.from("brand-guidelines-assets").createSignedUrl(path12, BRAND_GUIDELINES_LOGO_SIGNED_URL_TTL_SECONDS);
+        const { data, error: error2 } = await ctx.supabase.storage.from("brand-guidelines-assets").createSignedUrl(path13, BRAND_GUIDELINES_LOGO_SIGNED_URL_TTL_SECONDS);
         if (error2) {
           console.warn(`[resolver] brand-guidelines: sign ${slot} failed: ${error2.message}`);
         } else if (data?.signedUrl) {
@@ -67065,10 +67065,10 @@ function renderBundleText(result, task) {
   return lines.join("\n");
 }
 function renderCitation(it2) {
-  const path12 = it2.citation?.path;
+  const path13 = it2.citation?.path;
   const v2 = it2.citation?.version_number;
-  if (path12 && v2 != null) return `\u2014 \`${path12}\` v${v2}`;
-  if (path12) return `\u2014 \`${path12}\``;
+  if (path13 && v2 != null) return `\u2014 \`${path13}\` v${v2}`;
+  if (path13) return `\u2014 \`${path13}\``;
   return "";
 }
 
@@ -67532,26 +67532,63 @@ function withResolverDefaults(ctx, args) {
 
 // packages/plugin-core/dist/pre-tool-use-handler.js
 import { execSync as execSync3 } from "node:child_process";
-import path8 from "node:path";
+import path9 from "node:path";
 
 // packages/plugin-core/dist/client.js
-import { promises as fs4 } from "node:fs";
-import path5 from "node:path";
+import { promises as fs5 } from "node:fs";
+import path6 from "node:path";
 import os5 from "node:os";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/dist/auth.js
-import { promises as fs2 } from "node:fs";
-import path2 from "node:path";
+import { promises as fs3 } from "node:fs";
+import path3 from "node:path";
 import os2 from "node:os";
 import { randomUUID } from "node:crypto";
+
+// packages/plugin-core/dist/atomic-rename.js
+import { promises as fs2 } from "node:fs";
+import path from "node:path";
+var RETRYABLE_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
+var MAX_ATTEMPTS = 10;
+var BASE_DELAY_MS = 10;
+var MAX_DELAY_MS = 100;
+var renameQueues = /* @__PURE__ */ new Map();
+async function renameWithRetry(from, to, rename) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error2) {
+      const code = error2.code;
+      if (attempt >= MAX_ATTEMPTS || !code || !RETRYABLE_CODES.has(code)) throw error2;
+      const cap = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
+      const delay2 = cap / 2 + Math.random() * (cap / 2);
+      await new Promise((resolve) => setTimeout(resolve, delay2));
+    }
+  }
+}
+async function atomicRename(from, to, dependencies = {}) {
+  const rename = dependencies.rename ?? fs2.rename;
+  const queueKey = path.resolve(to);
+  const previous = renameQueues.get(queueKey) ?? Promise.resolve();
+  const run = previous.catch(() => void 0).then(() => renameWithRetry(from, to, rename));
+  renameQueues.set(queueKey, run);
+  try {
+    await run;
+  } finally {
+    if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
+  }
+}
+
+// packages/plugin-core/dist/auth.js
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
 var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
 function persistedTokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path2.join(os2.homedir(), ".config", "memlin", "token.json");
+  return process.env.MEMLIN_TOKEN_FILE || path3.join(os2.homedir(), ".config", "memlin", "token.json");
 }
 var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
 var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
@@ -67562,18 +67599,18 @@ function authFileLockPath() {
 async function acquireAuthFileLock() {
   const file = authFileLockPath();
   const owner = `${process.pid}:${randomUUID()}`;
-  await fs2.mkdir(path2.dirname(file), { recursive: true });
+  await fs3.mkdir(path3.dirname(file), { recursive: true });
   const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
-      const handle = await fs2.open(file, "wx", 384);
+      const handle = await fs3.open(file, "wx", 384);
       try {
         await handle.writeFile(owner, "utf8");
         await handle.sync();
       } catch (error2) {
         await handle.close().catch(() => {
         });
-        await fs2.rm(file, { force: true }).catch(() => {
+        await fs3.rm(file, { force: true }).catch(() => {
         });
         throw error2;
       }
@@ -67583,16 +67620,16 @@ async function acquireAuthFileLock() {
         released = true;
         await handle.close().catch(() => {
         });
-        const currentOwner = await fs2.readFile(file, "utf8").catch(() => null);
-        if (currentOwner === owner) await fs2.rm(file, { force: true }).catch(() => {
+        const currentOwner = await fs3.readFile(file, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs3.rm(file, { force: true }).catch(() => {
         });
       };
     } catch (error2) {
       if (error2.code !== "EEXIST") throw error2;
       try {
-        const stat = await fs2.stat(file);
+        const stat = await fs3.stat(file);
         if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
-          await fs2.rm(file, { force: true });
+          await fs3.rm(file, { force: true });
           continue;
         }
       } catch (statError) {
@@ -67616,7 +67653,7 @@ async function withAuthFileLock(operation) {
 }
 async function readPersistedToken() {
   try {
-    const raw = await fs2.readFile(persistedTokenFilePath(), "utf8");
+    const raw = await fs3.readFile(persistedTokenFilePath(), "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -67624,15 +67661,15 @@ async function readPersistedToken() {
 }
 async function writePersistedToken(t2) {
   const file = persistedTokenFilePath();
-  await fs2.mkdir(path2.dirname(file), { recursive: true });
-  const tmp = path2.join(
-    path2.dirname(file),
-    `${path2.basename(file)}.tmp-${process.pid}-${randomUUID()}`
+  await fs3.mkdir(path3.dirname(file), { recursive: true });
+  const tmp = path3.join(
+    path3.dirname(file),
+    `${path3.basename(file)}.tmp-${process.pid}-${randomUUID()}`
   );
-  await fs2.writeFile(tmp, JSON.stringify(t2, null, 2), { mode: 384 });
-  await fs2.chmod(tmp, 384).catch(() => {
+  await fs3.writeFile(tmp, JSON.stringify(t2, null, 2), { mode: 384 });
+  await fs3.chmod(tmp, 384).catch(() => {
   });
-  await fs2.rename(tmp, file);
+  await atomicRename(tmp, file);
 }
 async function refreshAccessToken(refreshToken) {
   requireClientId();
@@ -67810,7 +67847,7 @@ async function withTimeout(promise, ms, fallback) {
 
 // packages/plugin-core/dist/host.js
 import os3 from "node:os";
-import path3 from "node:path";
+import path4 from "node:path";
 var BaseHost = class {
   constructor(kind2, home) {
     this.kind = kind2;
@@ -67822,42 +67859,42 @@ var BaseHost = class {
     return this.home;
   }
   plansDir() {
-    return path3.join(this.home, "plans");
+    return path4.join(this.home, "plans");
   }
 };
 var ClaudeCodeHost = class extends BaseHost {
   constructor() {
-    super("claude-code", path3.join(os3.homedir(), ".claude"));
+    super("claude-code", path4.join(os3.homedir(), ".claude"));
   }
 };
 var CursorHost = class extends BaseHost {
   constructor() {
-    super("cursor", path3.join(os3.homedir(), ".config", "memlin"));
+    super("cursor", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var CodexHost = class extends BaseHost {
   constructor() {
-    super("codex", path3.join(os3.homedir(), ".config", "memlin"));
+    super("codex", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var WindsurfHost = class extends BaseHost {
   constructor() {
-    super("windsurf", path3.join(os3.homedir(), ".config", "memlin"));
+    super("windsurf", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var AntigravityHost = class extends BaseHost {
   constructor() {
-    super("antigravity", path3.join(os3.homedir(), ".config", "memlin"));
+    super("antigravity", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var VSCodeHost = class extends BaseHost {
   constructor() {
-    super("vscode", path3.join(os3.homedir(), ".config", "memlin"));
+    super("vscode", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var CompanionHost = class extends BaseHost {
   constructor() {
-    super("companion", path3.join(os3.homedir(), ".config", "memlin"));
+    super("companion", path4.join(os3.homedir(), ".config", "memlin"));
   }
 };
 var HOSTS = {
@@ -68460,17 +68497,17 @@ function resolveApiUrl() {
 
 // packages/plugin-core/dist/workspace-binding.js
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { constants, promises as fs3 } from "node:fs";
-import path4 from "node:path";
+import { constants, promises as fs4 } from "node:fs";
+import path5 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
 var WORKSPACE_BINDING_FILE = "config.json";
 var GIT_POINTER_MAX_BYTES = 8 * 1024;
 async function walkForWorkspaceBinding(startDir) {
-  let dir = path4.resolve(startDir);
+  let dir = path5.resolve(startDir);
   for (let i2 = 0; i2 < 64; i2++) {
-    const candidate = path4.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
+    const candidate = path5.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
     try {
-      const raw = await fs3.readFile(candidate, "utf8");
+      const raw = await fs4.readFile(candidate, "utf8");
       const parsed = JSON.parse(raw);
       if (typeof parsed.account_id === "string" && parsed.account_id) {
         return {
@@ -68484,7 +68521,7 @@ async function walkForWorkspaceBinding(startDir) {
       }
     } catch {
     }
-    const parent = path4.dirname(dir);
+    const parent = path5.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
@@ -68493,7 +68530,7 @@ async function walkForWorkspaceBinding(startDir) {
 async function readSmallRegularFile(file) {
   let before;
   try {
-    before = await fs3.lstat(file);
+    before = await fs4.lstat(file);
   } catch (error2) {
     return isFileNotFound(error2) ? { kind: "missing" } : { kind: "invalid" };
   }
@@ -68502,14 +68539,14 @@ async function readSmallRegularFile(file) {
       return { kind: "invalid" };
     }
     const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-    const handle = await fs3.open(file, constants.O_RDONLY | noFollow);
+    const handle = await fs4.open(file, constants.O_RDONLY | noFollow);
     try {
       const opened = await handle.stat();
       if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size || opened.size > GIT_POINTER_MAX_BYTES) {
         return { kind: "invalid" };
       }
       const bytes = await handle.readFile();
-      const [after, afterPath] = await Promise.all([handle.stat(), fs3.lstat(file)]);
+      const [after, afterPath] = await Promise.all([handle.stat(), fs4.lstat(file)]);
       if (afterPath.isSymbolicLink() || !afterPath.isFile() || after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size || bytes.byteLength !== opened.size || bytes.includes(0)) {
         return { kind: "invalid" };
       }
@@ -68522,16 +68559,16 @@ async function readSmallRegularFile(file) {
   }
 }
 function containedBy(parent, child) {
-  const relative = path4.relative(parent, child);
-  return relative === "" || relative !== ".." && !relative.startsWith(`..${path4.sep}`) && !path4.isAbsolute(relative);
+  const relative = path5.relative(parent, child);
+  return relative === "" || relative !== ".." && !relative.startsWith(`..${path5.sep}`) && !path5.isAbsolute(relative);
 }
 async function canonicalSafeDirectory(candidate) {
   try {
-    const before = await fs3.lstat(candidate);
+    const before = await fs4.lstat(candidate);
     if (before.isSymbolicLink() || !before.isDirectory()) return null;
-    await fs3.access(candidate, constants.R_OK | constants.X_OK);
-    const canonical = await fs3.realpath(candidate);
-    const after = await fs3.lstat(candidate);
+    await fs4.access(candidate, constants.R_OK | constants.X_OK);
+    const canonical = await fs4.realpath(candidate);
+    const after = await fs4.lstat(candidate);
     if (after.isSymbolicLink() || !after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) {
       return null;
     }
@@ -68548,24 +68585,24 @@ function gitIdentity(checkoutRoot, state, repositoryRoot = checkoutRoot) {
   };
 }
 async function resolveGitWorkspaceIdentity(startDir) {
-  const requested = path4.resolve(startDir);
+  const requested = path5.resolve(startDir);
   let canonicalStart;
   try {
-    canonicalStart = await fs3.realpath(requested);
-    const startEntry = await fs3.stat(canonicalStart);
+    canonicalStart = await fs4.realpath(requested);
+    const startEntry = await fs4.stat(canonicalStart);
     if (!startEntry.isDirectory()) return gitIdentity(canonicalStart, "unknown");
   } catch {
     return gitIdentity(requested, "unknown");
   }
   let dir = canonicalStart;
   for (let i2 = 0; i2 < 64; i2++) {
-    const gitEntry = path4.join(dir, ".git");
+    const gitEntry = path5.join(dir, ".git");
     let entry;
     try {
-      entry = await fs3.lstat(gitEntry);
+      entry = await fs4.lstat(gitEntry);
     } catch (error2) {
       if (!isFileNotFound(error2)) return gitIdentity(dir, "unknown");
-      const parent = path4.dirname(dir);
+      const parent = path5.dirname(dir);
       if (parent === dir) return gitIdentity(canonicalStart, "none");
       dir = parent;
       continue;
@@ -68586,16 +68623,16 @@ async function resolveGitWorkspaceIdentity(startDir) {
     if (!pointerValue) return gitIdentity(checkoutRoot, "unknown");
     let gitDirCandidate;
     try {
-      gitDirCandidate = path4.isAbsolute(pointerValue) ? pointerValue : path4.resolve(checkoutRoot, pointerValue);
+      gitDirCandidate = path5.isAbsolute(pointerValue) ? pointerValue : path5.resolve(checkoutRoot, pointerValue);
     } catch {
       return gitIdentity(checkoutRoot, "unknown");
     }
     const gitDir = await canonicalSafeDirectory(gitDirCandidate);
     if (!gitDir) return gitIdentity(checkoutRoot, "unknown");
-    const commonRead = await readSmallRegularFile(path4.join(gitDir, "commondir"));
+    const commonRead = await readSmallRegularFile(path5.join(gitDir, "commondir"));
     if (commonRead.kind === "missing") {
-      const gitDirParent = path4.dirname(gitDir);
-      const looksLikeWorktreeAdmin = path4.basename(gitDirParent) === "worktrees" && path4.basename(path4.dirname(gitDirParent)) === ".git";
+      const gitDirParent = path5.dirname(gitDir);
+      const looksLikeWorktreeAdmin = path5.basename(gitDirParent) === "worktrees" && path5.basename(path5.dirname(gitDirParent)) === ".git";
       if (looksLikeWorktreeAdmin) return gitIdentity(checkoutRoot, "unknown");
       return gitIdentity(checkoutRoot, "main");
     }
@@ -68607,22 +68644,22 @@ async function resolveGitWorkspaceIdentity(startDir) {
     if (!commonValue) return gitIdentity(checkoutRoot, "unknown");
     let commonCandidate;
     try {
-      commonCandidate = path4.isAbsolute(commonValue) ? commonValue : path4.resolve(gitDir, commonValue);
+      commonCandidate = path5.isAbsolute(commonValue) ? commonValue : path5.resolve(gitDir, commonValue);
     } catch {
       return gitIdentity(checkoutRoot, "unknown");
     }
     const commonDir = await canonicalSafeDirectory(commonCandidate);
     if (!commonDir) return gitIdentity(checkoutRoot, "unknown");
-    const worktreesDir = path4.join(commonDir, "worktrees");
-    if (path4.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
+    const worktreesDir = path5.join(commonDir, "worktrees");
+    if (path5.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
       return gitIdentity(checkoutRoot, "unknown");
     }
-    const repositoryRoot = path4.dirname(commonDir);
-    const repositoryGitDir = await canonicalSafeDirectory(path4.join(repositoryRoot, ".git"));
+    const repositoryRoot = path5.dirname(commonDir);
+    const repositoryGitDir = await canonicalSafeDirectory(path5.join(repositoryRoot, ".git"));
     if (!repositoryGitDir || repositoryGitDir !== commonDir) {
       return gitIdentity(checkoutRoot, "unknown");
     }
-    const reverseRead = await readSmallRegularFile(path4.join(gitDir, "gitdir"));
+    const reverseRead = await readSmallRegularFile(path5.join(gitDir, "gitdir"));
     if (reverseRead.kind !== "ok" || reverseRead.value.includes("\0")) {
       return gitIdentity(checkoutRoot, "unknown");
     }
@@ -68630,10 +68667,10 @@ async function resolveGitWorkspaceIdentity(startDir) {
     const reverseValue = reverseMatch?.[1];
     if (!reverseValue) return gitIdentity(checkoutRoot, "unknown");
     try {
-      const reverseCandidate = path4.isAbsolute(reverseValue) ? reverseValue : path4.resolve(gitDir, reverseValue);
+      const reverseCandidate = path5.isAbsolute(reverseValue) ? reverseValue : path5.resolve(gitDir, reverseValue);
       const [reverseTarget, checkoutGitFile] = await Promise.all([
-        fs3.realpath(reverseCandidate),
-        fs3.realpath(gitEntry)
+        fs4.realpath(reverseCandidate),
+        fs4.realpath(gitEntry)
       ]);
       if (reverseTarget !== checkoutGitFile) return gitIdentity(checkoutRoot, "unknown");
     } catch {
@@ -68648,7 +68685,7 @@ async function findWorkspaceBinding(startDir) {
   const gitIdentity2 = await resolveGitWorkspaceIdentity(startDir);
   if (gitIdentity2.state !== "worktree") return direct;
   if (direct) {
-    const bindingRoot = await fs3.realpath(direct.workspaceRoot).catch(() => path4.resolve(direct.workspaceRoot));
+    const bindingRoot = await fs4.realpath(direct.workspaceRoot).catch(() => path5.resolve(direct.workspaceRoot));
     if (containedBy(gitIdentity2.checkout_root, bindingRoot)) return direct;
   }
   return walkForWorkspaceBinding(gitIdentity2.repository_root);
@@ -68659,13 +68696,13 @@ function isFileNotFound(error2) {
 
 // packages/plugin-core/dist/client.js
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path5.join(os5.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path6.join(os5.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path5.join(os5.homedir(), ".config", "memlin");
-var TOKEN_FILE = path5.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path6.join(os5.homedir(), ".config", "memlin");
+var TOKEN_FILE = path6.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
-    const raw = await fs4.readFile(globalConfigFilePath(), "utf8");
+    const raw = await fs5.readFile(globalConfigFilePath(), "utf8");
     const parsed = JSON.parse(raw);
     if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
       return null;
@@ -68737,9 +68774,9 @@ function log(msg) {
 // packages/plugin-core/dist/project-resolver.js
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import path6 from "node:path";
+import path7 from "node:path";
 async function resolveProject(api, cwd, configProjectId) {
-  const absCwd = path6.resolve(cwd);
+  const absCwd = path7.resolve(cwd);
   const remotes = detectGitRemotes(cwd);
   const hasGitRemote = remotes.length > 0;
   try {
@@ -68799,8 +68836,8 @@ function detectGitRemotes(cwd) {
         continue;
       }
       scanned++;
-      const child = path6.join(cwd, entry.name);
-      if (!existsSync(path6.join(child, ".git"))) continue;
+      const child = path7.join(cwd, entry.name);
+      if (!existsSync(path7.join(child, ".git"))) continue;
       const remote = readGitRemote(child);
       if (remote && !out.includes(remote)) out.push(remote);
     }
@@ -68811,7 +68848,7 @@ function detectGitRemotes(cwd) {
 
 // packages/plugin-core/dist/edit-activity.js
 import { execSync as execSync2 } from "node:child_process";
-import path7 from "node:path";
+import path8 from "node:path";
 import os6 from "node:os";
 var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 function editedPathsFromHook(toolName, toolInput) {
@@ -68829,12 +68866,12 @@ function repoRelativePath(absPath, cwd) {
       timeout: 250
     }).trim();
     if (top) {
-      const rel = path7.relative(top, absPath);
-      if (rel && !rel.startsWith("..") && !path7.isAbsolute(rel)) return rel;
+      const rel = path8.relative(top, absPath);
+      if (rel && !rel.startsWith("..") && !path8.isAbsolute(rel)) return rel;
     }
   } catch {
   }
-  return path7.basename(absPath);
+  return path8.basename(absPath);
 }
 
 // packages/plugin-core/dist/pre-tool-use-handler.js
@@ -69010,7 +69047,7 @@ async function evaluateEditCollision(ctx, payload, projectId, projectAccountId) 
   if (rawPaths.length === 0) return null;
   const cwd = payload.cwd ?? process.cwd();
   const relPaths = [
-    ...new Set(rawPaths.map((p2) => repoRelativePath(path8.resolve(cwd, p2), cwd)))
+    ...new Set(rawPaths.map((p2) => repoRelativePath(path9.resolve(cwd, p2), cwd)))
   ];
   if (relPaths.length === 0) return null;
   let res;
@@ -69126,15 +69163,15 @@ async function runPreToolUseHandler(payload) {
 }
 
 // packages/plugin-core/dist/state.js
-import { promises as fs5 } from "node:fs";
-import path9 from "node:path";
+import { promises as fs6 } from "node:fs";
+import path10 from "node:path";
 import os7 from "node:os";
 import crypto2 from "node:crypto";
-var STATE_FILE = path9.join(os7.homedir(), ".config", "memlin", "state.json");
+var STATE_FILE = path10.join(os7.homedir(), ".config", "memlin", "state.json");
 var EMPTY = { documents: {} };
 async function readState() {
   try {
-    const raw = await fs5.readFile(STATE_FILE, "utf8");
+    const raw = await fs6.readFile(STATE_FILE, "utf8");
     return JSON.parse(raw);
   } catch {
     return { ...EMPTY };
@@ -69162,18 +69199,18 @@ function diffStates(prev, current) {
 }
 
 // packages/plugin-core/dist/local-scan.js
-import { promises as fs6 } from "node:fs";
+import { promises as fs7 } from "node:fs";
 import { existsSync as existsSync2 } from "node:fs";
-import path10 from "node:path";
+import path11 from "node:path";
 async function scanLocal(opts = {}) {
   const out = [];
   const root = opts.rootOverride ?? resolveHost().homeDir();
-  const memDir = path10.join(root, "memory");
+  const memDir = path11.join(root, "memory");
   if (existsSync2(memDir)) {
-    for (const file of await fs6.readdir(memDir)) {
+    for (const file of await fs7.readdir(memDir)) {
       if (!file.endsWith(".md") || file === "MEMORY.md") continue;
-      const abs = path10.join(memDir, file);
-      const content = await fs6.readFile(abs, "utf8");
+      const abs = path11.join(memDir, file);
+      const content = await fs7.readFile(abs, "utf8");
       out.push({
         path: `memory/${file}`,
         abs_path: abs,
@@ -69183,14 +69220,14 @@ async function scanLocal(opts = {}) {
       });
     }
   }
-  const skillsDir = path10.join(root, "skills");
+  const skillsDir = path11.join(root, "skills");
   if (existsSync2(skillsDir)) {
-    const entries = await fs6.readdir(skillsDir, { withFileTypes: true });
+    const entries = await fs7.readdir(skillsDir, { withFileTypes: true });
     for (const e2 of entries) {
       if (!e2.isDirectory()) continue;
-      const skillMd = path10.join(skillsDir, e2.name, "SKILL.md");
+      const skillMd = path11.join(skillsDir, e2.name, "SKILL.md");
       if (!existsSync2(skillMd)) continue;
-      const content = await fs6.readFile(skillMd, "utf8");
+      const content = await fs7.readFile(skillMd, "utf8");
       out.push({
         path: `skills/${e2.name}/SKILL.md`,
         abs_path: skillMd,
@@ -69200,12 +69237,12 @@ async function scanLocal(opts = {}) {
       });
     }
   }
-  const goalsDir = path10.join(root, "goals");
+  const goalsDir = path11.join(root, "goals");
   if (existsSync2(goalsDir)) {
-    for (const file of await fs6.readdir(goalsDir)) {
+    for (const file of await fs7.readdir(goalsDir)) {
       if (!file.endsWith(".md")) continue;
-      const abs = path10.join(goalsDir, file);
-      const content = await fs6.readFile(abs, "utf8");
+      const abs = path11.join(goalsDir, file);
+      const content = await fs7.readFile(abs, "utf8");
       out.push({
         path: `goals/${file}`,
         abs_path: abs,
@@ -69215,12 +69252,12 @@ async function scanLocal(opts = {}) {
       });
     }
   }
-  const schemasDir = path10.join(root, "schemas");
+  const schemasDir = path11.join(root, "schemas");
   if (existsSync2(schemasDir)) {
-    for (const file of await fs6.readdir(schemasDir)) {
+    for (const file of await fs7.readdir(schemasDir)) {
       if (!file.endsWith(".json")) continue;
-      const abs = path10.join(schemasDir, file);
-      const content = await fs6.readFile(abs, "utf8");
+      const abs = path11.join(schemasDir, file);
+      const content = await fs7.readFile(abs, "utf8");
       out.push({
         path: `schemas/${file}`,
         abs_path: abs,
@@ -69233,10 +69270,10 @@ async function scanLocal(opts = {}) {
   if (opts.includePlans) {
     const plansDir = resolveHost().plansDir();
     if (existsSync2(plansDir)) {
-      for (const file of await fs6.readdir(plansDir)) {
+      for (const file of await fs7.readdir(plansDir)) {
         if (!file.endsWith(".md")) continue;
-        const abs = path10.join(plansDir, file);
-        const content = await fs6.readFile(abs, "utf8");
+        const abs = path11.join(plansDir, file);
+        const content = await fs7.readFile(abs, "utf8");
         out.push({
           path: `plans/${file}`,
           abs_path: abs,
@@ -69252,9 +69289,9 @@ async function scanLocal(opts = {}) {
     for (const [relPath, meta] of Object.entries(opts.trackedDocs)) {
       if (seen.has(relPath)) continue;
       if (relPath.startsWith("plans/")) continue;
-      const abs = path10.join(root, relPath);
+      const abs = path11.join(root, relPath);
       if (!existsSync2(abs)) continue;
-      const content = await fs6.readFile(abs, "utf8");
+      const content = await fs7.readFile(abs, "utf8");
       out.push({
         path: relPath,
         abs_path: abs,
@@ -69268,7 +69305,7 @@ async function scanLocal(opts = {}) {
 }
 function filterAbsentOnDisk(paths, rootOverride) {
   const root = rootOverride ?? resolveHost().homeDir();
-  return paths.filter((p2) => !existsSync2(path10.join(root, p2)));
+  return paths.filter((p2) => !existsSync2(path11.join(root, p2)));
 }
 
 // apps/mcp-server/src/request-routing.ts
@@ -69385,7 +69422,7 @@ function runtimeCwd() {
     "INIT_CWD"
   ]) {
     const value = process.env[key]?.trim();
-    if (value && path11.isAbsolute(value)) return path11.resolve(value);
+    if (value && path12.isAbsolute(value)) return path12.resolve(value);
   }
   return process.cwd();
 }
