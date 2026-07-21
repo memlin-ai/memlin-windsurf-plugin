@@ -61846,7 +61846,37 @@ var WORK_PATH_MATCH_MAX = 3;
 var OWN_EDIT_WINDOW_MS = 2 * 60 * 6e4;
 var DOC_PATH_MATCH_MAX = 2;
 var DOC_PATH_BODY_CAP = 6e3;
-var RECALL_FLOOR = 0.45;
+var AUTHOR_DOC_MATCH_MAX = 3;
+var AUTHOR_MENTION_MAX = 2;
+var AUTHOR_NAME_MIN_LEN = 3;
+var AMBIGUOUS_NAME_TOKENS = /* @__PURE__ */ new Set([
+  "will",
+  "bill",
+  "grant",
+  "mark",
+  "art",
+  "sue",
+  "ray",
+  "rob",
+  "dawn",
+  "may",
+  "june",
+  "april",
+  "august",
+  "hope",
+  "joy",
+  "frank",
+  "jack",
+  "pat",
+  "max",
+  "guy",
+  "rose",
+  "lane",
+  "dean",
+  "chase"
+]);
+var RECALL_FLOOR_MARGIN = 0.1;
+var RECALL_FLOOR_MIN = 0.25;
 var CONCURRENT_PR_WINDOW_MS = 24 * 60 * 6e4;
 var CONCURRENT_PR_MAX = 3;
 var DUP_SIMILARITY_GATE = 0.86;
@@ -62180,6 +62210,54 @@ function extractPathTokens(task) {
   }
   return out;
 }
+function wordMatchPosition(haystackLower, needleLower) {
+  if (needleLower.length < AUTHOR_NAME_MIN_LEN) return -1;
+  const escaped = needleLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m2 = new RegExp(`(?:^|[^\\p{L}\\p{N}_])(${escaped})(?=$|[^\\p{L}\\p{N}_])`, "u").exec(
+    haystackLower
+  );
+  return m2 ? m2.index + m2[0].indexOf(m2[1]) : -1;
+}
+function detectMentionedMembers(task, members) {
+  if (!task || members.length === 0) return [];
+  const haystack = task.toLowerCase();
+  const found = /* @__PURE__ */ new Map();
+  for (const member of members) {
+    const displayName = member.display_name?.trim() ?? "";
+    const nameTokens = displayName.toLowerCase().split(/\s+/).filter(Boolean);
+    const emailLocal = member.email?.split("@")[0]?.toLowerCase() ?? "";
+    let hit = null;
+    if (nameTokens.length >= 2) {
+      const pos = wordMatchPosition(haystack, nameTokens.join(" "));
+      if (pos >= 0) hit = { matched_on: "full_name", position: pos };
+    }
+    if (!hit && nameTokens[0] && !AMBIGUOUS_NAME_TOKENS.has(nameTokens[0])) {
+      const pos = wordMatchPosition(haystack, nameTokens[0]);
+      if (pos >= 0) hit = { matched_on: "first_name", position: pos };
+    }
+    if (!hit && emailLocal && !AMBIGUOUS_NAME_TOKENS.has(emailLocal)) {
+      for (const candidate of [.../* @__PURE__ */ new Set([emailLocal, emailLocal.split(".")[0] ?? ""])]) {
+        if (!candidate || AMBIGUOUS_NAME_TOKENS.has(candidate)) continue;
+        const pos = wordMatchPosition(haystack, candidate);
+        if (pos >= 0) {
+          hit = { matched_on: "email_local", position: pos };
+          break;
+        }
+      }
+    }
+    if (!hit) continue;
+    const existing = found.get(member.user_id);
+    if (!existing || hit.position < existing.position) {
+      found.set(member.user_id, {
+        user_id: member.user_id,
+        name: displayName || emailLocal || member.user_id,
+        matched_on: hit.matched_on,
+        position: hit.position
+      });
+    }
+  }
+  return [...found.values()].sort((a2, b2) => a2.position - b2.position).slice(0, AUTHOR_MENTION_MAX);
+}
 function patternPrefixDirs(patterns) {
   const out = [];
   for (const pat of patterns) {
@@ -62422,6 +62500,110 @@ async function assembleDocsTouchingMyFiles(ctx, projectId, myDirs, excludeIds, a
   }
   return items;
 }
+async function assembleDocsAuthoredBy(ctx, projectId, members, excludeIds, applicability = {}) {
+  if (members.length === 0) return [];
+  const nameByUserId = new Map(members.map((m2) => [m2.user_id, m2.name]));
+  const memberIds = [...nameByUserId.keys()];
+  const fetchLimit = AUTHOR_DOC_MATCH_MAX * 4 + excludeIds.size;
+  const docColumns = `id, account_id, created_by, locked_to_owners, scope, project_id, status,
+       kind, title, path, updated_at, metadata`;
+  const versionEmbed = "document_versions!documents_current_version_fk";
+  const [strong, fallback] = await Promise.all([
+    ctx.supabase.from("documents").select(`${docColumns}, ${versionEmbed}!inner ( content, version_number, author_id )`).eq("account_id", ctx.accountId).eq("locked_to_owners", false).neq("status", "archived").in("document_versions.author_id", memberIds).order("updated_at", { ascending: false }).limit(fetchLimit),
+    ctx.supabase.from("documents").select(`${docColumns}, ${versionEmbed} ( content, version_number, author_id )`).eq("account_id", ctx.accountId).eq("locked_to_owners", false).neq("status", "archived").or(
+      `created_by.in.(${memberIds.join(",")}),metadata->>proposed_by_user_id.in.(${memberIds.join(",")})`
+    ).order("updated_at", { ascending: false }).limit(fetchLimit)
+  ]);
+  for (const q2 of [strong, fallback]) {
+    if (q2.error) {
+      console.warn(
+        `[resolver] author-attributed docs query failed: ${q2.error.message} \u2014 proceeding without it`
+      );
+    }
+  }
+  const seenIds = /* @__PURE__ */ new Set();
+  const rows = [];
+  for (const raw of [...strong.data ?? [], ...fallback.data ?? []]) {
+    const id = typeof raw.id === "string" ? raw.id : null;
+    if (!id || seenIds.has(id)) continue;
+    seenIds.add(id);
+    rows.push(raw);
+  }
+  rows.sort((a2, b2) => String(b2.updated_at ?? "").localeCompare(String(a2.updated_at ?? "")));
+  const items = [];
+  for (const raw of rows) {
+    const id = typeof raw.id === "string" ? raw.id : null;
+    const kind2 = typeof raw.kind === "string" ? raw.kind : null;
+    if (!id || excludeIds.has(id)) continue;
+    if (kind2 !== "memory" && kind2 !== "skill" && kind2 !== "decision" && kind2 !== "schema" && kind2 !== "goal")
+      continue;
+    if (!isDirectResolverDocumentEligible(raw, {
+      accountId: ctx.accountId,
+      userId: ctx.userId,
+      projectId
+    }))
+      continue;
+    const version4 = Array.isArray(raw.document_versions) ? raw.document_versions[0] : raw.document_versions;
+    const metadata = raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? raw.metadata : {};
+    const proposedBy = typeof metadata.proposed_by_user_id === "string" ? metadata.proposed_by_user_id : null;
+    const attributedTo = [version4?.author_id ?? null, raw.created_by ?? null, proposedBy].find(
+      (candidate) => typeof candidate === "string" && nameByUserId.has(candidate)
+    );
+    const authorName = attributedTo ? nameByUserId.get(attributedTo) : void 0;
+    if (!attributedTo || !authorName) continue;
+    const title = typeof raw.title === "string" ? raw.title : "";
+    const path13 = typeof raw.path === "string" ? raw.path : null;
+    if (kind2 === "skill" && !isSkillTargetedToAgent(metadata, applicability.agentKind)) {
+      applicability.onOmitted?.({
+        id,
+        kind: "skill",
+        title,
+        similarity: 0,
+        reason: "agent_target_mismatch",
+        detail: `author-attributed skill targets [${skillTargetAgents(metadata).join(", ")}], not agent ${applicability.agentKind}`,
+        path: path13
+      });
+      continue;
+    }
+    const antiExample = kind2 === "skill" && !applicability.requiredIds?.has(id) && applicability.task ? matchingSkillAntiExample(applicability.task, metadata) : null;
+    if (antiExample) {
+      applicability.onOmitted?.({
+        id,
+        kind: "skill",
+        title,
+        similarity: 0,
+        reason: "anti_example_match",
+        detail: `author-attributed task high-precision matched skill anti-example: ${antiExample.slice(0, 240)}`,
+        path: path13
+      });
+      continue;
+    }
+    const rawBody = version4?.content ?? "";
+    items.push({
+      id,
+      kind: kind2,
+      title,
+      body: rawBody.length > DOC_PATH_BODY_CAP ? `${rawBody.slice(0, DOC_PATH_BODY_CAP)}
+\u2026 (truncated \u2014 author-attributed doc)` : rawBody,
+      similarity: 0,
+      citation: {
+        path: path13,
+        version_number: version4?.version_number ?? 1,
+        updated_at: typeof raw.updated_at === "string" ? raw.updated_at : "",
+        // The citation reports the version's true author (possibly null on
+        // pre-stamping captures); author_match reports who the doc was
+        // ATTRIBUTED to, which may come from a fallback door.
+        author_id: version4?.author_id ?? null
+      },
+      component_id: null,
+      component_name: null,
+      match_source: "author",
+      author_match: { user_id: attributedTo, name: authorName }
+    });
+    if (items.length >= AUTHOR_DOC_MATCH_MAX) break;
+  }
+  return items;
+}
 async function recordDeployActivity(ctx, deploy) {
   try {
     await ctx.supabase.rpc("record_usage_event", {
@@ -62654,6 +62836,7 @@ function buildDeliveredContextCounts(deliveredItems) {
 function deliveredInclusionReason(item, fallback) {
   if (item.below_gate) return "recall_floor";
   if (item.match_source === "paths") return "path_overlap";
+  if (item.match_source === "author") return "author_attribution";
   return fallback;
 }
 function dedupeResolveBundleDocumentLanes(bundle) {
@@ -62719,6 +62902,7 @@ function buildDeliveredItemSnapshots(bundle) {
         ...item.below_gate ? { below_gate: true } : {},
         ...item.match_source ? { match_source: item.match_source } : {},
         ...item.overlap_paths ? { overlap_paths: item.overlap_paths } : {},
+        ...item.author_match ? { author_match: item.author_match } : {},
         ...item.authority_tier !== void 0 ? { authority_tier: item.authority_tier } : {},
         ...item.pack ? { pack: item.pack } : {},
         ...item.thread ? { thread: item.thread } : {}
@@ -64854,7 +65038,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     deployInProgress,
     semanticWorkInFlight,
     myEditPaths,
-    componentDirs
+    componentDirs,
+    workspaceMembers
   ] = await Promise.all([
     // Brand-guidelines context. Always-on (not semantic) — fetched directly
     // from the project's chosen pointer (or the account default) and merged
@@ -64943,7 +65128,21 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       return patternPrefixDirs(
         compRow?.path_patterns ?? []
       );
-    }) : Promise.resolve([])
+    }) : Promise.resolve([]),
+    // Person-mention input: this account's member roster, so a task naming a
+    // teammate can recall their authored docs (10e-iii-b). Bounded and
+    // indexed; rides the parallel block so it costs no wall-clock.
+    feed("workspace-members fetch", [], async () => {
+      const { data: memberRows } = await ctx.supabase.from("account_members").select("user_id, users!account_members_user_id_fkey ( display_name, email )").eq("account_id", ctx.accountId).limit(500);
+      return (memberRows ?? []).map((row) => {
+        const user = Array.isArray(row.users) ? row.users[0] : row.users;
+        return {
+          user_id: typeof row.user_id === "string" ? row.user_id : "",
+          display_name: typeof user?.display_name === "string" ? user.display_name : null,
+          email: typeof user?.email === "string" ? user.email : null
+        };
+      }).filter((m2) => m2.user_id.length > 0);
+    })
   ]);
   const awarenessFeedsMs = Date.now() - feedsStartedAt;
   let brandGuidelines = brandGuidelinesRaw;
@@ -64969,7 +65168,20 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       ...dirsOfPaths(extractPathTokens(args.task))
     ])
   ].slice(0, 30);
-  const [pathMatchedWork, pathDocs] = await Promise.all([
+  const mentionedMembers = detectMentionedMembers(args.task, workspaceMembers);
+  const outOfBandExcludeIds = /* @__PURE__ */ new Set([
+    ...included.map((item) => item.id),
+    ...requiredCoreItems.map((item) => item.id),
+    ...pinnedIncluded.map((item) => item.id)
+  ]);
+  const outOfBandApplicability = {
+    task: args.task,
+    agentKind: audit.agentKind ?? null,
+    requiredIds: projectBrainPolicy.requiredChainIds,
+    onOmitted: (candidate) => omittedCandidates.push(candidate)
+  };
+  let authorRecallMs = 0;
+  const [pathMatchedWork, pathDocs, authorDocs] = await Promise.all([
     feed(
       "path-matched work assembly",
       [],
@@ -64982,19 +65194,25 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         ctx,
         projectId,
         myDirs,
-        /* @__PURE__ */ new Set([
-          ...included.map((item) => item.id),
-          ...requiredCoreItems.map((item) => item.id),
-          ...pinnedIncluded.map((item) => item.id)
-        ]),
-        {
-          task: args.task,
-          agentKind: audit.agentKind ?? null,
-          requiredIds: projectBrainPolicy.requiredChainIds,
-          onOmitted: (candidate) => omittedCandidates.push(candidate)
-        }
+        outOfBandExcludeIds,
+        outOfBandApplicability
       )
-    )
+    ),
+    feed("author-attributed docs assembly", [], async () => {
+      if (mentionedMembers.length === 0) return [];
+      const startedAt = Date.now();
+      try {
+        return await assembleDocsAuthoredBy(
+          ctx,
+          projectId,
+          mentionedMembers,
+          outOfBandExcludeIds,
+          outOfBandApplicability
+        );
+      } finally {
+        authorRecallMs = Date.now() - startedAt;
+      }
+    })
   ]);
   const workInFlight = mergeWorkInFlight(semanticWorkInFlight, pathMatchedWork);
   await feed(
@@ -65022,12 +65240,40 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     used += cost;
     docPathMatches += 1;
   }
+  let authorDocMatches = 0;
+  const alreadyIncluded = new Set(included.map((item) => item.id));
+  for (const d2 of authorDocs) {
+    if (alreadyIncluded.has(d2.id)) continue;
+    const cost = estimateTokens(d2.body);
+    if (used + cost > maxTokens) {
+      truncated = true;
+      omittedCandidates.push({
+        id: d2.id,
+        kind: d2.kind,
+        title: d2.title,
+        similarity: d2.similarity,
+        reason: "budget_excluded",
+        detail: `author-attributed doc: estimated ${cost} tokens would exceed budget ${maxTokens}`,
+        path: d2.citation.path
+      });
+      continue;
+    }
+    included.push(d2);
+    used += cost;
+    authorDocMatches += 1;
+  }
   const pathRecallMs = Date.now() - pathRecallStartedAt;
   let floorIncludedId = null;
   if (included.length === 0 && requiredCoreItems.length === 0 && pinnedIncluded.length === 0) {
+    const recallFloorFor = (kind2) => Math.max(
+      (customThresholds?.[kind2] ?? KIND_THRESHOLDS[kind2]) - RECALL_FLOOR_MARGIN,
+      RECALL_FLOOR_MIN
+    );
     const floorCandidates = omittedCandidates.filter(
-      (o2) => o2.reason === "below_threshold" && (o2.threshold_score ?? o2.similarity) >= RECALL_FLOOR
-    ).sort((a2, b2) => (b2.threshold_score ?? b2.similarity) - (a2.threshold_score ?? a2.similarity)).slice(0, 3);
+      (o2) => o2.reason === "below_threshold" && (o2.threshold_score ?? o2.similarity) >= recallFloorFor(o2.kind)
+    ).sort(
+      (a2, b2) => (b2.threshold_score ?? b2.similarity) - recallFloorFor(b2.kind) - ((a2.threshold_score ?? a2.similarity) - recallFloorFor(a2.kind))
+    ).slice(0, 3);
     for (const best of floorCandidates) {
       if (floorIncludedId) break;
       try {
@@ -65473,6 +65719,20 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       }))
     } : {},
     ...docPathMatches > 0 ? { doc_path_matches: docPathMatches } : {},
+    // Person-attribution lane telemetry. Recorded whenever the task named a
+    // member — even with 0 doc matches — so "we recognized Davis but found
+    // nothing he authored" is distinguishable from "we never saw the name"
+    // (the capture-gap vs recall-gap distinction audit 8de7a744 needed).
+    ...mentionedMembers.length > 0 ? {
+      author_recall: {
+        members: mentionedMembers.map((m2) => ({
+          user_id: m2.user_id,
+          name: m2.name,
+          matched_on: m2.matched_on
+        })),
+        doc_matches: authorDocMatches
+      }
+    } : {},
     ...floorIncludedId ? { recall_floor_included: floorIncludedId } : {},
     // Latency telemetry — total assembly time plus the two awareness phases,
     // measured server-side up to (not including) this audit write. Client
@@ -65489,7 +65749,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       budget_wait: budgetWaitMs,
       rerank: rerankLatencyMs,
       awareness_feeds: awarenessFeedsMs,
-      path_recall: pathRecallMs
+      path_recall: pathRecallMs,
+      author_recall: authorRecallMs
     },
     similarity_thresholds: {
       skill: customThresholds?.skill ?? KIND_THRESHOLDS.skill,
@@ -67044,6 +67305,22 @@ function renderBundleText(result, task) {
     for (const it2 of items) {
       const cite = renderCitation(it2);
       lines.push(`### ${it2.title}${cite ? ` ${cite}` : ""}`);
+      if (it2.below_gate) {
+        lines.push("");
+        lines.push("_(closest match \u2014 BELOW the confidence gate; verify before trusting)_");
+      }
+      if (it2.match_source === "author" && it2.author_match) {
+        lines.push("");
+        lines.push(
+          `_(surfaced by author attribution \u2014 authored by ${it2.author_match.name}, not by topical match)_`
+        );
+      }
+      if (it2.match_source === "paths") {
+        lines.push("");
+        lines.push(
+          `_(surfaced by path overlap: ${(it2.overlap_paths ?? []).join(", ") || "your working area"})_`
+        );
+      }
       const body = (it2.body ?? "").trim();
       if (body) {
         lines.push("");

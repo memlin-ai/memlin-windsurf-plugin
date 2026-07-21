@@ -8147,7 +8147,7 @@ function renderArchitecture(a) {
 }
 function renderItem(label, item, extra = []) {
   const lines = [];
-  const simLabel = item.match_source === "paths" ? `surfaced by path overlap: ${(item.overlap_paths ?? []).join(", ") || "your working area"}` : item.below_gate ? `closest match ${item.similarity.toFixed(2)} \u2014 BELOW confidence gate; verify before trusting` : `similarity ${item.similarity.toFixed(2)}`;
+  const simLabel = item.match_source === "paths" ? `surfaced by path overlap: ${(item.overlap_paths ?? []).join(", ") || "your working area"}` : item.match_source === "author" ? `surfaced by author attribution: authored by ${item.author_match?.name ?? "a teammate named in the task"}` : item.below_gate ? `closest match ${item.similarity.toFixed(2)} \u2014 BELOW confidence gate; verify before trusting` : `similarity ${item.similarity.toFixed(2)}`;
   const metaParts = [simLabel, ...extra];
   if (item.collapsed_duplicates && item.collapsed_duplicates > 0) {
     metaParts.push(`+${item.collapsed_duplicates} corroborating`);
@@ -8309,10 +8309,11 @@ function renderItemXml(tagName, item, attributes = {}) {
   const verifiedModel = item.verification ? verificationModelLabel(item.verification.model_attribution) : null;
   const verifiedModelAttr = verifiedModel ? ` verified_model="${verifiedModel}"` : "";
   const pathMatched = item.match_source === "paths" ? ` path_match="${(item.overlap_paths ?? []).join(",")}"` : "";
+  const authorMatched = item.match_source === "author" && item.author_match ? ` author_match="${item.author_match.name}"` : "";
   const belowGate = item.below_gate ? ` below_gate="true"` : "";
   const lines = [];
   lines.push(
-    `<${tagName}${attrs} title="${item.title}" similarity="${item.similarity.toFixed(2)}"${corroborating}${verified}${verifiedModelAttr}${pathMatched}${belowGate}>`
+    `<${tagName}${attrs} title="${item.title}" similarity="${item.similarity.toFixed(2)}"${corroborating}${verified}${verifiedModelAttr}${pathMatched}${authorMatched}${belowGate}>`
   );
   lines.push(
     `  <citation path="${item.citation.path ?? "(no path)"}" version="v${item.citation.version_number}" updated="${item.citation.updated_at}" />`
