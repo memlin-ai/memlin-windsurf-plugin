@@ -4479,6 +4479,15 @@ var MemlinApiClient = class {
     return this.request("POST", "/memory/ingest-native", input, { accountId: opts.accountId });
   }
   /**
+   * POST /memory/remember — save one user-typed durable memory
+   * (/memlin-remember). Routes through the server-side scribe dedup, tagged
+   * as a provenance-verified directive so it activates immediately and can
+   * supersede the stale fact it corrects.
+   */
+  async rememberMemory(input, opts = {}) {
+    return this.request("POST", "/memory/remember", input, { accountId: opts.accountId });
+  }
+  /**
    * POST /plans — upload a Claude Code plan as a first-class plan document.
    *
    * Server resolves project from cwd/git_remote (when not pinned), writes
@@ -9657,6 +9666,12 @@ var MEMLIN_COMMANDS = [
     cmd: "ingest-native-memory",
     blurb: "pull this host's native auto-memory into Memlin",
     details: "Reads this host's native auto-memory index (Claude Code's ~/.claude/projects/<repo>/memory/MEMORY.md) and runs each entry through the Memlin scribe dedup, so native learnings corroborate what Memlin already knows instead of duplicating. Run once before `manage-memory` so letting Memlin take over is lossless \u2014 everything moves into the governed, fully exportable corpus."
+  },
+  {
+    section: "",
+    cmd: "remember",
+    blurb: "save a one-line durable memory with zero ceremony",
+    details: "Saves the text you type as a durable, team-scoped memory \u2014 one line, no review stop. Routes through the server-side scribe dedup so a repeated fact corroborates the existing doc instead of duplicating it, and lands as a provenance-verified user directive: active immediately, with supersede power over the stale fact it corrects. `--project` binds it to the current project, `--skill` saves an agent procedure instead, `--title`/`--type` override the derived title and memory type. Example: `memlin remember our database is RLS; include RLS instructions when updating a stored procedure or table`."
   }
 ];
 

@@ -180,10 +180,6 @@ var init_companion_client = __esm({
   }
 });
 
-// packages/plugin-core/src/cli/prompt-ci.ts
-import { promises as fs7 } from "node:fs";
-import path9 from "node:path";
-
 // packages/plugin-core/src/client.ts
 import { promises as fs4 } from "node:fs";
 import path6 from "node:path";
@@ -446,6 +442,40 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+var PROVIDER_HOSTS = [
+  "github.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "dev.azure.com",
+  "ssh.dev.azure.com",
+  "codeberg.org",
+  "sr.ht",
+  "git.sr.ht"
+];
+function normalizeGitRemote(raw) {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  s = s.replace(/^git@([^:]+):/, "https://$1/");
+  s = s.replace(/^ssh:\/\//, "");
+  s = s.replace(/^https?:\/\//, "");
+  s = s.replace(/^git@/, "");
+  s = s.replace(/\.git$/, "");
+  s = s.replace(/\/$/, "");
+  const slash = s.indexOf("/");
+  if (slash > 0) {
+    const host = s.slice(0, slash);
+    const rest = s.slice(slash);
+    for (const provider of PROVIDER_HOSTS) {
+      if (host === provider) break;
+      if (host.startsWith(provider + "-")) {
+        s = provider + rest;
+        break;
+      }
+    }
+  }
+  return s || null;
+}
 async function closeHttpSockets() {
   try {
     const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
@@ -1436,340 +1466,188 @@ function runCliMain(main2, onError) {
   );
 }
 
-// packages/plugin-core/src/local-scan.ts
-import { promises as fs6 } from "node:fs";
-import { existsSync } from "node:fs";
-import path8 from "node:path";
-
-// packages/plugin-core/src/state.ts
-import { promises as fs5 } from "node:fs";
+// packages/plugin-core/src/project-resolver.ts
+import { execSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import path7 from "node:path";
-import os6 from "node:os";
-import crypto from "node:crypto";
-var STATE_FILE = path7.join(os6.homedir(), ".config", "memlin", "state.json");
-var EMPTY = { documents: {} };
-async function readState() {
+var WORKSPACE_ENV_VARS = [
+  // Claude Code exposes the original project dir to hooks/plugin commands.
+  "CLAUDE_PROJECT_DIR",
+  // Cursor/plugin shims and local tests can set this explicitly.
+  "CURSOR_WORKSPACE_ROOT",
+  "CURSOR_PROJECT_ROOT",
+  "MEMLIN_WORKSPACE_ROOT",
+  // npm/pnpm set INIT_CWD to the directory where the user invoked a script.
+  "INIT_CWD"
+];
+function runtimeCwd(fallback = process.cwd()) {
+  for (const name of WORKSPACE_ENV_VARS) {
+    const raw = process.env[name]?.trim();
+    if (raw && path7.isAbsolute(raw)) return path7.resolve(raw);
+  }
+  return path7.resolve(fallback);
+}
+async function resolveProject(api, cwd, configProjectId) {
+  const absCwd = path7.resolve(cwd);
+  const remotes = detectGitRemotes(cwd);
+  const hasGitRemote = remotes.length > 0;
   try {
-    const raw = await fs5.readFile(STATE_FILE, "utf8");
-    return JSON.parse(raw);
+    const result = await api.resolveProject({
+      // Primary remote (back-compat with the single-remote server path).
+      git_remote: remotes[0] ?? null,
+      // All detected remotes — for the workspace-root-of-repos case, this is
+      // every sibling repo so the server resolves to the owning project.
+      git_remotes: remotes,
+      cwd: absCwd
+    });
+    if (result.project_id) {
+      return {
+        project_id: result.project_id,
+        project_name: result.name,
+        account_id: result.account_id,
+        reason: result.reason === "none" ? "config" : result.reason,
+        hasGitRemote
+      };
+    }
   } catch {
-    return { ...EMPTY };
+  }
+  if (configProjectId) {
+    return {
+      project_id: configProjectId,
+      project_name: null,
+      account_id: null,
+      reason: "config",
+      hasGitRemote
+    };
+  }
+  return { project_id: null, project_name: null, account_id: null, reason: "none", hasGitRemote };
+}
+function readGitRemote(cwd) {
+  try {
+    const url = execSync("git remote get-url origin", {
+      windowsHide: true,
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8"
+    }).trim();
+    return normalizeGitRemote(url);
+  } catch {
+    return null;
   }
 }
-var LOCK_DIR = `${STATE_FILE}.lock`;
-function hash(content) {
-  return crypto.createHash("sha256").update(content).digest("hex");
-}
-
-// packages/plugin-core/src/local-scan.ts
-async function scanLocal(opts = {}) {
+var MAX_WORKSPACE_SCAN = 64;
+function detectGitRemotes(cwd) {
+  const enclosing = readGitRemote(cwd);
+  if (enclosing) return [enclosing];
   const out = [];
-  const root = opts.rootOverride ?? resolveHost().homeDir();
-  const memDir = path8.join(root, "memory");
-  if (existsSync(memDir)) {
-    for (const file of await fs6.readdir(memDir)) {
-      if (!file.endsWith(".md") || file === "MEMORY.md") continue;
-      const abs = path8.join(memDir, file);
-      const content = await fs6.readFile(abs, "utf8");
-      out.push({
-        path: `memory/${file}`,
-        abs_path: abs,
-        kind: "memory",
-        content,
-        hash: hash(content)
-      });
-    }
-  }
-  const skillsDir = path8.join(root, "skills");
-  if (existsSync(skillsDir)) {
-    const entries = await fs6.readdir(skillsDir, { withFileTypes: true });
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      const skillMd = path8.join(skillsDir, e.name, "SKILL.md");
-      if (!existsSync(skillMd)) continue;
-      const content = await fs6.readFile(skillMd, "utf8");
-      out.push({
-        path: `skills/${e.name}/SKILL.md`,
-        abs_path: skillMd,
-        kind: "skill",
-        content,
-        hash: hash(content)
-      });
-    }
-  }
-  const goalsDir = path8.join(root, "goals");
-  if (existsSync(goalsDir)) {
-    for (const file of await fs6.readdir(goalsDir)) {
-      if (!file.endsWith(".md")) continue;
-      const abs = path8.join(goalsDir, file);
-      const content = await fs6.readFile(abs, "utf8");
-      out.push({
-        path: `goals/${file}`,
-        abs_path: abs,
-        kind: "goal",
-        content,
-        hash: hash(content)
-      });
-    }
-  }
-  const schemasDir = path8.join(root, "schemas");
-  if (existsSync(schemasDir)) {
-    for (const file of await fs6.readdir(schemasDir)) {
-      if (!file.endsWith(".json")) continue;
-      const abs = path8.join(schemasDir, file);
-      const content = await fs6.readFile(abs, "utf8");
-      out.push({
-        path: `schemas/${file}`,
-        abs_path: abs,
-        kind: "schema",
-        content,
-        hash: hash(content)
-      });
-    }
-  }
-  if (opts.includePlans) {
-    const plansDir = resolveHost().plansDir();
-    if (existsSync(plansDir)) {
-      for (const file of await fs6.readdir(plansDir)) {
-        if (!file.endsWith(".md")) continue;
-        const abs = path8.join(plansDir, file);
-        const content = await fs6.readFile(abs, "utf8");
-        out.push({
-          path: `plans/${file}`,
-          abs_path: abs,
-          kind: "plan",
-          content,
-          hash: hash(content)
-        });
+  try {
+    let scanned = 0;
+    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
+      if (scanned >= MAX_WORKSPACE_SCAN) break;
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
       }
+      scanned++;
+      const child = path7.join(cwd, entry.name);
+      if (!existsSync(path7.join(child, ".git"))) continue;
+      const remote = readGitRemote(child);
+      if (remote && !out.includes(remote)) out.push(remote);
     }
-  }
-  if (opts.trackedDocs) {
-    const seen = new Set(out.map((d) => d.path));
-    for (const [relPath, meta] of Object.entries(opts.trackedDocs)) {
-      if (seen.has(relPath)) continue;
-      if (relPath.startsWith("plans/")) continue;
-      const abs = path8.join(root, relPath);
-      if (!existsSync(abs)) continue;
-      const content = await fs6.readFile(abs, "utf8");
-      out.push({
-        path: relPath,
-        abs_path: abs,
-        kind: meta.kind,
-        content,
-        hash: hash(content)
-      });
-    }
+  } catch {
   }
   return out;
 }
 
-// packages/plugin-core/src/cli/args.ts
-function parseSlashArgs(raw) {
-  const tokens = [];
-  let cur = "";
-  let inSingle = false;
-  let inDouble = false;
-  let started = false;
-  let i = 0;
-  const flush = () => {
-    if (started) {
-      tokens.push(cur);
-      cur = "";
-      started = false;
-    }
-  };
-  while (i < raw.length) {
-    const ch = raw[i];
-    if (inSingle) {
-      if (ch === "'") {
-        inSingle = false;
-      } else {
-        cur += ch;
-      }
-      i++;
-      continue;
-    }
-    if (inDouble) {
-      if (ch === "\\" && i + 1 < raw.length) {
-        const next = raw[i + 1];
-        if (next === '"' || next === "\\") {
-          cur += next;
-          i += 2;
-          continue;
-        }
-        cur += ch;
-        i++;
-        continue;
-      }
-      if (ch === '"') {
-        inDouble = false;
-        i++;
-        continue;
-      }
-      cur += ch;
-      i++;
-      continue;
-    }
-    if (ch === "'") {
-      inSingle = true;
-      started = true;
-      i++;
-      continue;
-    }
-    if (ch === '"') {
-      inDouble = true;
-      started = true;
-      i++;
-      continue;
-    }
-    if (ch === " " || ch === "	" || ch === "\n") {
-      flush();
-      i++;
-      continue;
-    }
-    cur += ch;
-    started = true;
-    i++;
+// packages/plugin-core/src/cli/remember.ts
+function takeFlag(args, flag) {
+  const i = args.indexOf(flag);
+  if (i < 0) return false;
+  args.splice(i, 1);
+  return true;
+}
+function takeValueFlag(args, flag) {
+  const i = args.indexOf(flag);
+  if (i < 0) return null;
+  const value = args[i + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`memlin remember: ${flag} needs a value`);
+    exitCli(2);
   }
-  flush();
-  return tokens;
-}
-function argvAsSlashArgs() {
-  const raw = process.argv.slice(2).join(" ").trim();
-  return parseSlashArgs(raw);
-}
-
-// packages/plugin-core/src/cli/prompt-ci.ts
-function printHelp() {
-  console.log(
-    [
-      "memlin prompt-ci \u2014 run Prompt CI regression tests for local skill changes",
-      "",
-      "Usage:",
-      "  memlin prompt-ci [file-path]",
-      "",
-      "Examples:",
-      "  memlin prompt-ci",
-      "  memlin prompt-ci skills/git-committer.md"
-    ].join("\n")
-  );
+  args.splice(i, 2);
+  return value ?? null;
 }
 async function main() {
-  const argv = argvAsSlashArgs();
-  if (argv.includes("--help") || argv.includes("-h")) {
-    printHelp();
-    exitCli(0);
-  }
   const ctx = await getApi();
   if (!ctx) {
     console.error("memlin: not configured. Run `memlin login` first.");
     exitCli(1);
   }
-  const { api } = ctx;
-  const targetPath = argv[0] ? path9.relative(process.cwd(), path9.resolve(argv[0])) : null;
-  const state = await readState();
-  const localDocs = await scanLocal();
-  const skillsToTest = [];
-  if (targetPath) {
-    const doc = localDocs.find(
-      (d) => d.path === targetPath || path9.resolve(d.abs_path) === path9.resolve(targetPath)
-    );
-    if (!doc) {
-      console.error(`memlin prompt-ci: could not find local file "${targetPath}"`);
-      exitCli(2);
-    }
-    if (doc.kind !== "skill") {
-      console.error(`memlin prompt-ci: "${targetPath}" is not a skill document.`);
-      exitCli(2);
-    }
-    const prev = state.documents[doc.path];
-    if (!prev?.document_id) {
+  const { api, config } = ctx;
+  const args = process.argv.slice(2);
+  const useProject = takeFlag(args, "--project");
+  const asSkill = takeFlag(args, "--skill");
+  const title = takeValueFlag(args, "--title");
+  const memoryType = takeValueFlag(args, "--type");
+  const text = args.join(" ").trim();
+  if (!text) {
+    console.error('usage: memlin remember [--project] [--skill] [--title "<t>"] [--type <t>] <text>');
+    exitCli(2);
+  }
+  const cwd = runtimeCwd();
+  let projectId = null;
+  if (useProject) {
+    const resolved = await resolveProject(api, cwd, config.project_id);
+    projectId = resolved.project_id;
+    if (!projectId) {
       console.error(
-        `memlin prompt-ci: "${targetPath}" has not been synchronized yet. Run \`memlin sync\` first.`
+        "memlin remember: --project given but no project resolves for this workspace \u2014 saving at team scope instead."
       );
-      exitCli(2);
-    }
-    skillsToTest.push({
-      relPath: doc.path,
-      absPath: doc.abs_path,
-      docId: prev.document_id
-    });
-  } else {
-    for (const doc of localDocs) {
-      if (doc.kind === "skill") {
-        const prev = state.documents[doc.path];
-        if (prev?.document_id) {
-          skillsToTest.push({
-            relPath: doc.path,
-            absPath: doc.abs_path,
-            docId: prev.document_id
-          });
-        }
-      }
     }
   }
-  if (skillsToTest.length === 0) {
-    console.log("No synchronized local skills found to run CI against.");
-    exitCli(0);
-  }
-  console.log(`Running Prompt CI regression suite for ${skillsToTest.length} skill(s)...`);
-  let hasRegressions = false;
-  for (const skill of skillsToTest) {
-    console.log(`
-------------------------------------------------------------`);
-    console.log(`Testing skill: ${skill.relPath} (ID: ${skill.docId.slice(0, 8)}...)`);
-    console.log(`------------------------------------------------------------`);
-    const content = await fs7.readFile(skill.absPath, "utf8");
-    try {
-      const report = await api.runPromptCi(skill.docId, content);
-      const passRate = report.totalTraces > 0 ? (report.passedTraces / report.totalTraces * 100).toFixed(0) : "100";
-      console.log(`Report: ${report.skillName}`);
-      console.log(`Traces Replayed: ${report.totalTraces}`);
-      console.log(`Traces Passed  : ${report.passedTraces} (${passRate}%)`);
-      if (report.results.length === 0) {
-        console.log(`  \u2139 No historical traces found using this skill. (Happy Path / Dry-run)`);
-      }
-      for (const res of report.results) {
-        const statusIcon = res.passed ? "\u2714" : "\u2717";
-        const statusColor = res.passed ? "\x1B[32m" : "\x1B[31m";
-        const resetColor = "\x1B[0m";
-        console.log(
-          `  ${statusColor}${statusIcon}${resetColor} Trace ${res.auditId.slice(0, 8)}\u2026 [task: "${res.task}"]`
-        );
-        console.log(
-          `     Baseline Tokens: ${res.baselineTokens} | Canary Tokens: ${res.canaryTokens}`
-        );
-        console.log(
-          `     Baseline Resolved: ${res.baselineIncluded ? "Yes" : "No"} | Canary Resolved: ${res.canaryIncluded ? "Yes" : "No"}`
-        );
-        if (res.errors.length > 0) {
-          hasRegressions = true;
-          for (const err of res.errors) {
-            console.log(`     \x1B[33m\u26A0 ${err}\x1B[0m`);
-          }
-        }
-      }
-    } catch (err) {
+  const result = await api.rememberMemory(
+    {
+      text,
+      ...title ? { title } : {},
+      kind: asSkill ? "skill" : "memory",
+      ...memoryType ? { memory_type: memoryType } : {},
+      ...projectId ? { project_id: projectId, use_project: true } : {},
+      cwd,
+      git_remote: detectGitRemotes(cwd)[0] ?? null
+    },
+    { accountId: config.account_id }
+  );
+  if (!result.ok) {
+    if (result.reason === "ai_access_blocked") {
       console.error(
-        `  \u2717 Prompt CI run failed: ${err instanceof Error ? err.message : String(err)}`
+        "memlin remember: AI access is blocked for this workspace \u2014 saving needs embedding funding."
       );
-      hasRegressions = true;
+    } else if (result.outcome === "suppressed_tombstone") {
+      console.error(
+        "Not saved: this matches a memory the team previously rejected or superseded. If it should come back, review it in the inbox or rephrase with the new context."
+      );
+    } else {
+      console.error(`memlin remember failed: ${result.reason ?? result.outcome ?? "unknown"}`);
     }
+    exitCli(1);
   }
-  console.log(`
-============================================================`);
-  if (hasRegressions) {
+  const scopeLabel = result.scope === "project" ? "project" : "team";
+  if (result.outcome === "corroborated") {
     console.log(
-      `\x1B[31mCI Result: REGRESSIONS DETECTED. Please review the failures above.\x1B[0m`
+      `\u2713 Merged into an existing ${scopeLabel} memory (dedup matched): ${result.document_id}` + (result.version_number != null ? ` v${result.version_number}` : "")
     );
-    return 1;
   } else {
-    console.log(`\x1B[32mCI Result: SUCCESS. All prompt changes passed regression checks.\x1B[0m`);
-    return 0;
+    console.log(
+      `\u2713 Remembered (${scopeLabel} scope): "${result.title}"
+  ${result.document_id}${result.version_number != null ? ` v${result.version_number}` : ""}`
+    );
+  }
+  if ((result.superseded_ids?.length ?? 0) > 0) {
+    console.log(
+      `  superseded ${result.superseded_ids.length} stale doc(s): ${result.superseded_ids.join(", ")}`
+    );
   }
 }
 runCliMain(main, (err) => {
-  console.error("memlin prompt-ci failed:", err instanceof Error ? err.message : err);
+  console.error("memlin remember failed:", err instanceof Error ? err.message : err);
   return 1;
 });

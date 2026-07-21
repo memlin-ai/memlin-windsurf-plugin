@@ -4558,6 +4558,15 @@ var MemlinApiClient = class {
     return this.request("POST", "/memory/ingest-native", input, { accountId: opts.accountId });
   }
   /**
+   * POST /memory/remember — save one user-typed durable memory
+   * (/memlin-remember). Routes through the server-side scribe dedup, tagged
+   * as a provenance-verified directive so it activates immediately and can
+   * supersede the stale fact it corrects.
+   */
+  async rememberMemory(input, opts = {}) {
+    return this.request("POST", "/memory/remember", input, { accountId: opts.accountId });
+  }
+  /**
    * POST /plans — upload a Claude Code plan as a first-class plan document.
    *
    * Server resolves project from cwd/git_remote (when not pinned), writes
