@@ -65132,9 +65132,30 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     // Person-mention input: this account's member roster, so a task naming a
     // teammate can recall their authored docs (10e-iii-b). Bounded and
     // indexed; rides the parallel block so it costs no wall-clock.
+    //
+    // Via the account_member_identities RPC (security definer, membership
+    // self-guarded): users RLS is self-read-only, so a direct
+    // account_members→users embed returns TEAMMATES with null identities
+    // under the caller's client — the roster looked fine under service-role
+    // validation and arrived nameless in production (audit df72471c). Falls
+    // back to the direct embed for pre-migration databases, where
+    // service-role callers still see full identities.
     feed("workspace-members fetch", [], async () => {
-      const { data: memberRows } = await ctx.supabase.from("account_members").select("user_id, users!account_members_user_id_fkey ( display_name, email )").eq("account_id", ctx.accountId).limit(500);
-      return (memberRows ?? []).map((row) => {
+      const { data: rpcRows, error: rpcErr } = await ctx.supabase.rpc(
+        "account_member_identities",
+        { p_account_id: ctx.accountId }
+      );
+      let memberRows;
+      if (!rpcErr && rpcRows) {
+        memberRows = rpcRows.map((r2) => ({
+          user_id: r2.user_id,
+          users: { display_name: r2.display_name, email: r2.email }
+        }));
+      } else {
+        const { data: embedRows } = await ctx.supabase.from("account_members").select("user_id, users!account_members_user_id_fkey ( display_name, email )").eq("account_id", ctx.accountId).limit(500);
+        memberRows = embedRows ?? [];
+      }
+      return memberRows.map((row) => {
         const user = Array.isArray(row.users) ? row.users[0] : row.users;
         return {
           user_id: typeof row.user_id === "string" ? row.user_id : "",
