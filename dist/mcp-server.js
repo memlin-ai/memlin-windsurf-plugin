@@ -58440,6 +58440,46 @@ for (const p2 of REDACTION_PATTERNS) {
     throw new Error(`redact: pattern '${p2.name}' must use the 'g' flag`);
   }
 }
+function redactSensitive(input, extraPatterns = []) {
+  if (!input) {
+    return { redacted: input, hits: [], changed: false };
+  }
+  let out = input;
+  const hits = [];
+  const all = [...REDACTION_PATTERNS, ...extraPatterns];
+  for (const p2 of all) {
+    p2.regex.lastIndex = 0;
+    let count = 0;
+    out = out.replaceAll(p2.regex, () => {
+      count++;
+      return `[REDACTED-${p2.name}]`;
+    });
+    if (count > 0) hits.push({ name: p2.name, count });
+  }
+  return { redacted: out, hits, changed: hits.length > 0 };
+}
+
+// packages/shared/dist/audit-privacy.js
+var AUDIT_TASK_MAX_CHARS = 200;
+function sanitizeAuditTask(task, extraPatterns = []) {
+  if (!task) return { task: "", truncated: false, redaction_hits: [] };
+  const { redacted, hits } = redactSensitive(task, extraPatterns);
+  if (redacted.length <= AUDIT_TASK_MAX_CHARS) {
+    return { task: redacted, truncated: false, redaction_hits: hits };
+  }
+  return {
+    task: `${redacted.slice(0, AUDIT_TASK_MAX_CHARS)}\u2026`,
+    truncated: true,
+    redaction_hits: hits
+  };
+}
+var AUDIT_CWD_MAX_CHARS = 256;
+function sanitizeAuditCwd(cwd) {
+  if (!cwd) return null;
+  const norm = cwd.replace(/\\/g, "/").replace(/\/+$/, "");
+  const stripped = norm.replace(/^[A-Za-z]:\/Users\/[^/]+/, "~").replace(/^\/(?:Users|home)\/[^/]+/, "~");
+  return stripped.slice(0, AUDIT_CWD_MAX_CHARS);
+}
 
 // packages/shared/dist/guardrails.js
 function compileGuardrailPattern(raw) {
@@ -62614,7 +62654,7 @@ async function recordDeployActivity(ctx, deploy) {
       p_metadata: {
         session_id: deploy.sessionId,
         project_id: deploy.projectId,
-        task: deploy.task,
+        task: sanitizeAuditTask(deploy.task).task,
         active_component_id: deploy.activeComponentId,
         active_component_name: deploy.activeComponentName,
         agent_kind: deploy.agentKind,
@@ -65141,10 +65181,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     // back to the direct embed for pre-migration databases, where
     // service-role callers still see full identities.
     feed("workspace-members fetch", [], async () => {
-      const { data: rpcRows, error: rpcErr } = await ctx.supabase.rpc(
-        "account_member_identities",
-        { p_account_id: ctx.accountId }
-      );
+      const { data: rpcRows, error: rpcErr } = await ctx.supabase.rpc("account_member_identities", {
+        p_account_id: ctx.accountId
+      });
       let memberRows;
       if (!rpcErr && rpcRows) {
         memberRows = rpcRows.map((r2) => ({
@@ -65687,8 +65726,10 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   if (used > maxTokens) truncationReasons.add("delivered_context_over_budget");
   if (truncated && truncationReasons.size === 0) truncationReasons.add("other_budget_truncation");
   const empty_context_reason = contextCounts.total > 0 ? null : omittedCandidates.length > 0 ? "all_candidates_filtered" : "no_candidates_found";
+  const auditTask = sanitizeAuditTask(args.task);
+  const auditCwd = sanitizeAuditCwd(args.cwd ?? null);
   const auditMetadata = {
-    task: args.task,
+    task: auditTask.task,
     ...resolveRoutingAuditMetadata(args, projectId),
     // Open-threads lane — always on; record which threads were pulled by entity.
     include_open_threads: true,
@@ -65710,6 +65751,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     // every resolve.invocation row carries its label; backfill script
     // covers historical rows.
     task_category: classifyTask(args.task),
+    ...auditTask.truncated ? { task_truncated: true } : {},
+    ...auditTask.redaction_hits.length > 0 ? { task_redaction_hits: auditTask.redaction_hits } : {},
     project_id: projectId,
     // Axis C: the caller's branch, so a LATER resolve can match this session
     // to an open PR (work_items.head_ref) after the live window closes.
@@ -65832,7 +65875,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     // Snapshot of the brand-guidelines version-at-resolve so replay can
     // detect drift on this slice too (it's the always-on context).
     brand_guidelines_updated_at: brandGuidelines?.updated_at ?? null,
-    cwd: args.cwd ?? null,
+    cwd: auditCwd,
     git_remote: args.git_remote ?? null,
     // task_embedding is deliberately NOT mirrored into metadata: it's a 1536-
     // float vector — ~86% of each audit row's JSON (~31KB) — and the
@@ -65964,7 +66007,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         p_audit_id: auditId,
         p_account_id: ctx.accountId,
         p_project_id: projectId ?? null,
-        p_task: args.task,
+        // Same membership RLS as usage_events (0074) — must carry the same
+        // sanitized preview, not the raw prompt.
+        p_task: auditTask.task,
         p_bundle: bundle,
         p_bundle_hash: bundleHash,
         p_surfaced_decisions: surfacedDecisions
@@ -67674,7 +67719,7 @@ async function correctMemory(ctx, rawArgs) {
         p_metadata: {
           target_document_ids: targetIds,
           source_audit_id: str3(args.source_audit_id),
-          user_quote: str3(args.user_quote),
+          user_quote: sanitizeAuditTask(str3(args.user_quote) ?? "").task || null,
           session_id: str3(args.session_id)
         }
       });
