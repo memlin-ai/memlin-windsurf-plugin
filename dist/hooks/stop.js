@@ -10354,6 +10354,37 @@ async function maybeProposeMemory(ctx, payload) {
     log(`memory propose failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
+var TURN_TIMING_OUTLIER_MS = 30 * 60 * 1e3;
+async function maybeRecordTurnTiming(ctx, payload) {
+  const state = await readState();
+  const sessionId = payload.session_id ?? sessionIdFromTranscriptPath(payload.transcript_path) ?? null;
+  const lastResolve = getLastResolveForSession(state, sessionId);
+  if (!isResolveEligibleForOutcome(lastResolve)) return;
+  if (typeof lastResolve.turn_started_at !== "number") return;
+  const cwd = payload.cwd ?? process.cwd();
+  if (cwd !== lastResolve.cwd) return;
+  const answerDeliveredAt = Date.now();
+  const wallClockMs = answerDeliveredAt - lastResolve.turn_started_at;
+  if (wallClockMs < 0) return;
+  try {
+    await ctx.api.writeUsageEvent({
+      event_type: "turn.timing",
+      metadata: {
+        audit_id: lastResolve.audit_id,
+        // join key → invocation + outcome
+        session_id: sessionId,
+        host: lastResolve.host ?? null,
+        turn_started_at: lastResolve.turn_started_at,
+        answer_delivered_at: answerDeliveredAt,
+        wall_clock_ms: wallClockMs,
+        outlier: wallClockMs > TURN_TIMING_OUTLIER_MS
+      }
+    });
+    log(`recorded turn.timing: ${wallClockMs}ms for audit ${lastResolve.audit_id}`);
+  } catch (err) {
+    log(`failed to record turn.timing: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 async function maybeRecordOutcome(ctx, payload) {
   const state = await readState();
   const transcriptSessionId = sessionIdFromTranscriptPath(payload.transcript_path);
@@ -10726,6 +10757,7 @@ async function runStopHandler(payload) {
     maybeProposeMemory(ctx, payload),
     maybeScribeSession(ctx, payload),
     maybeRecordOutcome(ctx, payload),
+    maybeRecordTurnTiming(ctx, payload),
     maybeUpsertWorkingMemory(ctx, payload)
   ]);
 }

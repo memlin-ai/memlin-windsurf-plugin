@@ -10642,7 +10642,11 @@ async function main() {
       // hook's deadline was NOT injected into any conversation yet
       // (delivered=false) — continuity has nothing to point at.
       session_id: sessionId,
-      delivered: !missedDeadline
+      delivered: !missedDeadline,
+      // Human time-to-answer anchor: the Stop handler subtracts this from
+      // answer-delivery time to emit turn.timing, keyed on the same audit_id
+      // so server assembly latency and human wall-clock join per turn.
+      turn_started_at: startedAt
     });
   }
 }
