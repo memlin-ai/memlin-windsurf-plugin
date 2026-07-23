@@ -9884,9 +9884,17 @@ function lintPrompt(content) {
 
 // packages/shared/dist/model-prices.js
 var MODEL_PRICES = {
-  // Anthropic
+  // Anthropic. Opus was absent until 2026-07-23, which meant every Opus turn —
+  // a common Claude Code default — priced as $0 and was reported as an unpriced
+  // turn. Absence of a price is not absence of cost.
   "claude-haiku-4-5": { inputUsdPerMTok: 1, outputUsdPerMTok: 5 },
   "claude-sonnet-4-6": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
+  "claude-sonnet-4-5": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
+  "claude-sonnet-5": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
+  "claude-opus-4-5": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
+  "claude-opus-4-6": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
+  "claude-opus-4-7": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
+  "claude-opus-4-8": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
   // OpenAI
   "text-embedding-3-small": { inputUsdPerMTok: 0.02, outputUsdPerMTok: 0 },
   "gpt-4.1-mini": { inputUsdPerMTok: 0.4, outputUsdPerMTok: 1.6 }

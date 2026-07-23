@@ -59176,10 +59176,21 @@ function accumulateOutcomeCounts(meta, itemIds, resolveCategory, posCounts, negC
 var import_gray_matter2 = __toESM(require_gray_matter(), 1);
 
 // packages/shared/dist/model-prices.js
+var CACHE_READ_MULTIPLIER = 0.1;
+var CACHE_WRITE_5M_MULTIPLIER = 1.25;
+var CACHE_WRITE_1H_MULTIPLIER = 2;
 var MODEL_PRICES = {
-  // Anthropic
+  // Anthropic. Opus was absent until 2026-07-23, which meant every Opus turn —
+  // a common Claude Code default — priced as $0 and was reported as an unpriced
+  // turn. Absence of a price is not absence of cost.
   "claude-haiku-4-5": { inputUsdPerMTok: 1, outputUsdPerMTok: 5 },
   "claude-sonnet-4-6": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
+  "claude-sonnet-4-5": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
+  "claude-sonnet-5": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
+  "claude-opus-4-5": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
+  "claude-opus-4-6": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
+  "claude-opus-4-7": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
+  "claude-opus-4-8": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
   // OpenAI
   "text-embedding-3-small": { inputUsdPerMTok: 0.02, outputUsdPerMTok: 0 },
   "gpt-4.1-mini": { inputUsdPerMTok: 0.4, outputUsdPerMTok: 1.6 }
@@ -59187,12 +59198,17 @@ var MODEL_PRICES = {
 function normalizeModelId(model) {
   return model.trim().replace(/-20\d{6}$/, "");
 }
-function costUsdFor(model, inputTokens, outputTokens) {
+function costUsdFor(model, inputTokens, outputTokens, cache) {
   const price = MODEL_PRICES[normalizeModelId(model)];
   if (!price) return null;
-  const inTok = Number(inputTokens) || 0;
-  const outTok = Number(outputTokens) || 0;
-  const usd = inTok / 1e6 * price.inputUsdPerMTok + outTok / 1e6 * price.outputUsdPerMTok;
+  const n2 = (v2) => Number(v2) || 0;
+  const inTok = n2(inputTokens);
+  const outTok = n2(outputTokens);
+  const cacheRead = n2(cache?.cacheReadInputTokens);
+  const write5m = n2(cache?.cacheCreation5mInputTokens);
+  const write1h = n2(cache?.cacheCreation1hInputTokens);
+  const usd = inTok / 1e6 * price.inputUsdPerMTok + outTok / 1e6 * price.outputUsdPerMTok + // Cache tokens are priced off the BASE INPUT rate, not the output rate.
+  cacheRead / 1e6 * price.inputUsdPerMTok * CACHE_READ_MULTIPLIER + write5m / 1e6 * price.inputUsdPerMTok * CACHE_WRITE_5M_MULTIPLIER + write1h / 1e6 * price.inputUsdPerMTok * CACHE_WRITE_1H_MULTIPLIER;
   return Math.round(usd * 1e6) / 1e6;
 }
 
