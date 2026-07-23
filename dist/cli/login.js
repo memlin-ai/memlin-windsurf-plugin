@@ -9511,6 +9511,14 @@ var MODEL_PRICES = {
 // packages/shared/dist/usage-stats.js
 var SONNET_INPUT_USD_PER_MTOK = MODEL_PRICES["claude-sonnet-4-6"].inputUsdPerMTok;
 var SONNET_OUTPUT_USD_PER_MTOK = MODEL_PRICES["claude-sonnet-4-6"].outputUsdPerMTok;
+var OUTPUT_MULTIPLIER = 0.3;
+function estCostUsd(inputTokens) {
+  const inputCostUsd = inputTokens / 1e6 * SONNET_INPUT_USD_PER_MTOK;
+  const outputCostUsd = inputTokens * OUTPUT_MULTIPLIER / 1e6 * SONNET_OUTPUT_USD_PER_MTOK;
+  return inputCostUsd + outputCostUsd;
+}
+var SONNET_BLENDED_USD_PER_MTOK = SONNET_INPUT_USD_PER_MTOK + OUTPUT_MULTIPLIER * SONNET_OUTPUT_USD_PER_MTOK;
+var SAVINGS_USD_PER_TOKEN = estCostUsd(1);
 
 // packages/shared/dist/memlin-commands.js
 var MEMLIN_COMMANDS = [
