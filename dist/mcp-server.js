@@ -11024,8 +11024,8 @@ var require_RealtimeChannel = __commonJS({
       }
       /** @internal */
       _notThisChannelEvent(event, ref) {
-        const { close, error: error2, leave, join: join2 } = constants_1.CHANNEL_EVENTS;
-        const events = [close, error2, leave, join2];
+        const { close, error: error2, leave, join: join3 } = constants_1.CHANNEL_EVENTS;
+        const events = [close, error2, leave, join3];
         return ref && events.includes(event) && ref !== this.joinPush.ref;
       }
       /** @internal */
@@ -31413,7 +31413,9 @@ var init_companion_client = __esm({
 
 // apps/mcp-server/src/index.ts
 import { execSync as execSync4 } from "node:child_process";
-import path12 from "node:path";
+import { readFileSync as readFileSync2 } from "node:fs";
+import path12, { dirname as dirname2, join as join2 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 import os8 from "node:os";
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
@@ -69915,13 +69917,41 @@ function agentCapabilities2() {
 function agentDevice2() {
   return process.env.MEMLIN_AGENT_DEVICE || os8.hostname() || "unknown device";
 }
+function readNearestPackageVersion() {
+  try {
+    let dir = dirname2(fileURLToPath2(import.meta.url));
+    for (let i2 = 0; i2 < 6; i2++) {
+      try {
+        const pkg = JSON.parse(readFileSync2(join2(dir, "package.json"), "utf8"));
+        if (pkg && typeof pkg.version === "string" && pkg.version) return pkg.version;
+      } catch {
+      }
+      const parent = dirname2(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+  }
+  return null;
+}
+var cachedAgentVersion2;
+function agentVersion2() {
+  if (cachedAgentVersion2 !== void 0) return cachedAgentVersion2;
+  const env = "0.1.34"?.trim();
+  cachedAgentVersion2 = env || readNearestPackageVersion();
+  return cachedAgentVersion2;
+}
 function agentHeaders(accessToken, accountId) {
+  const version4 = agentVersion2();
   return {
     Authorization: `Bearer ${accessToken}`,
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.1.34",
+    // Only stamp the version header when we resolved a REAL version. Omitting
+    // it (null) lets the web write path's never-blank guard keep the last good
+    // agent_version instead of overwriting it with a fabricated floor.
+    ...version4 ? { "Memlin-Agent-Version": version4 } : {},
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -70001,6 +70031,27 @@ function createToolContext(accessToken, requestCfg) {
     auth: { persistSession: false, autoRefreshToken: false },
     global: { headers: { Authorization: `Bearer ${accessToken}` } }
   });
+  void (async () => {
+    try {
+      const { error: error2 } = await supabase.rpc("record_agent_install", {
+        p_account: requestCfg.accountId,
+        p_kind: agentKind(),
+        p_device: agentDevice2(),
+        p_version: agentVersion2(),
+        // REAL version or null — NEVER the '0.1.0'
+        // header floor. The RPC treats null as "no
+        // change" (never blanks a known version) and
+        // its semver-gated propagation only moves a
+        // sibling row UP, so a floor can't smear.
+        p_platform: os8.platform(),
+        p_arch: os8.arch(),
+        p_capabilities: { items: agentCapabilities2().split(",").map((s2) => s2.trim()).filter(Boolean) }
+      });
+      if (error2) console.warn(`[mcp] record_agent_install failed: ${error2.message} \u2014 proceeding`);
+    } catch (e2) {
+      console.warn(`[mcp] record_agent_install threw: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding`);
+    }
+  })();
   return {
     supabase,
     accountId: requestCfg.accountId,
@@ -70205,7 +70256,9 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.1.34" },
+  // Cosmetic MCP identity only (never written to the DB). 'dev' when we can't
+  // resolve a real version — never the fabricated '0.1.0' floor.
+  { name: "memlin", version: agentVersion2() ?? "dev" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
