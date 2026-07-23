@@ -10263,6 +10263,42 @@ async function readLastExchange(transcriptPath) {
   if (!userText || !assistantText) return null;
   return { user_message: userText, agent_message: assistantText };
 }
+function nonNegativeInt(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+async function readLastAssistantUsage(transcriptPath) {
+  let raw;
+  try {
+    raw = await fs7.readFile(transcriptPath, "utf8");
+  } catch {
+    return null;
+  }
+  const lines = raw.split("\n").filter((l) => l.trim());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+    let msg;
+    try {
+      const parsed = JSON.parse(line);
+      const envelope = parsed.message;
+      msg = envelope ?? parsed;
+    } catch {
+      continue;
+    }
+    if (msg?.role !== "assistant") continue;
+    const usage = msg.usage;
+    if (!usage || typeof usage !== "object") return null;
+    return {
+      input_tokens: nonNegativeInt(usage.input_tokens),
+      output_tokens: nonNegativeInt(usage.output_tokens),
+      cache_read_input_tokens: nonNegativeInt(usage.cache_read_input_tokens),
+      cache_creation_input_tokens: nonNegativeInt(usage.cache_creation_input_tokens),
+      model: typeof msg.model === "string" && msg.model ? msg.model : null
+    };
+  }
+  return null;
+}
 function isMemorable(exchange) {
   if (exchange.user_message.length + exchange.agent_message.length < MIN_MEMORABLE_CHARS) {
     return false;
@@ -10366,6 +10402,7 @@ async function maybeRecordTurnTiming(ctx, payload) {
   const answerDeliveredAt = Date.now();
   const wallClockMs = answerDeliveredAt - lastResolve.turn_started_at;
   if (wallClockMs < 0) return;
+  const usage = payload.transcript_path ? await readLastAssistantUsage(payload.transcript_path) : null;
   try {
     await ctx.api.writeUsageEvent({
       event_type: "turn.timing",
@@ -10377,7 +10414,14 @@ async function maybeRecordTurnTiming(ctx, payload) {
         turn_started_at: lastResolve.turn_started_at,
         answer_delivered_at: answerDeliveredAt,
         wall_clock_ms: wallClockMs,
-        outlier: wallClockMs > TURN_TIMING_OUTLIER_MS
+        outlier: wallClockMs > TURN_TIMING_OUTLIER_MS,
+        ...usage ? {
+          turn_input_tokens: usage.input_tokens,
+          turn_output_tokens: usage.output_tokens,
+          turn_cache_read_input_tokens: usage.cache_read_input_tokens,
+          turn_cache_creation_input_tokens: usage.cache_creation_input_tokens,
+          turn_model: usage.model
+        } : {}
       }
     });
     log(`recorded turn.timing: ${wallClockMs}ms for audit ${lastResolve.audit_id}`);
