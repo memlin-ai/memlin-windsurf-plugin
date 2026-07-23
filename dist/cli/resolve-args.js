@@ -8016,11 +8016,22 @@ var MODEL_PRICES = {
   "claude-haiku-4-5": { inputUsdPerMTok: 1, outputUsdPerMTok: 5 },
   "claude-sonnet-4-6": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
   "claude-sonnet-4-5": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
-  "claude-sonnet-5": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
+  // ⚠️ INTRODUCTORY pricing, in effect only through 2026-08-31. On 2026-09-01
+  // Sonnet 5 reverts to $3 / $15 — the tripwire test in model-prices.test.ts
+  // goes red on that date until this is bumped. Do NOT set it to $3/$15 early:
+  // that over-bills every Sonnet 5 turn by 50% until the window actually ends.
+  "claude-sonnet-5": { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
   "claude-opus-4-5": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
   "claude-opus-4-6": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
   "claude-opus-4-7": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
   "claude-opus-4-8": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
+  // Deprecated (retires 2026-08-05) but still billable until then, so priced
+  // rather than left to report $0. 3x Opus 4.8's rate — a stray call costed at
+  // $0 would be a material miss. Drop this entry after the retirement date.
+  "claude-opus-4-1": { inputUsdPerMTok: 15, outputUsdPerMTok: 75 },
+  // Anthropic's most capable tier. Mythos 5 (Project Glasswing) shares the sheet.
+  "claude-fable-5": { inputUsdPerMTok: 10, outputUsdPerMTok: 50 },
+  "claude-mythos-5": { inputUsdPerMTok: 10, outputUsdPerMTok: 50 },
   // OpenAI
   "text-embedding-3-small": { inputUsdPerMTok: 0.02, outputUsdPerMTok: 0 },
   "gpt-4.1-mini": { inputUsdPerMTok: 0.4, outputUsdPerMTok: 1.6 }
