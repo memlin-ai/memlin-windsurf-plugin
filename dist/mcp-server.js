@@ -58314,16 +58314,18 @@ function normalizeGitRemote(raw) {
   if (!raw) return null;
   let s2 = raw.trim();
   if (!s2) return null;
-  s2 = s2.replace(/^git@([^:]+):/, "https://$1/");
-  s2 = s2.replace(/^ssh:\/\//, "");
-  s2 = s2.replace(/^https?:\/\//, "");
-  s2 = s2.replace(/^git@/, "");
+  if (!s2.includes("://")) {
+    s2 = s2.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
+  }
+  s2 = s2.replace(/^(?:ssh|git|https?):\/\//, "");
+  s2 = s2.replace(/^[^/@]+@/, "");
   s2 = s2.replace(/\.git$/, "");
   s2 = s2.replace(/\/$/, "");
   const slash = s2.indexOf("/");
   if (slash > 0) {
-    const host = s2.slice(0, slash);
+    const host = s2.slice(0, slash).toLowerCase();
     const rest = s2.slice(slash);
+    s2 = host + rest;
     for (const provider of PROVIDER_HOSTS) {
       if (host === provider) break;
       if (host.startsWith(provider + "-")) {
@@ -58341,6 +58343,67 @@ function remoteMatchesRepo(normalizedRemote, repoFullName) {
 }
 
 // packages/shared/dist/redact.js
+function luhnValid(digits) {
+  if (digits.length === 0) return false;
+  let sum = 0;
+  let double = false;
+  for (let i2 = digits.length - 1; i2 >= 0; i2--) {
+    const d2 = digits.charCodeAt(i2) - 48;
+    if (d2 < 0 || d2 > 9) return false;
+    let v2 = d2;
+    if (double) {
+      v2 *= 2;
+      if (v2 > 9) v2 -= 9;
+    }
+    sum += v2;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+function isValidCardNumber(match) {
+  const digits = match.replace(/\D/g, "");
+  if (digits.length < 13 || digits.length > 19) return false;
+  if (!/^[2-6]/.test(digits)) return false;
+  return luhnValid(digits);
+}
+function isValidUsSsn(match) {
+  const m2 = /^(\d{3})-(\d{2})-(\d{4})$/.exec(match);
+  if (!m2) return false;
+  const area = Number(m2[1]);
+  const group = Number(m2[2]);
+  const serial = Number(m2[3]);
+  if (area === 0 || area === 666 || area >= 900) return false;
+  if (group === 0) return false;
+  if (serial === 0) return false;
+  return true;
+}
+function mod97(numeric) {
+  let remainder = 0;
+  for (let i2 = 0; i2 < numeric.length; i2++) {
+    remainder = (remainder * 10 + (numeric.charCodeAt(i2) - 48)) % 97;
+  }
+  return remainder;
+}
+function isValidIban(match) {
+  const compact = match.replace(/[\s-]/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(compact)) return false;
+  const rearranged = compact.slice(4) + compact.slice(0, 4);
+  let numeric = "";
+  for (let i2 = 0; i2 < rearranged.length; i2++) {
+    const c2 = rearranged.charCodeAt(i2);
+    numeric += c2 >= 65 && c2 <= 90 ? String(c2 - 55) : rearranged[i2];
+  }
+  return mod97(numeric) === 1;
+}
+function isValidAbaRouting(match) {
+  if (!/^\d{9}$/.test(match)) return false;
+  const prefix = Number(match.slice(0, 2));
+  const validPrefix = prefix <= 12 || prefix >= 21 && prefix <= 32 || prefix >= 61 && prefix <= 72 || prefix === 80;
+  if (!validPrefix) return false;
+  const d2 = (i2) => match.charCodeAt(i2) - 48;
+  const sum = 3 * (d2(0) + d2(3) + d2(6)) + 7 * (d2(1) + d2(4) + d2(7)) + (d2(2) + d2(5) + d2(8));
+  return sum % 10 === 0;
+}
 var REDACTION_PATTERNS = [
   // ---------- AI provider keys ----------
   {
@@ -58435,6 +58498,45 @@ var REDACTION_PATTERNS = [
     // unlikely to appear in legitimate prose. Conservative length floors
     // on each segment keep this from matching short fragments.
     regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g
+  },
+  // ---------- PII (checksum / range-validated) ----------
+  // Unlike the key patterns above, a digit run is not self-identifying — the
+  // regex only nominates a candidate and `validate` makes the call. Kept last
+  // so the secret rules redact first (a card regex never nibbles a JWT/token).
+  {
+    name: "credit-card",
+    description: "Payment card number (Luhn-valid, 13\u201319 digits)",
+    // Candidate: 13–19 digits with optional single space/dash separators.
+    // Luhn + length + leading-digit gate live in isValidCardNumber so this
+    // regex stays readable. \b anchors keep it off digits glued to letters
+    // (hex hashes, ids like abc1234…).
+    regex: /\b\d(?:[ -]?\d){12,18}\b/g,
+    validate: isValidCardNumber
+  },
+  {
+    name: "us-ssn",
+    description: "US Social Security number (AAA-GG-SSSS)",
+    // Dashed form only — bare 9-digit runs collide with too many legitimate
+    // IDs. isValidUsSsn drops the SSA's never-issued area/group/serial ranges.
+    regex: /\b\d{3}-\d{2}-\d{4}\b/g,
+    validate: isValidUsSsn
+  },
+  {
+    name: "iban",
+    description: "International Bank Account Number (mod-97-valid)",
+    // Country code + 2 check digits + BBAN as 4-char groups (space-optional)
+    // plus a final 1–3 char group. Matching the real group-of-four print
+    // format — rather than "any alnum-or-space run" — stops the candidate
+    // from bleeding into trailing prose. isValidIban runs the mod-97.
+    regex: /\b[A-Za-z]{2}\d{2}(?:[ ]?[A-Za-z0-9]{4})+(?:[ ]?[A-Za-z0-9]{1,3})?\b/g,
+    validate: isValidIban
+  },
+  {
+    name: "us-bank-routing",
+    description: "US bank routing / ABA number (checksum-valid)",
+    // Bare 9-digit candidate; isValidAbaRouting gates on checksum + prefix.
+    regex: /\b\d{9}\b/g,
+    validate: isValidAbaRouting
   }
 ];
 for (const p2 of REDACTION_PATTERNS) {
@@ -58452,7 +58554,8 @@ function redactSensitive(input, extraPatterns = []) {
   for (const p2 of all) {
     p2.regex.lastIndex = 0;
     let count = 0;
-    out = out.replaceAll(p2.regex, () => {
+    out = out.replaceAll(p2.regex, (match) => {
+      if (p2.validate && !p2.validate(match)) return match;
       count++;
       return `[REDACTED-${p2.name}]`;
     });
@@ -59264,6 +59367,125 @@ var FEATURE_DISCOVERY_SYSTEM = [
   "where each members entry is an id from the inventory. No prose outside the JSON."
 ].join("\n");
 
+// packages/shared/dist/memory-taxonomy.js
+var MEMORY_TAXONOMY = [
+  // ---------------------------------------------------------------- process --
+  { term: "standup", facet: "process", forms: ["standup", "stand-up", "daily standup", "daily scrum", "daily sync"] },
+  // Bare "retro" survives on the hyphen guard, not on luck: "retro-fit" and
+  // "retro-compatible" are compounds, and nothing else in this corpus is retro.
+  { term: "retro", facet: "process", forms: ["retro", "retrospective", "sprint retro"] },
+  // Bare "planning" is meaningless on its own ("planning to ship"), so only the
+  // ritual names count.
+  { term: "planning", facet: "process", forms: ["sprint planning", "iteration planning", "planning meeting", "refinement session"] },
+  // NOT the verbs "onboard"/"offboard" — "onboard the new repo" is not a hire.
+  { term: "onboarding", facet: "process", forms: ["onboarding", "new hire", "onboarding checklist"] },
+  { term: "offboarding", facet: "process", forms: ["offboarding", "departure checklist"] },
+  // NOT bare "reviewer": this workspace ships a component called Memory
+  // Reviewer, and the word names a person on any kind of review.
+  { term: "code-review", facet: "process", forms: ["code review", "code-review", "pr review", "pull request review", "review checklist"] },
+  // NOT bare "release" — that is the technology axis's deploy/CI territory.
+  { term: "release-process", facet: "process", forms: ["release process", "release checklist", "release cadence", "release train", "cut a release"] },
+  { term: "oncall", facet: "process", forms: ["oncall", "on-call", "on call rotation", "pager rotation"] },
+  { term: "incident", facet: "process", forms: ["incident", "outage", "sev1", "sev-1", "sev2", "sev-2"] },
+  { term: "postmortem", facet: "process", forms: ["postmortem", "post-mortem", "root cause analysis", "rca", "incident review"] },
+  { term: "triage", facet: "process", forms: ["triage", "bug triage", "triage rotation"] },
+  { term: "handoff", facet: "process", forms: ["handoff", "hand-off", "handover", "shift handoff"] },
+  // The largest single class of memory in this corpus: a standing instruction
+  // about how work is done. "User directive:" is the literal title prefix the
+  // /memlin-remember path writes, which is why it is a form rather than a guess.
+  { term: "convention", facet: "process", forms: ["convention", "working agreement", "style guide", "house rule", "ground rule", "user directive", "standing instruction"] },
+  // ------------------------------------------------------------- commercial --
+  { term: "pricing", facet: "commercial", forms: ["pricing", "price list", "pricing tier", "rate card", "list price"] },
+  { term: "billing", facet: "commercial", forms: ["billing", "invoice", "invoicing", "billing cycle"] },
+  // The verb "renew" is out: certificates, tokens and leases all renew.
+  { term: "renewal", facet: "commercial", forms: ["renewal", "renewal date", "contract renewal", "subscription renewal"] },
+  // Bare "contract" is the worst word in this table for THIS repo: it ships
+  // packages/shared/src/memlin-contract.ts, contract tests for the MCP surface,
+  // "Reader contract" memories and component data contracts. Only the
+  // paperwork senses survive.
+  { term: "contract", facet: "commercial", forms: ["msa", "statement of work", "sow", "contract negotiation", "signed contract", "countersigned"] },
+  { term: "procurement", facet: "commercial", forms: ["procurement", "purchase order", "po number"] },
+  // Bare "customer" is engineering vocabulary here — customer-facing copy, the
+  // customer table, "the customer prefers blue" — so the facet needs the noun
+  // phrase that can only mean an account.
+  { term: "customer", facet: "commercial", forms: ["customer account", "customer contact", "customer meeting", "key customer", "enterprise customer"] },
+  // "downgrade" is semver and permissions here; bare "churn" is what tags do on
+  // reclassification; bare "cancellation" is an aborted request.
+  { term: "churn", facet: "commercial", forms: ["churn rate", "customer churn", "churned", "account cancellation", "subscription cancellation"] },
+  // "quota" is deliberately absent: an API quota is not a sales quota.
+  { term: "sales", facet: "commercial", forms: ["sales", "sales cycle", "sales pipeline", "win rate"] },
+  // A PoC or a "proof of concept" is a prototype in an engineering corpus, and
+  // "trial and error" is not a pilot.
+  { term: "trial", facet: "commercial", forms: ["free trial", "trial period", "trial account", "trial conversion", "pilot program"] },
+  { term: "discount", facet: "commercial", forms: ["discount", "promo code", "coupon"] },
+  { term: "competitor", facet: "commercial", forms: ["competitor", "competitive analysis", "competitive landscape"] },
+  { term: "partnership", facet: "commercial", forms: ["partnership", "partner program", "reseller"] },
+  // Bare "support" is the single most over-matching word in an eng corpus
+  // ("we support Node 20"), so only the desk meaning counts.
+  { term: "support", facet: "commercial", forms: ["customer support", "support ticket", "support queue", "help desk"] },
+  // ----------------------------------------------------------------- people --
+  { term: "hiring", facet: "people", forms: ["hiring", "recruiting", "job opening", "headcount"] },
+  // Bare "interview" is a user interview as often as a hiring one, and that is
+  // product research, not this facet.
+  { term: "interview", facet: "people", forms: ["interview loop", "interview panel", "interview debrief", "hiring interview", "take-home exercise"] },
+  // "promotion" is auto-promotion of facts and promoting a staging build here;
+  // "1:1" is a 1:1 mapping far more often than a meeting.
+  { term: "performance-review", facet: "people", forms: ["performance review", "perf review", "career ladder", "one-on-one", "promotion cycle"] },
+  // Bare "ownership" is Rust ownership, data ownership, buffer ownership.
+  { term: "ownership", facet: "people", forms: ["code owner", "code ownership", "owning team", "dri", "accountable for", "raci"] },
+  { term: "escalation", facet: "people", forms: ["escalation", "escalation path"] },
+  { term: "team-structure", facet: "people", forms: ["team structure", "org chart", "reporting line"] },
+  { term: "availability", facet: "people", forms: ["time off", "pto", "vacation", "working hours", "holiday schedule"] },
+  // ---------------------------------------------------------------- product --
+  { term: "roadmap", facet: "product", forms: ["roadmap", "quarterly plan", "product plan"] },
+  { term: "requirement", facet: "product", forms: ["requirement", "acceptance criteria", "user story", "product spec"] },
+  // Bare "decision" would tag most of the corpus — `decision` is a document kind
+  // here. Only the artefact and the act of deciding count.
+  { term: "decision", facet: "product", forms: ["decision record", "architecture decision", "adr", "decision log", "we decided", "decided to"] },
+  { term: "tradeoff", facet: "product", forms: ["tradeoff", "trade-off", "trade off", "pros and cons"] },
+  { term: "deprecation", facet: "product", forms: ["deprecation", "deprecated", "sunset", "end of life", "eol"] },
+  { term: "feedback", facet: "product", forms: ["user feedback", "customer feedback", "feature request"] },
+  // Bare "launch" means starting a process in half this corpus.
+  { term: "launch", facet: "product", forms: ["product launch", "launch plan", "launch date", "go-live", "general availability", "beta program"] },
+  // The verb is out: "prioritize the fast path" is a routing decision.
+  { term: "prioritization", facet: "product", forms: ["prioritization", "priority order", "must-have"] },
+  { term: "backlog", facet: "product", forms: ["backlog", "icebox"] },
+  // ------------------------------------------------------------- operations --
+  // Bare "playbook" is out — a demo playbook is a script for a sales call, not
+  // an operating procedure — but the qualified ops senses stay.
+  { term: "runbook", facet: "operations", forms: ["runbook", "run book", "operating procedure", "ops playbook", "incident playbook"] },
+  { term: "sla", facet: "operations", forms: ["sla", "slo", "uptime target", "service level"] },
+  // Bare "budget" is taken: the resolver has a delivery budget and the insight
+  // scanner an emission budget, neither of which is money.
+  // ...and "spend" is the other half of the same word: the real title "Flat
+  // token_budget is the limit, never the spend" is about a token budget.
+  { term: "budget", facet: "operations", forms: ["annual budget", "budget approval", "budget owner", "cost cap", "burn rate"] },
+  { term: "compliance", facet: "operations", forms: ["compliance", "soc 2", "soc2", "gdpr", "hipaa", "iso 27001"] },
+  // Bare "audit" is taken too — a resolve audit is a debugging trace, not a
+  // control test.
+  { term: "audit", facet: "operations", forms: ["compliance audit", "external audit", "audit finding", "audit evidence", "auditor"] },
+  { term: "security-policy", facet: "operations", forms: ["security policy", "security review", "threat model", "vulnerability disclosure"] },
+  { term: "data-retention", facet: "operations", forms: ["data retention", "retention policy", "purge policy", "right to be forgotten"] },
+  { term: "access-control", facet: "operations", forms: ["access control", "access review", "least privilege", "permissions policy", "rbac"] },
+  // Bare "privacy" is a macOS settings pane and a /privacy route here, so the
+  // policy senses carry the term instead.
+  { term: "privacy", facet: "operations", forms: ["privacy policy", "data privacy", "pii", "personal data", "data processing agreement", "dpa"] },
+  // Bare "legal" is an adjective in this corpus — a legal value, a legal state,
+  // a legal move.
+  { term: "legal", facet: "operations", forms: ["legal review", "legal counsel", "legal team", "terms of service", "nda", "liability"] },
+  { term: "licensing", facet: "operations", forms: ["license", "licence", "licensing", "license compatibility"] },
+  { term: "vendor", facet: "operations", forms: ["vendor", "third-party provider", "subprocessor", "supplier"] },
+  { term: "disaster-recovery", facet: "operations", forms: ["disaster recovery", "backup policy", "business continuity", "rto", "rpo"] },
+  { term: "governance", facet: "operations", forms: ["governance", "approval policy", "change control", "sign-off"] }
+];
+var TAXONOMY_TERMS = new Set(MEMORY_TAXONOMY.map((e2) => e2.term));
+var TAXONOMY_CANONICAL_BY_FORM = new Map(
+  MEMORY_TAXONOMY.flatMap((e2) => e2.forms.map((f2) => [f2, e2.term]))
+);
+var FACET_BY_TERM = new Map(
+  MEMORY_TAXONOMY.map((e2) => [e2.term, e2.facet])
+);
+
 // packages/sync-core/src/embeddings.ts
 var client = null;
 function getClient() {
@@ -59428,7 +59650,7 @@ var TOOLS = [
   },
   {
     name: "memlin_resolve_task",
-    description: "The Memlin resolver \u2014 one call returns a pre-assembled, scope-correct, citation-bearing context bundle for a specific engineering task. Use this BEFORE doing specialized work (code review, security audit, API design, debugging, etc.) instead of loading every skill and memory snippet into context. The server runs hybrid retrieval (semantic cosine + BM25) across skills, memory, approved goals, schemas, and decisions in parallel, applies per-kind similarity thresholds and a kind-priority weighting, enforces a token budget, and returns a single composed bundle with full provenance on every item. Apply the primary skill's framework; treat approved goals and required/pinned decisions as constraints; use other decisions as cited project context; validate against any schemas; use memory facts as ground truth. Always cite sources by path + version. In a host without a pre-task hook (e.g. Claude Desktop, or any plain MCP client), nothing resolves automatically \u2014 call this yourself at the start of any non-trivial task so you work from the team's context instead of guessing.",
+    description: "The Memlin resolver \u2014 one call returns a pre-assembled, scope-correct, citation-bearing context bundle for a specific engineering task. Use this BEFORE doing specialized work (code review, security audit, API design, debugging, etc.) instead of loading every skill and memory snippet into context. The server runs hybrid retrieval (semantic cosine + BM25) across skills, memory, approved goals, schemas, and decisions in parallel, applies per-kind similarity thresholds and a kind-priority weighting, enforces a token budget, and returns a single composed bundle with full provenance on every item. Apply the primary skill's framework; treat approved goals and required/pinned decisions as constraints; use other decisions as cited project context; validate against any schemas; use memory facts as ground truth. Always cite sources by path + version. If you materially follow a delivered skill, append `<!-- memlin-applied: skill-document-id[, ...] -->` to the final response using only the ids of skills actually followed; reading or citing alone is not application, and omit the receipt when none were followed. In a host without a pre-task hook (e.g. Claude Desktop, or any plain MCP client), nothing resolves automatically \u2014 call this yourself at the start of any non-trivial task so you work from the team's context instead of guessing.",
     annotations: { readOnlyHint: true, destructiveHint: false },
     inputSchema: {
       type: "object",
@@ -59892,7 +60114,7 @@ var TOOLS = [
   },
   {
     name: "memlin_capture_session",
-    description: "Capture a conversation into the workspace \u2014 the manual, on-demand stand-in for the session scribe that editor plugins (Claude Code, Cursor, \u2026) run automatically on their Stop hook. Hosts like Claude Desktop have no lifecycle hook and no transcript file, so YOU supply the conversation as `transcript` text (alternating '### user' / '### assistant' turns) and the server runs the exact same extraction: it proposes the durable decisions, facts, and reusable skills into the user's inbox for review. Overwrites nothing; nothing is auto-approved. Returns how many proposals were captured (or a `skipped` flag with a `reason` when the account's AI mode is off). Pair with the `memlin-capture` prompt.",
+    description: "Capture a conversation into the workspace \u2014 the manual, on-demand stand-in for the session scribe that editor plugins (Claude Code, Cursor, \u2026) run automatically on their Stop hook. Hosts like Claude Desktop have no lifecycle hook and no transcript file, so YOU supply the conversation as `transcript` text (alternating '### user' / '### assistant' turns) and the server runs the exact same extraction and automatic handling: safe captures become active or background, while only governed or conflicting items remain pending for inbox review. Overwrites nothing. Returns how many proposals were captured and how many still need review (or a `skipped` flag with a `reason` when the account's AI mode is off). Pair with the `memlin-capture` prompt.",
     inputSchema: {
       type: "object",
       required: ["transcript"],
@@ -59989,7 +60211,17 @@ var TOOLS = [
           properties: {
             kind: {
               type: "string",
-              enum: ["thought", "file", "todo", "plan", "goal", "memory", "skill", "schema", "decision"],
+              enum: [
+                "thought",
+                "file",
+                "todo",
+                "plan",
+                "goal",
+                "memory",
+                "skill",
+                "schema",
+                "decision"
+              ],
               description: "Entity kind of the item being attached."
             },
             id: { type: "string", description: "Entity uuid." }
@@ -60863,10 +61095,10 @@ async function dispatchProviderCall(impl, input, opts) {
     };
   }
   if (impl.provider === "google") {
-    const key = opts.allowPlatformProviderKey ? process4.env.GEMINI_API_KEY || process4.env.GOOGLE_API_KEY : void 0;
+    const key = opts.providerKeys?.gemini || (opts.allowPlatformProviderKey ? process4.env.GEMINI_API_KEY || process4.env.GOOGLE_API_KEY : void 0);
     if (!key) {
       throw new ActionExecuteError(
-        "GEMINI_API_KEY or GOOGLE_API_KEY not set \u2014 cannot dispatch provider_call to google",
+        "No Gemini key \u2014 add one in Settings \u2192 API keys, or configure GEMINI_API_KEY",
         "provider_unavailable"
       );
     }
@@ -60899,10 +61131,10 @@ async function dispatchProviderCall(impl, input, opts) {
     };
   }
   if (impl.provider === "xai") {
-    const key = opts.allowPlatformProviderKey ? process4.env.GROK_API_KEY || process4.env.XAI_API_KEY : void 0;
+    const key = opts.providerKeys?.grok || (opts.allowPlatformProviderKey ? process4.env.GROK_API_KEY || process4.env.XAI_API_KEY : void 0);
     if (!key) {
       throw new ActionExecuteError(
-        "GROK_API_KEY or XAI_API_KEY not set \u2014 cannot dispatch provider_call to xai",
+        "No Grok key \u2014 add one in Settings \u2192 API keys, or configure GROK_API_KEY",
         "provider_unavailable"
       );
     }
@@ -63244,6 +63476,7 @@ var MIN_CANDIDATES_FOR_RERANK = 4;
 var RERANK_TIMEOUT_MS = 4e3;
 var RERANK_EXCERPT_CHARS = 500;
 var RERANK_MIN_COVERAGE = 0.5;
+var RERANK_SKILL_MIN_SCORE = 0.15;
 var BRAND_GUIDELINES_LOGO_SIGNED_URL_TTL_SECONDS = 60 * 60;
 var KIND_THRESHOLDS = {
   skill: 0.5,
@@ -63953,32 +64186,54 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const kPerKind = args.k_per_kind ?? DEFAULT_K_PER_KIND;
   const projectId = args.project_id ?? ctx.projectId ?? null;
   const governanceUserId = ctx.userId ?? null;
-  const projectTeam = await getProjectTeamId(ctx, projectId);
-  const teamId = projectTeam.teamId;
   const requestedKinds = args.kinds ? [...args.kinds] : [...SEARCHABLE_KINDS];
-  const projectBrainPolicy = await loadProjectBrainPolicy(
-    ctx,
-    projectId,
-    teamId,
-    governanceUserId,
-    projectTeam.error ? [projectTeam.error] : []
+  if (!ctx.embed) {
+    throw new EmbeddingUnavailableError(
+      "resolver requires server-side embeddings; set OPENAI_API_KEY"
+    );
+  }
+  const projectTeamPromise = getProjectTeamId(ctx, projectId);
+  const projectBrainPolicyPromise = projectTeamPromise.then(
+    (projectTeam) => loadProjectBrainPolicy(
+      ctx,
+      projectId,
+      projectTeam.teamId,
+      governanceUserId,
+      projectTeam.error ? [projectTeam.error] : []
+    )
   );
   let customThresholds = null;
   let thresholdsMode = "default";
   let brandContextMode = "always";
-  let accThresholds = null;
-  let accThresholdsErr = null;
-  {
+  const accountSettingsPromise = (async () => {
     const res = await ctx.supabase.from("accounts").select("similarity_thresholds, brand_context_mode").eq("id", ctx.accountId).maybeSingle();
     if (res.error && /brand_context_mode/i.test(res.error.message)) {
       const fallback = await ctx.supabase.from("accounts").select("similarity_thresholds").eq("id", ctx.accountId).maybeSingle();
-      accThresholds = fallback.data;
-      accThresholdsErr = fallback.error;
-    } else {
-      accThresholds = res.data;
-      accThresholdsErr = res.error;
+      return { accThresholds: fallback.data, accThresholdsErr: fallback.error };
     }
-  }
+    return { accThresholds: res.data, accThresholdsErr: res.error };
+  })();
+  const embeddingStartedAt = Date.now();
+  const cachedVec = getCachedEmbedding(args.task);
+  const embeddingPromise = cachedVec ? (() => {
+    embeddingCacheHit = true;
+    embeddingMs = Date.now() - embeddingStartedAt;
+    return Promise.resolve(cachedVec);
+  })() : ctx.embed(args.task).then((vec) => {
+    cacheEmbedding(args.task, vec);
+    return vec;
+  }).catch((e2) => {
+    throw new EmbeddingUnavailableError(
+      `embedding call failed: ${e2 instanceof Error ? e2.message : String(e2)}`
+    );
+  }).finally(() => {
+    embeddingMs = Date.now() - embeddingStartedAt;
+  });
+  const [{ accThresholds, accThresholdsErr }, projectBrainPolicy, queryVec] = await Promise.all([
+    accountSettingsPromise,
+    projectBrainPolicyPromise,
+    embeddingPromise
+  ]);
   if (accThresholdsErr) {
     console.warn(`[resolver] similarity-thresholds lookup failed: ${accThresholdsErr.message}`);
   } else if (accThresholds && accThresholds.similarity_thresholds) {
@@ -63991,28 +64246,6 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   if (accThresholds && accThresholds.brand_context_mode === "auto") {
     brandContextMode = "auto";
   }
-  if (!ctx.embed) {
-    throw new EmbeddingUnavailableError(
-      "resolver requires server-side embeddings; set OPENAI_API_KEY"
-    );
-  }
-  let queryVec;
-  const embeddingStartedAt = Date.now();
-  const cachedVec = getCachedEmbedding(args.task);
-  if (cachedVec) {
-    embeddingCacheHit = true;
-    queryVec = cachedVec;
-  } else {
-    try {
-      queryVec = await ctx.embed(args.task);
-      cacheEmbedding(args.task, queryVec);
-    } catch (e2) {
-      throw new EmbeddingUnavailableError(
-        `embedding call failed: ${e2 instanceof Error ? e2.message : String(e2)}`
-      );
-    }
-  }
-  embeddingMs = Date.now() - embeddingStartedAt;
   const reactivationDone = maybeReactivateColdMatches(ctx, ctx.accountId, queryVec);
   const corpusBudgetPromise = args.max_tokens === void 0 ? (() => {
     const startedAt = Date.now();
@@ -64564,14 +64797,15 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         for (let i2 = candidates.length - 1; i2 >= 0; i2--) {
           const c2 = candidates[i2];
           const newScore = scores[c2.id];
-          if (newScore === void 0 || newScore <= 0) {
+          const belowSkillAdmissionFloor = c2.kind === "skill" && !projectBrainPolicy.requiredChainIds.has(c2.id) && newScore !== void 0 && newScore < RERANK_SKILL_MIN_SCORE;
+          if (newScore === void 0 || newScore <= 0 || belowSkillAdmissionFloor) {
             omittedCandidates.push({
               id: c2.id,
               kind: c2.kind,
               title: c2.title,
               similarity: c2.similarity,
               reason: "rerank_filtered",
-              detail: "reranker omitted or scored this candidate at 0",
+              detail: belowSkillAdmissionFloor ? `skill rerank score ${newScore.toFixed(3)} is below the ${RERANK_SKILL_MIN_SCORE.toFixed(2)} application floor` : "reranker omitted or scored this candidate at 0",
               path: c2.citation.path
             });
             candidates.splice(i2, 1);
@@ -66029,51 +66263,62 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       `[resolver] audit log unexpected error: ${e2 instanceof Error ? e2.message : String(e2)}`
     );
   }
+  const postAssemblyTasks = [reactivationDone];
   if (projectId && isDeployTask(args.task)) {
-    await recordDeployActivity(ctx, {
-      projectId,
-      sessionId: audit.sessionId ?? null,
-      task: args.task,
-      activeComponentId,
-      activeComponentName,
-      agentKind: audit.agentKind ?? null,
-      agentInstallationId: audit.agentInstallationId ?? null
-    });
+    postAssemblyTasks.push(
+      recordDeployActivity(ctx, {
+        projectId,
+        sessionId: audit.sessionId ?? null,
+        task: args.task,
+        activeComponentId,
+        activeComponentName,
+        agentKind: audit.agentKind ?? null,
+        agentInstallationId: audit.agentInstallationId ?? null
+      })
+    );
   }
   if (audit.agentInstallationId) {
-    try {
-      await ctx.supabase.from("agent_installations").update({ last_sync_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", audit.agentInstallationId);
-    } catch (e2) {
-      console.warn(
-        `[resolver] last_sync_at stamp failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding`
-      );
-    }
+    postAssemblyTasks.push(
+      (async () => {
+        try {
+          await ctx.supabase.from("agent_installations").update({ last_sync_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", audit.agentInstallationId);
+        } catch (e2) {
+          console.warn(
+            `[resolver] last_sync_at stamp failed: ${e2 instanceof Error ? e2.message : String(e2)} \u2014 proceeding`
+          );
+        }
+      })()
+    );
   }
   if (auditId) {
-    try {
-      const bundleHash = createHash("sha256").update(JSON.stringify(bundle)).digest("hex");
-      const surfacedDecisions = bundle.decisions.map((d2) => d2.id).filter((id) => typeof id === "string");
-      const { error: snapErr } = await ctx.supabase.rpc("record_bundle_snapshot", {
-        p_audit_id: auditId,
-        p_account_id: ctx.accountId,
-        p_project_id: projectId ?? null,
-        // Same membership RLS as usage_events (0074) — must carry the same
-        // sanitized preview, not the raw prompt.
-        p_task: auditTask.task,
-        p_bundle: bundle,
-        p_bundle_hash: bundleHash,
-        p_surfaced_decisions: surfacedDecisions
-      });
-      if (snapErr) {
-        console.warn(`[resolver] bundle snapshot write failed: ${snapErr.message}`);
-      }
-    } catch (e2) {
-      console.warn(
-        `[resolver] bundle snapshot unexpected error: ${e2 instanceof Error ? e2.message : String(e2)}`
-      );
-    }
+    postAssemblyTasks.push(
+      (async () => {
+        try {
+          const bundleHash = createHash("sha256").update(JSON.stringify(bundle)).digest("hex");
+          const surfacedDecisions = bundle.decisions.map((d2) => d2.id).filter((id) => typeof id === "string");
+          const { error: snapErr } = await ctx.supabase.rpc("record_bundle_snapshot", {
+            p_audit_id: auditId,
+            p_account_id: ctx.accountId,
+            p_project_id: projectId ?? null,
+            // Same membership RLS as usage_events (0074) — must carry the same
+            // sanitized preview, not the raw prompt.
+            p_task: auditTask.task,
+            p_bundle: bundle,
+            p_bundle_hash: bundleHash,
+            p_surfaced_decisions: surfacedDecisions
+          });
+          if (snapErr) {
+            console.warn(`[resolver] bundle snapshot write failed: ${snapErr.message}`);
+          }
+        } catch (e2) {
+          console.warn(
+            `[resolver] bundle snapshot unexpected error: ${e2 instanceof Error ? e2.message : String(e2)}`
+          );
+        }
+      })()
+    );
   }
-  await reactivationDone;
+  await Promise.all(postAssemblyTasks);
   return {
     bundle,
     token_budget: { limit: maxTokens, used, truncated },
@@ -66873,6 +67118,28 @@ function generateStatusToken() {
 async function captureFeedback(ctx, rawArgs) {
   const args = FeedbackCaptureInputSchema.parse(rawArgs ?? {});
   const projectId = args.project_id ?? ctx.projectId ?? null;
+  if (ctx.apiBaseUrl && ctx.accessToken) {
+    const base = ctx.apiBaseUrl.replace(/\/+$/, "");
+    const res = await fetch(`${base}/feedback`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${ctx.accessToken}`,
+        "content-type": "application/json",
+        "Memlin-Account-Id": ctx.accountId
+      },
+      body: JSON.stringify({
+        ...args,
+        ...projectId ? { project_id: projectId } : {}
+      })
+    });
+    const payload = await res.json().catch(() => null);
+    if (!res.ok || !payload?.feedback_id) {
+      throw new Error(
+        `feedback_capture: ${payload?.error ?? `web API returned ${res.status}`}`
+      );
+    }
+    return payload;
+  }
   const body = (args.body ?? "").trim();
   const tier = decideFeedbackTier({
     body,
@@ -67359,7 +67626,9 @@ Call the \`memlin_create_decision\` tool with \`title\` set to the decision. If 
     case "memlin-verify": {
       const decision = typeof a2.decision === "string" ? a2.decision.trim() : "";
       if (!decision)
-        throw argError('memlin-verify requires a "decision" argument (an id, or words to find it).');
+        throw argError(
+          'memlin-verify requires a "decision" argument (an id, or words to find it).'
+        );
       const verdict = typeof a2.verdict === "string" && a2.verdict.trim() ? a2.verdict.trim() : null;
       const verdictLine = verdict ? ` I think the verdict is "${verdict}".` : "";
       const text = `Record a measured outcome on this past decision: "${decision}".${verdictLine}
@@ -67396,7 +67665,16 @@ function renderBundleText(result, task) {
     const skills = [b2.primary_skill, ...b2.supporting_skills ?? []].filter(
       (s2) => Boolean(s2)
     );
-    if (skills.length) sections.push(["Skills", skills]);
+    const hasDeliveredSkill = skills.length > 0 || (b2.required_core ?? []).some((item) => item.kind === "skill") || (b2.pinned ?? []).some((item) => item.kind === "skill");
+    if (hasDeliveredSkill) {
+      lines.push(
+        "Application receipt: if you materially follow a resolved skill, append `<!-- memlin-applied: skill-document-id[, ...] -->` to the final response using only the ids of skills actually followed. Reading or citing alone is not application; omit the receipt when none were followed."
+      );
+      lines.push("");
+    }
+    if (skills.length) {
+      sections.push(["Skills", skills]);
+    }
     if (b2.goals?.length) sections.push(["Goals", b2.goals]);
     if (b2.decisions?.length) sections.push(["Decisions", b2.decisions]);
     if (b2.memory?.length) sections.push(["Memory", b2.memory]);
@@ -67421,6 +67699,7 @@ function renderBundleText(result, task) {
     for (const it2 of items) {
       const cite = renderCitation(it2);
       lines.push(`### ${it2.title}${cite ? ` ${cite}` : ""}`);
+      lines.push(`Document id: \`${it2.id}\``);
       if (it2.below_gate) {
         lines.push("");
         lines.push("_(closest match \u2014 BELOW the confidence gate; verify before trusting)_");
@@ -67514,6 +67793,7 @@ async function captureSession(ctx, rawArgs) {
   return {
     run_id: body.run_id ?? null,
     proposals_persisted: Number(body.proposals_persisted ?? 0),
+    proposals_pending: typeof body.proposals_pending === "number" ? body.proposals_pending : null,
     proposal_ids: Array.isArray(body.proposal_ids) ? body.proposal_ids : [],
     proposals_corroborated: Number(body.proposals_corroborated ?? 0),
     proposals_auto_activated: Number(body.proposals_auto_activated ?? 0),
@@ -68203,16 +68483,18 @@ function normalizeGitRemote2(raw) {
   if (!raw) return null;
   let s2 = raw.trim();
   if (!s2) return null;
-  s2 = s2.replace(/^git@([^:]+):/, "https://$1/");
-  s2 = s2.replace(/^ssh:\/\//, "");
-  s2 = s2.replace(/^https?:\/\//, "");
-  s2 = s2.replace(/^git@/, "");
+  if (!s2.includes("://")) {
+    s2 = s2.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
+  }
+  s2 = s2.replace(/^(?:ssh|git|https?):\/\//, "");
+  s2 = s2.replace(/^[^/@]+@/, "");
   s2 = s2.replace(/\.git$/, "");
   s2 = s2.replace(/\/$/, "");
   const slash = s2.indexOf("/");
   if (slash > 0) {
-    const host = s2.slice(0, slash);
+    const host = s2.slice(0, slash).toLowerCase();
     const rest = s2.slice(slash);
+    s2 = host + rest;
     for (const provider of PROVIDER_HOSTS2) {
       if (host === provider) break;
       if (host.startsWith(provider + "-")) {
@@ -68313,7 +68595,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.34";
+  cachedAgentVersion = "0.1.35";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -68397,8 +68679,11 @@ var MemlinApiClient = class {
     };
     if (body !== void 0) headers["Content-Type"] = "application/json";
     const idempotent = method === "GET";
-    const maxAttempts = idempotent ? (this.cfg.maxRetries ?? DEFAULT_MAX_RETRIES2) + 1 : 1;
-    const timeoutMs = this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const maxAttempts = idempotent ? Math.max(0, opts.maxRetries ?? this.cfg.maxRetries ?? DEFAULT_MAX_RETRIES2) + 1 : 1;
+    const timeoutMs = Math.max(
+      1,
+      opts.requestTimeoutMs ?? this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    );
     for (let attempt = 1; ; attempt++) {
       let res;
       let text;
@@ -68678,7 +68963,11 @@ var MemlinApiClient = class {
    * the same account (no global-default/pinned-name mismatch).
    */
   async getAccount(opts = {}) {
-    return this.request("GET", "/account", void 0, { accountId: opts.accountId });
+    return this.request("GET", "/account", void 0, {
+      accountId: opts.accountId,
+      requestTimeoutMs: opts.requestTimeoutMs,
+      maxRetries: opts.maxRetries
+    });
   }
   /**
    * POST /projects/resolve — server-side project resolution.
@@ -68690,6 +68979,14 @@ var MemlinApiClient = class {
    */
   async resolveProject(input) {
     return this.request("POST", "/projects/resolve", input);
+  }
+  /** GET /account/enforce-done-deployed — the workspace done-deployed gate flag. */
+  async getEnforceDoneDeployed(opts = {}) {
+    return this.request("GET", "/account/enforce-done-deployed", void 0, opts);
+  }
+  /** PUT /account/enforce-done-deployed — owner/admin sets the workspace flag. */
+  async setEnforceDoneDeployed(enabled, opts = {}) {
+    return this.request("PUT", "/account/enforce-done-deployed", { enabled }, opts);
   }
   /**
    * POST /deploy-guard — acquire or release the per-project deploy lease.
@@ -68759,9 +69056,9 @@ var MemlinApiClient = class {
    *
    * Called by the PostToolUse hook after the agent runs `git commit`.
    * The server reads the commit message + diff, asks Haiku to extract
-   * any decision/memory/skill baked into the change, and persists
-   * results as documents with metadata.status='proposed'. They appear
-   * in the user's inbox until accepted.
+   * any decision/memory/skill baked into the change, and persists the
+   * results. The server may activate or background captures automatically;
+   * only the post-processing `proposals_pending` subset needs inbox review.
    */
   async scribeDiff(input, opts = {}) {
     return this.request("POST", "/scribe/diff", input, { accountId: opts.accountId });
@@ -68769,7 +69066,8 @@ var MemlinApiClient = class {
   /**
    * POST /scribe/session — Phase 1 auto-capture from a Claude Code
    * session transcript. Server slices the transcript (tail-biased
-   * when too large), runs Haiku extraction, persists proposals.
+   * when too large), runs Haiku extraction, persists proposals, and reports
+   * how many still need review after automatic handling.
    *
    * Triggered manually by /memlin-scribe today; an auto-triggered
    * variant on Stop with a 15-min debounce is a fast follow-up.
@@ -69196,7 +69494,8 @@ async function resolveProject(api, cwd, configProjectId) {
         project_name: result.name,
         account_id: result.account_id,
         reason: result.reason === "none" ? "config" : result.reason,
-        hasGitRemote
+        hasGitRemote,
+        enforce_done_deployed: result.enforce_done_deployed
       };
     }
   } catch {
@@ -69570,6 +69869,7 @@ import path10 from "node:path";
 import os7 from "node:os";
 import crypto2 from "node:crypto";
 var STATE_FILE = path10.join(os7.homedir(), ".config", "memlin", "state.json");
+var MAX_LAST_RESOLVE_SESSIONS = 32;
 var EMPTY = { documents: {} };
 async function readState() {
   try {
@@ -69579,9 +69879,74 @@ async function readState() {
     return { ...EMPTY };
   }
 }
+async function writeState(state) {
+  await fs6.mkdir(path10.dirname(STATE_FILE), { recursive: true });
+  const tmp = `${STATE_FILE}.${process.pid}.tmp`;
+  await fs6.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
+  await atomicRename(tmp, STATE_FILE);
+}
 var LOCK_DIR = `${STATE_FILE}.lock`;
+var LOCK_STALE_MS = 2e3;
+var LOCK_WAIT_MS = 2e3;
+var LOCK_RETRY_MS = 50;
+async function acquireStateLock() {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (; ; ) {
+    try {
+      await fs6.mkdir(LOCK_DIR);
+      return true;
+    } catch {
+      try {
+        const stat = await fs6.stat(LOCK_DIR);
+        if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+          await fs6.rmdir(LOCK_DIR).catch(() => {
+          });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() >= deadline) return false;
+      await new Promise((r2) => setTimeout(r2, LOCK_RETRY_MS));
+    }
+  }
+}
+async function releaseStateLock() {
+  await fs6.rmdir(LOCK_DIR).catch(() => {
+  });
+}
+async function updateState(mutate) {
+  const locked = await acquireStateLock();
+  try {
+    const state = await readState();
+    await mutate(state);
+    await writeState(state);
+    return state;
+  } finally {
+    if (locked) await releaseStateLock();
+  }
+}
 function hash(content) {
   return crypto2.createHash("sha256").update(content).digest("hex");
+}
+function cacheLastResolve(state, entry) {
+  state.last_resolve = entry;
+  if (!entry.session_id) return;
+  state.last_resolves ??= {};
+  state.last_resolves[entry.session_id] = entry;
+  const entries = Object.entries(state.last_resolves);
+  if (entries.length <= MAX_LAST_RESOLVE_SESSIONS) return;
+  entries.sort(([, a2], [, b2]) => b2.resolved_at - a2.resolved_at).slice(MAX_LAST_RESOLVE_SESSIONS).forEach(([sessionId]) => {
+    delete state.last_resolves?.[sessionId];
+  });
+}
+async function recordLastResolve(entry) {
+  try {
+    await updateState((state) => {
+      cacheLastResolve(state, entry);
+    });
+  } catch {
+  }
 }
 function diffStates(prev, current) {
   const currentByPath = new Map(current.map((c2) => [c2.path, c2.hash]));
@@ -69598,6 +69963,13 @@ function diffStates(prev, current) {
     if (!currentByPath.has(p2)) deleted.push(p2);
   }
   return { added, modified, deleted };
+}
+
+// packages/plugin-core/dist/continuity.js
+var CONTINUITY_WINDOW_MS = 10 * 60 * 1e3;
+function bundleHasContinuityContent(bundle) {
+  const claims = bundle.claim_guardrails;
+  return Boolean(bundle.primary_skill) || bundle.supporting_skills.length > 0 || bundle.memory.length > 0 || bundle.goals.length > 0 || bundle.schemas.length > 0 || (bundle.decisions?.length ?? 0) > 0 || (bundle.required_core?.length ?? 0) > 0 || (bundle.pinned?.length ?? 0) > 0 || (bundle.session_working?.length ?? 0) > 0 || (bundle.open_threads?.length ?? 0) > 0 || (bundle.pack_context?.length ?? 0) > 0 || (claims?.approved.length ?? 0) > 0 || (claims?.blocked.length ?? 0) > 0 || (claims?.competitor_facts.length ?? 0) > 0;
 }
 
 // packages/plugin-core/dist/local-scan.js
@@ -69785,10 +70157,11 @@ function normalizeGitRemote3(raw) {
   if (!raw) return null;
   let s2 = raw.trim();
   if (!s2) return null;
-  s2 = s2.replace(/^git@([^:]+):/, "https://$1/");
-  s2 = s2.replace(/^ssh:\/\//, "");
-  s2 = s2.replace(/^https?:\/\//, "");
-  s2 = s2.replace(/^git@/, "");
+  if (!s2.includes("://")) {
+    s2 = s2.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
+  }
+  s2 = s2.replace(/^(?:ssh|git|https?):\/\//, "");
+  s2 = s2.replace(/^[^/@]+@/, "");
   s2 = s2.replace(/\.git$/, "");
   s2 = s2.replace(/\/$/, "");
   const providers = [
@@ -69803,8 +70176,9 @@ function normalizeGitRemote3(raw) {
   ];
   const slash = s2.indexOf("/");
   if (slash > 0) {
-    const host = s2.slice(0, slash);
+    const host = s2.slice(0, slash).toLowerCase();
     const rest = s2.slice(slash);
+    s2 = host + rest;
     for (const provider of providers) {
       if (host === provider) break;
       if (host.startsWith(`${provider}-`)) {
@@ -69831,6 +70205,7 @@ function runtimeCwd() {
 function readGitRemote2(cwd) {
   try {
     const raw = execSync4("git remote get-url origin", {
+      windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8"
@@ -69937,7 +70312,7 @@ function readNearestPackageVersion() {
 var cachedAgentVersion2;
 function agentVersion2() {
   if (cachedAgentVersion2 !== void 0) return cachedAgentVersion2;
-  const env = "0.1.34"?.trim();
+  const env = "0.1.35"?.trim();
   cachedAgentVersion2 = env || readNearestPackageVersion();
   return cachedAgentVersion2;
 }
@@ -69988,6 +70363,7 @@ async function resolveProjectCached(input) {
   return value;
 }
 async function resolveViaApi(args, requestCfg) {
+  const startedAt = Date.now();
   const accessToken = await currentAccessToken(requestCfg.authConfig);
   const routing = await resolveRequestRouting(
     args,
@@ -70024,7 +70400,21 @@ async function resolveViaApi(args, requestCfg) {
   });
   const body = await res.text();
   if (!res.ok) throw new Error(`resolve HTTP ${res.status}: ${body}`);
-  return JSON.parse(body);
+  const result = JSON.parse(body);
+  if (result.audit_id && typeof args.task === "string") {
+    await recordLastResolve({
+      task: args.task,
+      audit_id: result.audit_id,
+      resolved_at: Date.now(),
+      cwd: routing.cwd,
+      had_content: bundleHasContinuityContent(result.bundle),
+      host: agentKind(),
+      session_id: process.env.MEMLIN_SESSION_ID || null,
+      delivered: true,
+      turn_started_at: startedAt
+    });
+  }
+  return result;
 }
 function createToolContext(accessToken, requestCfg) {
   const supabase = createClient(requestCfg.supabaseUrl, requestCfg.supabaseAnon, {
@@ -70272,7 +70662,7 @@ server.setRequestHandler(GetPromptRequestSchema, async (req) => {
   const name = req.params.name;
   const args = req.params.arguments ?? {};
   const token = await currentAccessToken(requestCfg.authConfig);
-  const resolveFn = async ({ task, project_id }) => await resolveViaApi(
+  const resolveFn = async ({ task, project_id }) => resolveViaApi(
     {
       task,
       ...project_id ? { project_id } : {}

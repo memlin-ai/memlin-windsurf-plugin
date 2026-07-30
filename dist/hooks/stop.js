@@ -504,9 +504,9 @@ var require_common = __commonJS({
       }
       return target;
     }
-    function repeat(string, count) {
+    function repeat(string, count2) {
       var result = "", cycle;
-      for (cycle = 0; cycle < count; cycle += 1) {
+      for (cycle = 0; cycle < count2; cycle += 1) {
         result += string;
       }
       return result;
@@ -1888,11 +1888,11 @@ var require_loader = __commonJS({
       }
       return false;
     }
-    function writeFoldedLines(state, count) {
-      if (count === 1) {
+    function writeFoldedLines(state, count2) {
+      if (count2 === 1) {
         state.result += " ";
-      } else if (count > 1) {
-        state.result += common.repeat("\n", count - 1);
+      } else if (count2 > 1) {
+        state.result += common.repeat("\n", count2 - 1);
       }
     }
     function readPlainScalar(state, nodeIndent, withinFlowCollection) {
@@ -3580,7 +3580,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs8 = __require("fs");
+    var fs9 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3664,7 +3664,7 @@ var require_gray_matter = __commonJS({
       return stringify(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs8.readFileSync(filepath, "utf8");
+      const str2 = fs9.readFileSync(filepath, "utf8");
       const file = matter3(str2, options2);
       file.path = filepath;
       return file;
@@ -3693,8 +3693,8 @@ var require_gray_matter = __commonJS({
 });
 
 // packages/plugin-core/dist/stop-handler.js
-import { execSync as execSync2 } from "node:child_process";
-import { promises as fs7 } from "node:fs";
+import { execSync as execSync3 } from "node:child_process";
+import { promises as fs8 } from "node:fs";
 
 // packages/plugin-core/dist/client.js
 import { promises as fs4 } from "node:fs";
@@ -3972,16 +3972,18 @@ function normalizeGitRemote(raw) {
   if (!raw) return null;
   let s = raw.trim();
   if (!s) return null;
-  s = s.replace(/^git@([^:]+):/, "https://$1/");
-  s = s.replace(/^ssh:\/\//, "");
-  s = s.replace(/^https?:\/\//, "");
-  s = s.replace(/^git@/, "");
+  if (!s.includes("://")) {
+    s = s.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
+  }
+  s = s.replace(/^(?:ssh|git|https?):\/\//, "");
+  s = s.replace(/^[^/@]+@/, "");
   s = s.replace(/\.git$/, "");
   s = s.replace(/\/$/, "");
   const slash = s.indexOf("/");
   if (slash > 0) {
-    const host = s.slice(0, slash);
+    const host = s.slice(0, slash).toLowerCase();
     const rest = s.slice(slash);
+    s = host + rest;
     for (const provider of PROVIDER_HOSTS) {
       if (host === provider) break;
       if (host.startsWith(provider + "-")) {
@@ -4004,6 +4006,24 @@ async function withTimeout(promise, ms, fallback) {
     ]);
   } finally {
     if (timer !== void 0) clearTimeout(timer);
+  }
+}
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
   }
 }
 
@@ -4082,7 +4102,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.34";
+  cachedAgentVersion = "0.1.35";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -4166,8 +4186,11 @@ var MemlinApiClient = class {
     };
     if (body !== void 0) headers["Content-Type"] = "application/json";
     const idempotent = method === "GET";
-    const maxAttempts = idempotent ? (this.cfg.maxRetries ?? DEFAULT_MAX_RETRIES) + 1 : 1;
-    const timeoutMs = this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const maxAttempts = idempotent ? Math.max(0, opts.maxRetries ?? this.cfg.maxRetries ?? DEFAULT_MAX_RETRIES) + 1 : 1;
+    const timeoutMs = Math.max(
+      1,
+      opts.requestTimeoutMs ?? this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    );
     for (let attempt = 1; ; attempt++) {
       let res;
       let text;
@@ -4447,7 +4470,11 @@ var MemlinApiClient = class {
    * the same account (no global-default/pinned-name mismatch).
    */
   async getAccount(opts = {}) {
-    return this.request("GET", "/account", void 0, { accountId: opts.accountId });
+    return this.request("GET", "/account", void 0, {
+      accountId: opts.accountId,
+      requestTimeoutMs: opts.requestTimeoutMs,
+      maxRetries: opts.maxRetries
+    });
   }
   /**
    * POST /projects/resolve — server-side project resolution.
@@ -4459,6 +4486,14 @@ var MemlinApiClient = class {
    */
   async resolveProject(input) {
     return this.request("POST", "/projects/resolve", input);
+  }
+  /** GET /account/enforce-done-deployed — the workspace done-deployed gate flag. */
+  async getEnforceDoneDeployed(opts = {}) {
+    return this.request("GET", "/account/enforce-done-deployed", void 0, opts);
+  }
+  /** PUT /account/enforce-done-deployed — owner/admin sets the workspace flag. */
+  async setEnforceDoneDeployed(enabled, opts = {}) {
+    return this.request("PUT", "/account/enforce-done-deployed", { enabled }, opts);
   }
   /**
    * POST /deploy-guard — acquire or release the per-project deploy lease.
@@ -4528,9 +4563,9 @@ var MemlinApiClient = class {
    *
    * Called by the PostToolUse hook after the agent runs `git commit`.
    * The server reads the commit message + diff, asks Haiku to extract
-   * any decision/memory/skill baked into the change, and persists
-   * results as documents with metadata.status='proposed'. They appear
-   * in the user's inbox until accepted.
+   * any decision/memory/skill baked into the change, and persists the
+   * results. The server may activate or background captures automatically;
+   * only the post-processing `proposals_pending` subset needs inbox review.
    */
   async scribeDiff(input, opts = {}) {
     return this.request("POST", "/scribe/diff", input, { accountId: opts.accountId });
@@ -4538,7 +4573,8 @@ var MemlinApiClient = class {
   /**
    * POST /scribe/session — Phase 1 auto-capture from a Claude Code
    * session transcript. Server slices the transcript (tail-biased
-   * when too large), runs Haiku extraction, persists proposals.
+   * when too large), runs Haiku extraction, persists proposals, and reports
+   * how many still need review after automatic handling.
    *
    * Triggered manually by /memlin-scribe today; an auto-triggered
    * variant on Stop with a 15-min debounce is a fast follow-up.
@@ -4865,6 +4901,23 @@ function isFileNotFound(error) {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
+// packages/plugin-core/dist/hook-exit.js
+var HOOK_WATCHDOG_MS = 2e3;
+function releaseStdin() {
+  try {
+    const stdin = process.stdin;
+    stdin.pause();
+    stdin.unref?.();
+  } catch {
+  }
+}
+function exitHook(code) {
+  process.exitCode = code;
+  releaseStdin();
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), HOOK_WATCHDOG_MS).unref();
+}
+
 // packages/plugin-core/dist/client.js
 function globalConfigFilePath() {
   return process.env.MEMLIN_CONFIG_FILE || path6.join(os5.homedir(), ".config", "memlin", "config.json");
@@ -4942,19 +4995,160 @@ function log(msg) {
   }
 }
 
+// packages/plugin-core/dist/done-gate.js
+init_companion_client();
+import { execSync } from "node:child_process";
+import { promises as fs5 } from "node:fs";
+import path7 from "node:path";
+var CLAIM = /\bit'?s (now )?(live|deployed|done|fixed|shipped)\b|\bnow live\b|\bis live\b|\bis deployed\b|\bdeployed to prod\b|\ball done\b|\bfully (fixed|working|deployed|shipped)\b|\bfix(ed)? (and|&) deployed\b|\bmerged (and|&) deployed\b|✅/i;
+var HARD = /(^|\n)\s*[-*✅•\s]*\s*(fixed|deployed|shipped|done)\b[.! ]*\s*$/im;
+var HONEST = /not (yet )?(live|merged|deployed|shipped)|isn'?t (live|merged|deployed|shipped)|remaining step|next step (is|to)|not on main|still on (the |a )?(feature )?branch|needs? (to be )?merg|to be merged|before (this|it) is live|to make (it|this) live|awaiting (merge|deploy)|hold(ing)? the merge/i;
+var OVERRIDE = /\[skip-done-gate\]|done-gate:\s*override/i;
+function isOff(v) {
+  const s = (v || "").trim().toLowerCase();
+  return s === "off" || s === "0" || s === "false" || s === "no";
+}
+async function readMarker(cwd) {
+  let dir = path7.resolve(cwd);
+  for (let i = 0; i < 40; i += 1) {
+    const file = path7.join(dir, ".memlin", "enforce-done-deployed.json");
+    try {
+      const raw = await fs5.readFile(file, "utf8");
+      const parsed = JSON.parse(raw);
+      return { enabled: parsed.enabled !== false, base: parsed.base || "origin/main" };
+    } catch {
+    }
+    const parent = path7.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+async function readCompanionPolicy(cwd) {
+  try {
+    const ws = await companionRequest("workspace.resolve", { cwd });
+    const v = ws?.enforce_done_deployed;
+    return typeof v === "boolean" ? v : void 0;
+  } catch {
+    return void 0;
+  }
+}
+async function resolveGate(cwd) {
+  if (isOff(process.env.MEMLIN_DONE_GATE)) return null;
+  const marker = await readMarker(cwd);
+  if (marker && marker.enabled === false) return null;
+  const serverEnabled = await readCompanionPolicy(cwd);
+  const env = process.env.MEMLIN_DONE_MEANS_DEPLOYED;
+  const envOn = env === "1" || env === "true";
+  const enabled = serverEnabled === true || marker?.enabled === true || envOn;
+  if (!enabled) return null;
+  return { enabled: true, base: marker?.base || "origin/main" };
+}
+async function lastAssistantText(transcriptPath) {
+  let raw;
+  try {
+    raw = await fs5.readFile(transcriptPath, "utf8");
+  } catch {
+    return "";
+  }
+  let text = "";
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let ev;
+    try {
+      ev = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const msg = ev.message;
+    if (!msg || msg.role !== "assistant") continue;
+    const content = msg.content;
+    let chunk = "";
+    if (typeof content === "string") {
+      chunk = content;
+    } else if (Array.isArray(content)) {
+      chunk = content.map(
+        (b) => b && typeof b === "object" && b.type === "text" ? String(b.text ?? "") : ""
+      ).join(" ");
+    }
+    if (chunk.trim()) text = chunk;
+  }
+  return text;
+}
+function git(args, cwd) {
+  try {
+    return execSync(`git ${args}`, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5e3
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+function gitOk(args, cwd) {
+  try {
+    execSync(`git ${args}`, {
+      cwd,
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 5e3
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function enforceDoneMeansDeployed(payload) {
+  try {
+    if (payload.stop_hook_active) return null;
+    const cwd = payload.cwd || process.cwd();
+    const transcript = payload.transcript_path;
+    if (!transcript) return null;
+    const text = await lastAssistantText(transcript);
+    if (!text) return null;
+    if (HONEST.test(text)) return null;
+    if (OVERRIDE.test(text)) return null;
+    if (!CLAIM.test(text) && !HARD.test(text)) return null;
+    const cfg = await resolveGate(cwd);
+    if (!cfg) return null;
+    if (!gitOk(`rev-parse --verify ${cfg.base}`, cwd)) return null;
+    const branch = git("rev-parse --abbrev-ref HEAD", cwd) || "HEAD";
+    const dirty = Boolean(git("status --porcelain", cwd));
+    const merged = gitOk(`merge-base --is-ancestor HEAD ${cfg.base}`, cwd);
+    const onMain = branch === "main" || branch === "master";
+    const unpushed = onMain ? Boolean(git(`rev-list ${cfg.base}..HEAD`, cwd)) : false;
+    const live = merged && !dirty && !unpushed;
+    if (live) return null;
+    const why = [];
+    if (!merged) why.push(`HEAD (${branch}) is not merged into ${cfg.base}`);
+    if (dirty) why.push("the working tree has uncommitted changes");
+    if (unpushed) why.push(`there are unpushed commits (${cfg.base}..HEAD)`);
+    const reason = "HOLD \u2014 the last message claims the work is done/fixed/deployed, but it is NOT live: " + why.join("; ") + `. On this project "done" means merged into ${cfg.base} and deployed. Do ONE of:
+  (1) Ship it: commit \u2192 merge \u2192 confirm the deploy succeeded \u2192 verify the change live, THEN report done; or
+  (2) If you cannot merge right now (a concurrent deploy is in flight, you need sign-off, CI is red), say so plainly and state the exact remaining step \u2014 but do NOT call it done, fixed, or deployed.
+Override (deliberate): include [skip-done-gate] in your message to ship-anyway this once, or disable the gate entirely with MEMLIN_DONE_GATE=off (or set "enabled": false in .memlin/enforce-done-deployed.json). The gate is opt-in and read-only \u2014 it never edits your files.`;
+    return { decision: "block", reason };
+  } catch {
+    return null;
+  }
+}
+
 // packages/plugin-core/dist/heartbeat.js
 import crypto from "node:crypto";
-import { promises as fs5 } from "node:fs";
+import { promises as fs6 } from "node:fs";
 import os6 from "node:os";
-import path7 from "node:path";
+import path8 from "node:path";
 var DEFAULT_THROTTLE_MS = 6e4;
+var HEARTBEAT_REQUEST_TIMEOUT_MS = 750;
 function statePath(cwd, host) {
   const key = crypto.createHash("sha256").update(cwd).digest("hex").slice(0, 16);
-  return path7.join(os6.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
+  return path8.join(os6.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
 }
 async function recentlySent(file, throttleMs) {
   try {
-    const raw = await fs5.readFile(file, "utf8");
+    const raw = await fs6.readFile(file, "utf8");
     const parsed = JSON.parse(raw);
     return typeof parsed.sent_at === "number" && Date.now() - parsed.sent_at < throttleMs;
   } catch {
@@ -4969,8 +5163,11 @@ async function recordInstallHeartbeat(cwd, reason, opts = {}) {
   try {
     const ctx = await getApi({ cwd });
     if (!ctx) return;
-    await ctx.api.getAccount();
-    await fs5.writeFile(file, JSON.stringify({ sent_at: Date.now(), reason, host }), "utf8");
+    await ctx.api.getAccount({
+      requestTimeoutMs: HEARTBEAT_REQUEST_TIMEOUT_MS,
+      maxRetries: 0
+    });
+    await fs6.writeFile(file, JSON.stringify({ sent_at: Date.now(), reason, host }), "utf8");
     log(`${host} activity recorded: ${reason}`);
   } catch (err) {
     log(`${host} activity failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -4993,14 +5190,16 @@ function replayAttributionCandidates(replay) {
       id: row.document_id,
       title: row.title,
       path: typeof row.path === "string" ? row.path : null,
-      version_number: row.version_number
+      version_number: row.version_number,
+      kind: typeof row.kind === "string" ? row.kind : null
     };
   }).filter((item) => item !== null) : [];
   const candidates = Array.isArray(rawDelivered) && (rawDelivered.length === 0 || delivered.length > 0) ? delivered : [...replay.pinned ?? [], ...replay.items ?? []].map((item) => ({
     id: item.id,
     title: item.title,
     path: item.path,
-    version_number: item.version_number
+    version_number: item.version_number,
+    kind: item.kind
   }));
   return [...new Map(candidates.map((candidate) => [candidate.id, candidate])).values()];
 }
@@ -5053,35 +5252,51 @@ function titleReferenceIsExplicit(message, position, length) {
   );
   return delimited || appliedPrefix || referentialSuffix;
 }
+var APPLICATION_RECEIPT_RE = /<!--\s*memlin-applied\s*:\s*([\s\S]*?)-->/gi;
+function applicationReceiptIds(agentMessage, candidates) {
+  const deliveredSkills = new Set(
+    candidates.filter((candidate) => candidate.kind === "skill").map((candidate) => candidate.id)
+  );
+  const applied = [];
+  let match;
+  while ((match = APPLICATION_RECEIPT_RE.exec(agentMessage)) !== null) {
+    for (const rawId of (match[1] ?? "").split(",")) {
+      const id = rawId.trim();
+      if (deliveredSkills.has(id) && !applied.includes(id)) applied.push(id);
+    }
+  }
+  return applied;
+}
 function attributeAppliedItems(agentMessage, replay) {
   const candidates = replayAttributionCandidates(replay);
+  const applied = applicationReceiptIds(agentMessage, candidates);
   const message = normalizeReference(agentMessage);
   const pathIds = /* @__PURE__ */ new Map();
   const pathVersionIds = /* @__PURE__ */ new Map();
   const titleIds = /* @__PURE__ */ new Map();
   const titleVersionIds = /* @__PURE__ */ new Map();
   for (const candidate of candidates) {
-    const path10 = candidate.path ? normalizeReference(candidate.path.replace(/^\.\//, "")) : "";
+    const path11 = candidate.path ? normalizeReference(candidate.path.replace(/^\.\//, "")) : "";
     const title = normalizeReference(candidate.title);
-    addReferenceKey(pathIds, path10, candidate.id);
-    if (path10) {
-      addReferenceKey(pathVersionIds, `${path10}\0${candidate.version_number}`, candidate.id);
+    addReferenceKey(pathIds, path11, candidate.id);
+    if (path11) {
+      addReferenceKey(pathVersionIds, `${path11}\0${candidate.version_number}`, candidate.id);
     }
     addReferenceKey(titleIds, title, candidate.id);
     if (title) {
       addReferenceKey(titleVersionIds, `${title}\0${candidate.version_number}`, candidate.id);
     }
   }
-  const applied = [];
+  const referenced = [];
   for (const candidate of candidates) {
-    const path10 = candidate.path ? normalizeReference(candidate.path.replace(/^\.\//, "")) : "";
+    const path11 = candidate.path ? normalizeReference(candidate.path.replace(/^\.\//, "")) : "";
     const title = normalizeReference(candidate.title);
-    const pathPositions = unnegatedReferencePositions(message, path10);
-    const pathVersionKey = `${path10}\0${candidate.version_number}`;
-    const pathIsUnique = pathIds.get(path10)?.size === 1;
+    const pathPositions = unnegatedReferencePositions(message, path11);
+    const pathVersionKey = `${path11}\0${candidate.version_number}`;
+    const pathIsUnique = pathIds.get(path11)?.size === 1;
     const pathVersionIsUnique = pathVersionIds.get(pathVersionKey)?.size === 1;
     const pathMatch = pathPositions.length > 0 && (pathIsUnique || pathVersionIsUnique && pathPositions.some(
-      (position) => versionMentionNear(message, position, path10.length, candidate.version_number)
+      (position) => versionMentionNear(message, position, path11.length, candidate.version_number)
     ));
     const titlePositions = unnegatedReferencePositions(message, title);
     const titleVersionKey = `${title}\0${candidate.version_number}`;
@@ -5097,33 +5312,34 @@ function attributeAppliedItems(agentMessage, replay) {
       if (versioned && titleVersionIsUnique) return true;
       return titleIsUnique && titleReferenceIsExplicit(message, position, title.length);
     });
-    if (pathMatch || titleMatch) applied.push(candidate.id);
+    if (pathMatch || titleMatch) referenced.push(candidate.id);
   }
   return {
     applied_item_ids: applied,
-    attribution_mode: applied.length > 0 ? "explicit_final_message" : "no_explicit_reference"
+    referenced_item_ids: referenced,
+    attribution_mode: applied.length > 0 ? "structured_application_receipt" : referenced.length > 0 ? "explicit_reference" : "no_application_receipt"
   };
 }
 
 // packages/plugin-core/dist/state.js
-import { promises as fs6 } from "node:fs";
-import path8 from "node:path";
+import { promises as fs7 } from "node:fs";
+import path9 from "node:path";
 import os7 from "node:os";
 import crypto2 from "node:crypto";
-var STATE_FILE = path8.join(os7.homedir(), ".config", "memlin", "state.json");
+var STATE_FILE = path9.join(os7.homedir(), ".config", "memlin", "state.json");
 var EMPTY = { documents: {} };
 async function readState() {
   try {
-    const raw = await fs6.readFile(STATE_FILE, "utf8");
+    const raw = await fs7.readFile(STATE_FILE, "utf8");
     return JSON.parse(raw);
   } catch {
     return { ...EMPTY };
   }
 }
 async function writeState(state) {
-  await fs6.mkdir(path8.dirname(STATE_FILE), { recursive: true });
+  await fs7.mkdir(path9.dirname(STATE_FILE), { recursive: true });
   const tmp = `${STATE_FILE}.${process.pid}.tmp`;
-  await fs6.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
+  await fs7.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
   await atomicRename(tmp, STATE_FILE);
 }
 var LOCK_DIR = `${STATE_FILE}.lock`;
@@ -5134,10 +5350,29 @@ function getLastResolveForSession(state, sessionId) {
   return state.last_resolve?.session_id ? void 0 : state.last_resolve;
 }
 
+// packages/plugin-core/dist/scribe-notice.js
+function count(value) {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+function accumulateScribeNotice(existing, input) {
+  const captured = count(input.captured);
+  if (captured === 0) return existing;
+  const pending = input.pending == null ? captured : Math.min(captured, count(input.pending));
+  const sameSession = existing?.session_id === input.sessionId;
+  const carriedCaptured = sameSession ? count(existing.unsurfaced) : 0;
+  const carriedPending = sameSession ? existing.pending == null ? count(existing.unsurfaced) : Math.min(count(existing.unsurfaced), count(existing.pending)) : 0;
+  return {
+    unsurfaced: carriedCaptured + captured,
+    pending: carriedPending + pending,
+    session_id: input.sessionId,
+    at: input.at
+  };
+}
+
 // packages/plugin-core/dist/project-resolver.js
-import { execSync } from "node:child_process";
+import { execSync as execSync2 } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import path9 from "node:path";
+import path10 from "node:path";
 var ALLOW_ACCOUNT_MISMATCH_ENV = "MEMLIN_ALLOW_ACCOUNT_MISMATCH";
 function allowAccountMismatch(env = process.env) {
   const v = env[ALLOW_ACCOUNT_MISMATCH_ENV];
@@ -5150,7 +5385,7 @@ function accountBindingHazard(r, opts = {}) {
   return "none";
 }
 async function resolveProject(api, cwd, configProjectId) {
-  const absCwd = path9.resolve(cwd);
+  const absCwd = path10.resolve(cwd);
   const remotes = detectGitRemotes(cwd);
   const hasGitRemote = remotes.length > 0;
   try {
@@ -5168,7 +5403,8 @@ async function resolveProject(api, cwd, configProjectId) {
         project_name: result.name,
         account_id: result.account_id,
         reason: result.reason === "none" ? "config" : result.reason,
-        hasGitRemote
+        hasGitRemote,
+        enforce_done_deployed: result.enforce_done_deployed
       };
     }
   } catch {
@@ -5186,7 +5422,7 @@ async function resolveProject(api, cwd, configProjectId) {
 }
 function readGitRemote(cwd) {
   try {
-    const url = execSync("git remote get-url origin", {
+    const url = execSync2("git remote get-url origin", {
       windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
@@ -5210,8 +5446,8 @@ function detectGitRemotes(cwd) {
         continue;
       }
       scanned++;
-      const child = path9.join(cwd, entry.name);
-      if (!existsSync(path9.join(child, ".git"))) continue;
+      const child = path10.join(cwd, entry.name);
+      if (!existsSync(path10.join(child, ".git"))) continue;
       const remote = readGitRemote(child);
       if (remote && !out.includes(remote)) out.push(remote);
     }
@@ -5740,8 +5976,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path10, errorMaps, issueData } = params;
-  const fullPath = [...path10, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5857,11 +6093,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path10, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path10;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -9536,6 +9772,67 @@ var BrandGuidelinesFrontmatterSchema = external_exports.object({
 var import_gray_matter = __toESM(require_gray_matter(), 1);
 
 // packages/shared/dist/redact.js
+function luhnValid(digits) {
+  if (digits.length === 0) return false;
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    const d = digits.charCodeAt(i) - 48;
+    if (d < 0 || d > 9) return false;
+    let v = d;
+    if (double) {
+      v *= 2;
+      if (v > 9) v -= 9;
+    }
+    sum += v;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+function isValidCardNumber(match) {
+  const digits = match.replace(/\D/g, "");
+  if (digits.length < 13 || digits.length > 19) return false;
+  if (!/^[2-6]/.test(digits)) return false;
+  return luhnValid(digits);
+}
+function isValidUsSsn(match) {
+  const m = /^(\d{3})-(\d{2})-(\d{4})$/.exec(match);
+  if (!m) return false;
+  const area = Number(m[1]);
+  const group = Number(m[2]);
+  const serial = Number(m[3]);
+  if (area === 0 || area === 666 || area >= 900) return false;
+  if (group === 0) return false;
+  if (serial === 0) return false;
+  return true;
+}
+function mod97(numeric) {
+  let remainder = 0;
+  for (let i = 0; i < numeric.length; i++) {
+    remainder = (remainder * 10 + (numeric.charCodeAt(i) - 48)) % 97;
+  }
+  return remainder;
+}
+function isValidIban(match) {
+  const compact = match.replace(/[\s-]/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(compact)) return false;
+  const rearranged = compact.slice(4) + compact.slice(0, 4);
+  let numeric = "";
+  for (let i = 0; i < rearranged.length; i++) {
+    const c = rearranged.charCodeAt(i);
+    numeric += c >= 65 && c <= 90 ? String(c - 55) : rearranged[i];
+  }
+  return mod97(numeric) === 1;
+}
+function isValidAbaRouting(match) {
+  if (!/^\d{9}$/.test(match)) return false;
+  const prefix = Number(match.slice(0, 2));
+  const validPrefix = prefix <= 12 || prefix >= 21 && prefix <= 32 || prefix >= 61 && prefix <= 72 || prefix === 80;
+  if (!validPrefix) return false;
+  const d = (i) => match.charCodeAt(i) - 48;
+  const sum = 3 * (d(0) + d(3) + d(6)) + 7 * (d(1) + d(4) + d(7)) + (d(2) + d(5) + d(8));
+  return sum % 10 === 0;
+}
 var REDACTION_PATTERNS = [
   // ---------- AI provider keys ----------
   {
@@ -9630,6 +9927,45 @@ var REDACTION_PATTERNS = [
     // unlikely to appear in legitimate prose. Conservative length floors
     // on each segment keep this from matching short fragments.
     regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g
+  },
+  // ---------- PII (checksum / range-validated) ----------
+  // Unlike the key patterns above, a digit run is not self-identifying — the
+  // regex only nominates a candidate and `validate` makes the call. Kept last
+  // so the secret rules redact first (a card regex never nibbles a JWT/token).
+  {
+    name: "credit-card",
+    description: "Payment card number (Luhn-valid, 13\u201319 digits)",
+    // Candidate: 13–19 digits with optional single space/dash separators.
+    // Luhn + length + leading-digit gate live in isValidCardNumber so this
+    // regex stays readable. \b anchors keep it off digits glued to letters
+    // (hex hashes, ids like abc1234…).
+    regex: /\b\d(?:[ -]?\d){12,18}\b/g,
+    validate: isValidCardNumber
+  },
+  {
+    name: "us-ssn",
+    description: "US Social Security number (AAA-GG-SSSS)",
+    // Dashed form only — bare 9-digit runs collide with too many legitimate
+    // IDs. isValidUsSsn drops the SSA's never-issued area/group/serial ranges.
+    regex: /\b\d{3}-\d{2}-\d{4}\b/g,
+    validate: isValidUsSsn
+  },
+  {
+    name: "iban",
+    description: "International Bank Account Number (mod-97-valid)",
+    // Country code + 2 check digits + BBAN as 4-char groups (space-optional)
+    // plus a final 1–3 char group. Matching the real group-of-four print
+    // format — rather than "any alnum-or-space run" — stops the candidate
+    // from bleeding into trailing prose. isValidIban runs the mod-97.
+    regex: /\b[A-Za-z]{2}\d{2}(?:[ ]?[A-Za-z0-9]{4})+(?:[ ]?[A-Za-z0-9]{1,3})?\b/g,
+    validate: isValidIban
+  },
+  {
+    name: "us-bank-routing",
+    description: "US bank routing / ABA number (checksum-valid)",
+    // Bare 9-digit candidate; isValidAbaRouting gates on checksum + prefix.
+    regex: /\b\d{9}\b/g,
+    validate: isValidAbaRouting
   }
 ];
 for (const p of REDACTION_PATTERNS) {
@@ -10211,6 +10547,125 @@ var FEATURE_DISCOVERY_SYSTEM = [
   "where each members entry is an id from the inventory. No prose outside the JSON."
 ].join("\n");
 
+// packages/shared/dist/memory-taxonomy.js
+var MEMORY_TAXONOMY = [
+  // ---------------------------------------------------------------- process --
+  { term: "standup", facet: "process", forms: ["standup", "stand-up", "daily standup", "daily scrum", "daily sync"] },
+  // Bare "retro" survives on the hyphen guard, not on luck: "retro-fit" and
+  // "retro-compatible" are compounds, and nothing else in this corpus is retro.
+  { term: "retro", facet: "process", forms: ["retro", "retrospective", "sprint retro"] },
+  // Bare "planning" is meaningless on its own ("planning to ship"), so only the
+  // ritual names count.
+  { term: "planning", facet: "process", forms: ["sprint planning", "iteration planning", "planning meeting", "refinement session"] },
+  // NOT the verbs "onboard"/"offboard" — "onboard the new repo" is not a hire.
+  { term: "onboarding", facet: "process", forms: ["onboarding", "new hire", "onboarding checklist"] },
+  { term: "offboarding", facet: "process", forms: ["offboarding", "departure checklist"] },
+  // NOT bare "reviewer": this workspace ships a component called Memory
+  // Reviewer, and the word names a person on any kind of review.
+  { term: "code-review", facet: "process", forms: ["code review", "code-review", "pr review", "pull request review", "review checklist"] },
+  // NOT bare "release" — that is the technology axis's deploy/CI territory.
+  { term: "release-process", facet: "process", forms: ["release process", "release checklist", "release cadence", "release train", "cut a release"] },
+  { term: "oncall", facet: "process", forms: ["oncall", "on-call", "on call rotation", "pager rotation"] },
+  { term: "incident", facet: "process", forms: ["incident", "outage", "sev1", "sev-1", "sev2", "sev-2"] },
+  { term: "postmortem", facet: "process", forms: ["postmortem", "post-mortem", "root cause analysis", "rca", "incident review"] },
+  { term: "triage", facet: "process", forms: ["triage", "bug triage", "triage rotation"] },
+  { term: "handoff", facet: "process", forms: ["handoff", "hand-off", "handover", "shift handoff"] },
+  // The largest single class of memory in this corpus: a standing instruction
+  // about how work is done. "User directive:" is the literal title prefix the
+  // /memlin-remember path writes, which is why it is a form rather than a guess.
+  { term: "convention", facet: "process", forms: ["convention", "working agreement", "style guide", "house rule", "ground rule", "user directive", "standing instruction"] },
+  // ------------------------------------------------------------- commercial --
+  { term: "pricing", facet: "commercial", forms: ["pricing", "price list", "pricing tier", "rate card", "list price"] },
+  { term: "billing", facet: "commercial", forms: ["billing", "invoice", "invoicing", "billing cycle"] },
+  // The verb "renew" is out: certificates, tokens and leases all renew.
+  { term: "renewal", facet: "commercial", forms: ["renewal", "renewal date", "contract renewal", "subscription renewal"] },
+  // Bare "contract" is the worst word in this table for THIS repo: it ships
+  // packages/shared/src/memlin-contract.ts, contract tests for the MCP surface,
+  // "Reader contract" memories and component data contracts. Only the
+  // paperwork senses survive.
+  { term: "contract", facet: "commercial", forms: ["msa", "statement of work", "sow", "contract negotiation", "signed contract", "countersigned"] },
+  { term: "procurement", facet: "commercial", forms: ["procurement", "purchase order", "po number"] },
+  // Bare "customer" is engineering vocabulary here — customer-facing copy, the
+  // customer table, "the customer prefers blue" — so the facet needs the noun
+  // phrase that can only mean an account.
+  { term: "customer", facet: "commercial", forms: ["customer account", "customer contact", "customer meeting", "key customer", "enterprise customer"] },
+  // "downgrade" is semver and permissions here; bare "churn" is what tags do on
+  // reclassification; bare "cancellation" is an aborted request.
+  { term: "churn", facet: "commercial", forms: ["churn rate", "customer churn", "churned", "account cancellation", "subscription cancellation"] },
+  // "quota" is deliberately absent: an API quota is not a sales quota.
+  { term: "sales", facet: "commercial", forms: ["sales", "sales cycle", "sales pipeline", "win rate"] },
+  // A PoC or a "proof of concept" is a prototype in an engineering corpus, and
+  // "trial and error" is not a pilot.
+  { term: "trial", facet: "commercial", forms: ["free trial", "trial period", "trial account", "trial conversion", "pilot program"] },
+  { term: "discount", facet: "commercial", forms: ["discount", "promo code", "coupon"] },
+  { term: "competitor", facet: "commercial", forms: ["competitor", "competitive analysis", "competitive landscape"] },
+  { term: "partnership", facet: "commercial", forms: ["partnership", "partner program", "reseller"] },
+  // Bare "support" is the single most over-matching word in an eng corpus
+  // ("we support Node 20"), so only the desk meaning counts.
+  { term: "support", facet: "commercial", forms: ["customer support", "support ticket", "support queue", "help desk"] },
+  // ----------------------------------------------------------------- people --
+  { term: "hiring", facet: "people", forms: ["hiring", "recruiting", "job opening", "headcount"] },
+  // Bare "interview" is a user interview as often as a hiring one, and that is
+  // product research, not this facet.
+  { term: "interview", facet: "people", forms: ["interview loop", "interview panel", "interview debrief", "hiring interview", "take-home exercise"] },
+  // "promotion" is auto-promotion of facts and promoting a staging build here;
+  // "1:1" is a 1:1 mapping far more often than a meeting.
+  { term: "performance-review", facet: "people", forms: ["performance review", "perf review", "career ladder", "one-on-one", "promotion cycle"] },
+  // Bare "ownership" is Rust ownership, data ownership, buffer ownership.
+  { term: "ownership", facet: "people", forms: ["code owner", "code ownership", "owning team", "dri", "accountable for", "raci"] },
+  { term: "escalation", facet: "people", forms: ["escalation", "escalation path"] },
+  { term: "team-structure", facet: "people", forms: ["team structure", "org chart", "reporting line"] },
+  { term: "availability", facet: "people", forms: ["time off", "pto", "vacation", "working hours", "holiday schedule"] },
+  // ---------------------------------------------------------------- product --
+  { term: "roadmap", facet: "product", forms: ["roadmap", "quarterly plan", "product plan"] },
+  { term: "requirement", facet: "product", forms: ["requirement", "acceptance criteria", "user story", "product spec"] },
+  // Bare "decision" would tag most of the corpus — `decision` is a document kind
+  // here. Only the artefact and the act of deciding count.
+  { term: "decision", facet: "product", forms: ["decision record", "architecture decision", "adr", "decision log", "we decided", "decided to"] },
+  { term: "tradeoff", facet: "product", forms: ["tradeoff", "trade-off", "trade off", "pros and cons"] },
+  { term: "deprecation", facet: "product", forms: ["deprecation", "deprecated", "sunset", "end of life", "eol"] },
+  { term: "feedback", facet: "product", forms: ["user feedback", "customer feedback", "feature request"] },
+  // Bare "launch" means starting a process in half this corpus.
+  { term: "launch", facet: "product", forms: ["product launch", "launch plan", "launch date", "go-live", "general availability", "beta program"] },
+  // The verb is out: "prioritize the fast path" is a routing decision.
+  { term: "prioritization", facet: "product", forms: ["prioritization", "priority order", "must-have"] },
+  { term: "backlog", facet: "product", forms: ["backlog", "icebox"] },
+  // ------------------------------------------------------------- operations --
+  // Bare "playbook" is out — a demo playbook is a script for a sales call, not
+  // an operating procedure — but the qualified ops senses stay.
+  { term: "runbook", facet: "operations", forms: ["runbook", "run book", "operating procedure", "ops playbook", "incident playbook"] },
+  { term: "sla", facet: "operations", forms: ["sla", "slo", "uptime target", "service level"] },
+  // Bare "budget" is taken: the resolver has a delivery budget and the insight
+  // scanner an emission budget, neither of which is money.
+  // ...and "spend" is the other half of the same word: the real title "Flat
+  // token_budget is the limit, never the spend" is about a token budget.
+  { term: "budget", facet: "operations", forms: ["annual budget", "budget approval", "budget owner", "cost cap", "burn rate"] },
+  { term: "compliance", facet: "operations", forms: ["compliance", "soc 2", "soc2", "gdpr", "hipaa", "iso 27001"] },
+  // Bare "audit" is taken too — a resolve audit is a debugging trace, not a
+  // control test.
+  { term: "audit", facet: "operations", forms: ["compliance audit", "external audit", "audit finding", "audit evidence", "auditor"] },
+  { term: "security-policy", facet: "operations", forms: ["security policy", "security review", "threat model", "vulnerability disclosure"] },
+  { term: "data-retention", facet: "operations", forms: ["data retention", "retention policy", "purge policy", "right to be forgotten"] },
+  { term: "access-control", facet: "operations", forms: ["access control", "access review", "least privilege", "permissions policy", "rbac"] },
+  // Bare "privacy" is a macOS settings pane and a /privacy route here, so the
+  // policy senses carry the term instead.
+  { term: "privacy", facet: "operations", forms: ["privacy policy", "data privacy", "pii", "personal data", "data processing agreement", "dpa"] },
+  // Bare "legal" is an adjective in this corpus — a legal value, a legal state,
+  // a legal move.
+  { term: "legal", facet: "operations", forms: ["legal review", "legal counsel", "legal team", "terms of service", "nda", "liability"] },
+  { term: "licensing", facet: "operations", forms: ["license", "licence", "licensing", "license compatibility"] },
+  { term: "vendor", facet: "operations", forms: ["vendor", "third-party provider", "subprocessor", "supplier"] },
+  { term: "disaster-recovery", facet: "operations", forms: ["disaster recovery", "backup policy", "business continuity", "rto", "rpo"] },
+  { term: "governance", facet: "operations", forms: ["governance", "approval policy", "change control", "sign-off"] }
+];
+var TAXONOMY_TERMS = new Set(MEMORY_TAXONOMY.map((e) => e.term));
+var TAXONOMY_CANONICAL_BY_FORM = new Map(
+  MEMORY_TAXONOMY.flatMap((e) => e.forms.map((f) => [f, e.term]))
+);
+var FACET_BY_TERM = new Map(
+  MEMORY_TAXONOMY.map((e) => [e.term, e.facet])
+);
+
 // packages/plugin-core/dist/stop-handler.js
 var MEMORABLE_USER_PATTERNS = [
   // Explicit memory triggers.
@@ -10247,7 +10702,7 @@ function flattenContent(c) {
 async function readLastExchange(transcriptPath) {
   let raw;
   try {
-    raw = await fs7.readFile(transcriptPath, "utf8");
+    raw = await fs8.readFile(transcriptPath, "utf8");
   } catch {
     return null;
   }
@@ -10289,7 +10744,7 @@ function nonNegativeInt(v) {
 async function readLastAssistantUsage(transcriptPath) {
   let raw;
   try {
-    raw = await fs7.readFile(transcriptPath, "utf8");
+    raw = await fs8.readFile(transcriptPath, "utf8");
   } catch {
     return null;
   }
@@ -10334,7 +10789,7 @@ async function heartbeat(cwd) {
 }
 function readGitRemote2(cwd) {
   try {
-    const url = execSync2("git remote get-url origin", {
+    const url = execSync3("git remote get-url origin", {
       windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
@@ -10469,6 +10924,7 @@ async function maybeRecordOutcome(ctx, payload) {
   const taskCategory = classifyTask(lastResolve.task);
   let attribution = {
     applied_item_ids: [],
+    referenced_item_ids: [],
     attribution_mode: "replay_unavailable"
   };
   try {
@@ -10494,6 +10950,7 @@ async function maybeRecordOutcome(ctx, payload) {
         agent_apology: agentApology,
         task_category: taskCategory,
         applied_item_ids: attribution.applied_item_ids,
+        referenced_item_ids: attribution.referenced_item_ids,
         attribution_mode: attribution.attribution_mode
       }
     });
@@ -10570,7 +11027,7 @@ async function maybeScribeSession(ctx, payload) {
   if (!payload.transcript_path) return;
   let raw;
   try {
-    raw = await fs7.readFile(payload.transcript_path, "utf8");
+    raw = await fs8.readFile(payload.transcript_path, "utf8");
   } catch {
     return;
   }
@@ -10649,18 +11106,22 @@ ${text}`);
       run_id: "",
       proposals_extracted: 0,
       proposals_persisted: 0,
+      proposals_pending: 0,
       proposal_ids: [],
       latency_ms: 0,
       truncated: false
     });
     if (result.proposals_persisted > 0) {
-      log(`session scribe: ${result.proposals_persisted} proposal(s) queued`);
-      const carried = state.scribe_notice && state.scribe_notice.session_id === sessionId ? state.scribe_notice.unsurfaced : 0;
-      state.scribe_notice = {
-        unsurfaced: carried + result.proposals_persisted,
-        session_id: sessionId,
+      const pending = typeof result.proposals_pending === "number" ? Math.max(0, Math.min(result.proposals_persisted, result.proposals_pending)) : result.proposals_persisted;
+      log(
+        `session scribe: ${result.proposals_persisted} proposal(s) captured, ${pending} pending review`
+      );
+      state.scribe_notice = accumulateScribeNotice(state.scribe_notice, {
+        captured: result.proposals_persisted,
+        pending: result.proposals_pending,
+        sessionId,
         at: now
-      };
+      });
     }
     state.session_scribe = {
       at: now,
@@ -10749,7 +11210,7 @@ async function maybeUpsertWorkingMemory(ctx, payload) {
     log("working memory: skipped \u2014 no resolve or exchange yet");
     return;
   }
-  const path10 = workingMemoryPath(sessionId);
+  const path11 = workingMemoryPath(sessionId);
   const callOpts = accountOverride ? { accountId: accountOverride } : {};
   let documentId = state.working_memory_ids?.[sessionId] ?? null;
   if (!documentId) {
@@ -10765,7 +11226,7 @@ async function maybeUpsertWorkingMemory(ctx, payload) {
         TIMEOUT_MS,
         []
       );
-      const hit = docs.find((d) => d.path === path10);
+      const hit = docs.find((d) => d.path === path11);
       if (hit) documentId = hit.id;
     } catch (err) {
       log(
@@ -10780,7 +11241,7 @@ async function maybeUpsertWorkingMemory(ctx, payload) {
         scope: resolvedProjectId ? "project" : "team",
         kind: "memory",
         title: `Working memory \u2014 ${sessionId.slice(0, 12)}`,
-        path: path10,
+        path: path11,
         content,
         commit_message: "session working memory",
         project_id: resolvedProjectId,
@@ -10806,13 +11267,18 @@ async function maybeUpsertWorkingMemory(ctx, payload) {
       next.working_memory_ids = Object.fromEntries(ids.slice(ids.length - 64));
     }
     await writeState(next);
-    log(`working memory: upserted ${path10} (v${result.version_number})`);
+    log(`working memory: upserted ${path11} (v${result.version_number})`);
   } catch (err) {
     log(`working memory failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 async function runStopHandler(payload) {
   const cwd = payload.cwd ?? process.cwd();
+  const gate = await enforceDoneMeansDeployed(payload);
+  if (gate) {
+    process.stdout.write(JSON.stringify(gate));
+    return;
+  }
   const ctx = await getApi({ cwd });
   if (!ctx) return;
   await Promise.allSettled([
@@ -10865,7 +11331,7 @@ async function main() {
 }
 main().catch(() => {
   process.stdout.write("{}");
-  process.exit(0);
+  exitHook(0);
 });
 /*! Bundled license information:
 

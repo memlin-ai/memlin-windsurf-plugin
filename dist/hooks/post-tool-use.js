@@ -75,6 +75,43 @@ function resolveHost() {
   return (make ?? HOSTS["claude-code"])();
 }
 
+// packages/plugin-core/dist/runtime-shared.js
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
+
+// packages/plugin-core/dist/hook-exit.js
+var HOOK_WATCHDOG_MS = 2e3;
+function releaseStdin() {
+  try {
+    const stdin = process.stdin;
+    stdin.pause();
+    stdin.unref?.();
+  } catch {
+  }
+}
+function exitHook(code) {
+  process.exitCode = code;
+  releaseStdin();
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), HOOK_WATCHDOG_MS).unref();
+}
+
 // apps/windsurf-plugin/src/hook-io.ts
 function readHookInput() {
   return new Promise((resolve) => {
@@ -117,6 +154,7 @@ async function main() {
   if (abs && abs.startsWith(plansDir + path2.sep) && abs.endsWith(".md")) {
     try {
       const child = spawn(process.execPath, [PUSH_PLAN_BIN, abs], {
+        windowsHide: true,
         env: { ...process.env, MEMLIN_HOST: "windsurf" },
         detached: true,
         stdio: "ignore"
@@ -129,5 +167,5 @@ async function main() {
 }
 main().catch(() => {
   process.stdout.write("{}");
-  process.exit(0);
+  exitHook(0);
 });

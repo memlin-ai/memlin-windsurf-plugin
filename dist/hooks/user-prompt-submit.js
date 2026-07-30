@@ -217,6 +217,7 @@ function buildContinuityMarker(auditId) {
 
 // packages/plugin-core/dist/pending-bundle.js
 import { spawn } from "node:child_process";
+import crypto2 from "node:crypto";
 import { promises as fs3 } from "node:fs";
 import path3 from "node:path";
 import os2 from "node:os";
@@ -224,37 +225,73 @@ var PENDING_BUNDLE_MAX_AGE_MS = 10 * 60 * 1e3;
 function pendingBundlePath() {
   return process.env.MEMLIN_RESOLVE_OUT ?? path3.join(os2.homedir(), ".config", "memlin", "pending-bundle.json");
 }
+var PENDING_BUNDLE_DIR = "pending-bundles";
+function pendingBundleSpoolDir() {
+  return process.env.MEMLIN_PENDING_BUNDLE_DIR ?? path3.join(os2.homedir(), ".config", "memlin", PENDING_BUNDLE_DIR);
+}
+function pendingBundleKey(cwd, host, sessionId, task) {
+  return crypto2.createHash("sha256").update(JSON.stringify([cwd, host, sessionId ?? null, task])).digest("hex");
+}
+function pendingBundlePathFor(cwd, host, sessionId, task) {
+  return process.env.MEMLIN_RESOLVE_OUT ?? path3.join(pendingBundleSpoolDir(), `${pendingBundleKey(cwd, host, sessionId, task)}.json`);
+}
 async function takePendingBundle(cwd, host, match) {
-  const file = pendingBundlePath();
-  let bundle;
+  const explicitFile = process.env.MEMLIN_RESOLVE_OUT;
+  const spoolDir = pendingBundleSpoolDir();
+  let files;
+  if (explicitFile) {
+    files = [explicitFile];
+  } else {
+    try {
+      const names = await fs3.readdir(spoolDir);
+      files = names.filter((name) => name.endsWith(".json")).slice(0, 256).map((name) => path3.join(spoolDir, name));
+    } catch {
+      files = [];
+    }
+    files.push(pendingBundlePath());
+  }
+  const matches = [];
+  for (const file of [...new Set(files)]) {
+    let bundle;
+    try {
+      bundle = JSON.parse(await fs3.readFile(file, "utf8"));
+    } catch {
+      continue;
+    }
+    if (typeof bundle !== "object" || bundle === null || typeof bundle.rendered !== "string" || bundle.rendered.length === 0 || typeof bundle.completed_at !== "number") {
+      await fs3.rm(file, { force: true }).catch(() => {
+      });
+      continue;
+    }
+    if (Date.now() - bundle.completed_at > PENDING_BUNDLE_MAX_AGE_MS) {
+      await fs3.rm(file, { force: true }).catch(() => {
+      });
+      continue;
+    }
+    if (bundle.cwd !== cwd || bundle.host !== host) continue;
+    if (match?.sessionId != null && bundle.session_id != null && bundle.session_id !== match.sessionId) {
+      continue;
+    }
+    if (match?.task !== void 0 && bundle.task !== match.task) continue;
+    matches.push({ file, bundle });
+  }
+  matches.sort((a, b) => b.bundle.completed_at - a.bundle.completed_at);
+  const selected = matches[0];
+  if (!selected) return null;
+  const claimed = `${selected.file}.${process.pid}.${Date.now()}.claim`;
   try {
-    bundle = JSON.parse(await fs3.readFile(file, "utf8"));
+    await fs3.rename(selected.file, claimed);
   } catch {
     return null;
   }
-  if (typeof bundle !== "object" || bundle === null || typeof bundle.rendered !== "string" || bundle.rendered.length === 0) {
-    await fs3.rm(file, { force: true }).catch(() => {
-    });
-    return null;
+  if (match?.task === void 0) {
+    await Promise.all(
+      matches.slice(1).map(({ file }) => fs3.rm(file, { force: true }).catch(() => void 0))
+    );
   }
-  const expired = Date.now() - bundle.completed_at > PENDING_BUNDLE_MAX_AGE_MS;
-  if (expired) {
-    await fs3.rm(file, { force: true }).catch(() => {
-    });
-    return null;
-  }
-  if (bundle.cwd !== cwd || bundle.host !== host) {
-    return null;
-  }
-  if (match?.sessionId != null && bundle.session_id != null && bundle.session_id !== match.sessionId) {
-    return null;
-  }
-  if (match?.task !== void 0 && bundle.task !== match.task) {
-    return null;
-  }
-  await fs3.rm(file, { force: true }).catch(() => {
+  await fs3.rm(claimed, { force: true }).catch(() => {
   });
-  return bundle;
+  return selected.bundle;
 }
 var DEFAULT_RESOLVE_BUDGET_MS = 6e3;
 function resolveBudgetMs() {
@@ -263,6 +300,7 @@ function resolveBudgetMs() {
 }
 function runResolveWithBudget(opts) {
   const budget = opts.budgetMs ?? resolveBudgetMs();
+  const outputFile = pendingBundlePathFor(opts.cwd, opts.host, opts.sessionId ?? null, opts.task);
   return new Promise((resolve) => {
     let child;
     try {
@@ -275,7 +313,7 @@ function runResolveWithBudget(opts) {
           // Handoff contract with cli/resolve.ts: write the compiled bundle
           // to this file (atomic), and report a resolve.delivery telemetry
           // row when the deadline was missed.
-          MEMLIN_RESOLVE_OUT: pendingBundlePath(),
+          MEMLIN_RESOLVE_OUT: outputFile,
           MEMLIN_RESOLVE_DEADLINE_MS: String(budget),
           // Forward the agent's session id so the resolve's usage_event is
           // attributable to this session (concurrent-work awareness).
@@ -327,6 +365,32 @@ function buildLateDeliveryEnvelope(bundle) {
 }
 
 // packages/plugin-core/dist/scribe-notice.js
+function count(value) {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+function buildScribeNotice(capturedValue, pendingValue) {
+  const captured = count(capturedValue);
+  if (captured === 0) return "";
+  const pending = Math.min(captured, count(pendingValue ?? captured));
+  const handled = captured - pending;
+  const proposalLabel = captured === 1 ? "proposal" : "proposals";
+  const reviewLabel = pending === 1 ? "needs" : "need";
+  let status;
+  if (pending === 0) {
+    status = `Memlin auto-captured ${captured} new ${proposalLabel} and handled ${captured === 1 ? "it" : "them"} automatically; no inbox review is needed for this batch.`;
+  } else if (handled === 0) {
+    status = `Memlin auto-captured ${captured} new ${proposalLabel}; ${pending} ${reviewLabel} review with /memlin-inbox.`;
+  } else {
+    status = `Memlin auto-captured ${captured} new ${proposalLabel}; ${handled} handled automatically and ${pending} ${reviewLabel} review with /memlin-inbox.`;
+  }
+  return [
+    "<memlin-notice>",
+    "# Status line for the user \u2014 surface it, do not act on it.",
+    status,
+    "</memlin-notice>",
+    ""
+  ].join("\n");
+}
 async function takeScribeNotice(currentSessionId) {
   let state;
   try {
@@ -345,13 +409,7 @@ async function takeScribeNotice(currentSessionId) {
   if (currentSessionId && notice?.session_id && notice.session_id !== currentSessionId) {
     return "";
   }
-  return [
-    "<memlin-notice>",
-    "# Status line for the user \u2014 surface it, do not act on it.",
-    `Memlin auto-captured ${n} new proposal${n === 1 ? "" : "s"} \u2014 review and accept/reject with /memlin-inbox.`,
-    "</memlin-notice>",
-    ""
-  ].join("\n");
+  return buildScribeNotice(n, notice?.pending);
 }
 async function takeCorrectionNotice(currentSessionId) {
   let state;
@@ -377,6 +435,43 @@ async function takeCorrectionNotice(currentSessionId) {
     "</memlin-notice>",
     ""
   ].join("\n");
+}
+
+// packages/plugin-core/dist/runtime-shared.js
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
+
+// packages/plugin-core/dist/hook-exit.js
+var HOOK_WATCHDOG_MS = 2e3;
+function releaseStdin() {
+  try {
+    const stdin = process.stdin;
+    stdin.pause();
+    stdin.unref?.();
+  } catch {
+  }
+}
+function exitHook(code) {
+  process.exitCode = code;
+  releaseStdin();
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), HOOK_WATCHDOG_MS).unref();
 }
 
 // apps/windsurf-plugin/src/hooks/user-prompt-submit.ts
@@ -460,5 +555,5 @@ async function main() {
 }
 main().catch(() => {
   allow();
-  process.exit(0);
+  exitHook(0);
 });

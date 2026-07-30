@@ -7795,6 +7795,67 @@ var BrandGuidelinesFrontmatterSchema = external_exports.object({
 var import_gray_matter = __toESM(require_gray_matter(), 1);
 
 // packages/shared/dist/redact.js
+function luhnValid(digits) {
+  if (digits.length === 0) return false;
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    const d = digits.charCodeAt(i) - 48;
+    if (d < 0 || d > 9) return false;
+    let v = d;
+    if (double) {
+      v *= 2;
+      if (v > 9) v -= 9;
+    }
+    sum += v;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+function isValidCardNumber(match) {
+  const digits = match.replace(/\D/g, "");
+  if (digits.length < 13 || digits.length > 19) return false;
+  if (!/^[2-6]/.test(digits)) return false;
+  return luhnValid(digits);
+}
+function isValidUsSsn(match) {
+  const m = /^(\d{3})-(\d{2})-(\d{4})$/.exec(match);
+  if (!m) return false;
+  const area = Number(m[1]);
+  const group = Number(m[2]);
+  const serial = Number(m[3]);
+  if (area === 0 || area === 666 || area >= 900) return false;
+  if (group === 0) return false;
+  if (serial === 0) return false;
+  return true;
+}
+function mod97(numeric) {
+  let remainder = 0;
+  for (let i = 0; i < numeric.length; i++) {
+    remainder = (remainder * 10 + (numeric.charCodeAt(i) - 48)) % 97;
+  }
+  return remainder;
+}
+function isValidIban(match) {
+  const compact = match.replace(/[\s-]/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(compact)) return false;
+  const rearranged = compact.slice(4) + compact.slice(0, 4);
+  let numeric = "";
+  for (let i = 0; i < rearranged.length; i++) {
+    const c = rearranged.charCodeAt(i);
+    numeric += c >= 65 && c <= 90 ? String(c - 55) : rearranged[i];
+  }
+  return mod97(numeric) === 1;
+}
+function isValidAbaRouting(match) {
+  if (!/^\d{9}$/.test(match)) return false;
+  const prefix = Number(match.slice(0, 2));
+  const validPrefix = prefix <= 12 || prefix >= 21 && prefix <= 32 || prefix >= 61 && prefix <= 72 || prefix === 80;
+  if (!validPrefix) return false;
+  const d = (i) => match.charCodeAt(i) - 48;
+  const sum = 3 * (d(0) + d(3) + d(6)) + 7 * (d(1) + d(4) + d(7)) + (d(2) + d(5) + d(8));
+  return sum % 10 === 0;
+}
 var REDACTION_PATTERNS = [
   // ---------- AI provider keys ----------
   {
@@ -7889,6 +7950,45 @@ var REDACTION_PATTERNS = [
     // unlikely to appear in legitimate prose. Conservative length floors
     // on each segment keep this from matching short fragments.
     regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g
+  },
+  // ---------- PII (checksum / range-validated) ----------
+  // Unlike the key patterns above, a digit run is not self-identifying — the
+  // regex only nominates a candidate and `validate` makes the call. Kept last
+  // so the secret rules redact first (a card regex never nibbles a JWT/token).
+  {
+    name: "credit-card",
+    description: "Payment card number (Luhn-valid, 13\u201319 digits)",
+    // Candidate: 13–19 digits with optional single space/dash separators.
+    // Luhn + length + leading-digit gate live in isValidCardNumber so this
+    // regex stays readable. \b anchors keep it off digits glued to letters
+    // (hex hashes, ids like abc1234…).
+    regex: /\b\d(?:[ -]?\d){12,18}\b/g,
+    validate: isValidCardNumber
+  },
+  {
+    name: "us-ssn",
+    description: "US Social Security number (AAA-GG-SSSS)",
+    // Dashed form only — bare 9-digit runs collide with too many legitimate
+    // IDs. isValidUsSsn drops the SSA's never-issued area/group/serial ranges.
+    regex: /\b\d{3}-\d{2}-\d{4}\b/g,
+    validate: isValidUsSsn
+  },
+  {
+    name: "iban",
+    description: "International Bank Account Number (mod-97-valid)",
+    // Country code + 2 check digits + BBAN as 4-char groups (space-optional)
+    // plus a final 1–3 char group. Matching the real group-of-four print
+    // format — rather than "any alnum-or-space run" — stops the candidate
+    // from bleeding into trailing prose. isValidIban runs the mod-97.
+    regex: /\b[A-Za-z]{2}\d{2}(?:[ ]?[A-Za-z0-9]{4})+(?:[ ]?[A-Za-z0-9]{1,3})?\b/g,
+    validate: isValidIban
+  },
+  {
+    name: "us-bank-routing",
+    description: "US bank routing / ABA number (checksum-valid)",
+    // Bare 9-digit candidate; isValidAbaRouting gates on checksum + prefix.
+    regex: /\b\d{9}\b/g,
+    validate: isValidAbaRouting
   }
 ];
 for (const p of REDACTION_PATTERNS) {
@@ -8070,6 +8170,125 @@ var FEATURE_DISCOVERY_SYSTEM = [
   '{ "features": [ { "name": string, "summary": string, "members": string[] } ] }',
   "where each members entry is an id from the inventory. No prose outside the JSON."
 ].join("\n");
+
+// packages/shared/dist/memory-taxonomy.js
+var MEMORY_TAXONOMY = [
+  // ---------------------------------------------------------------- process --
+  { term: "standup", facet: "process", forms: ["standup", "stand-up", "daily standup", "daily scrum", "daily sync"] },
+  // Bare "retro" survives on the hyphen guard, not on luck: "retro-fit" and
+  // "retro-compatible" are compounds, and nothing else in this corpus is retro.
+  { term: "retro", facet: "process", forms: ["retro", "retrospective", "sprint retro"] },
+  // Bare "planning" is meaningless on its own ("planning to ship"), so only the
+  // ritual names count.
+  { term: "planning", facet: "process", forms: ["sprint planning", "iteration planning", "planning meeting", "refinement session"] },
+  // NOT the verbs "onboard"/"offboard" — "onboard the new repo" is not a hire.
+  { term: "onboarding", facet: "process", forms: ["onboarding", "new hire", "onboarding checklist"] },
+  { term: "offboarding", facet: "process", forms: ["offboarding", "departure checklist"] },
+  // NOT bare "reviewer": this workspace ships a component called Memory
+  // Reviewer, and the word names a person on any kind of review.
+  { term: "code-review", facet: "process", forms: ["code review", "code-review", "pr review", "pull request review", "review checklist"] },
+  // NOT bare "release" — that is the technology axis's deploy/CI territory.
+  { term: "release-process", facet: "process", forms: ["release process", "release checklist", "release cadence", "release train", "cut a release"] },
+  { term: "oncall", facet: "process", forms: ["oncall", "on-call", "on call rotation", "pager rotation"] },
+  { term: "incident", facet: "process", forms: ["incident", "outage", "sev1", "sev-1", "sev2", "sev-2"] },
+  { term: "postmortem", facet: "process", forms: ["postmortem", "post-mortem", "root cause analysis", "rca", "incident review"] },
+  { term: "triage", facet: "process", forms: ["triage", "bug triage", "triage rotation"] },
+  { term: "handoff", facet: "process", forms: ["handoff", "hand-off", "handover", "shift handoff"] },
+  // The largest single class of memory in this corpus: a standing instruction
+  // about how work is done. "User directive:" is the literal title prefix the
+  // /memlin-remember path writes, which is why it is a form rather than a guess.
+  { term: "convention", facet: "process", forms: ["convention", "working agreement", "style guide", "house rule", "ground rule", "user directive", "standing instruction"] },
+  // ------------------------------------------------------------- commercial --
+  { term: "pricing", facet: "commercial", forms: ["pricing", "price list", "pricing tier", "rate card", "list price"] },
+  { term: "billing", facet: "commercial", forms: ["billing", "invoice", "invoicing", "billing cycle"] },
+  // The verb "renew" is out: certificates, tokens and leases all renew.
+  { term: "renewal", facet: "commercial", forms: ["renewal", "renewal date", "contract renewal", "subscription renewal"] },
+  // Bare "contract" is the worst word in this table for THIS repo: it ships
+  // packages/shared/src/memlin-contract.ts, contract tests for the MCP surface,
+  // "Reader contract" memories and component data contracts. Only the
+  // paperwork senses survive.
+  { term: "contract", facet: "commercial", forms: ["msa", "statement of work", "sow", "contract negotiation", "signed contract", "countersigned"] },
+  { term: "procurement", facet: "commercial", forms: ["procurement", "purchase order", "po number"] },
+  // Bare "customer" is engineering vocabulary here — customer-facing copy, the
+  // customer table, "the customer prefers blue" — so the facet needs the noun
+  // phrase that can only mean an account.
+  { term: "customer", facet: "commercial", forms: ["customer account", "customer contact", "customer meeting", "key customer", "enterprise customer"] },
+  // "downgrade" is semver and permissions here; bare "churn" is what tags do on
+  // reclassification; bare "cancellation" is an aborted request.
+  { term: "churn", facet: "commercial", forms: ["churn rate", "customer churn", "churned", "account cancellation", "subscription cancellation"] },
+  // "quota" is deliberately absent: an API quota is not a sales quota.
+  { term: "sales", facet: "commercial", forms: ["sales", "sales cycle", "sales pipeline", "win rate"] },
+  // A PoC or a "proof of concept" is a prototype in an engineering corpus, and
+  // "trial and error" is not a pilot.
+  { term: "trial", facet: "commercial", forms: ["free trial", "trial period", "trial account", "trial conversion", "pilot program"] },
+  { term: "discount", facet: "commercial", forms: ["discount", "promo code", "coupon"] },
+  { term: "competitor", facet: "commercial", forms: ["competitor", "competitive analysis", "competitive landscape"] },
+  { term: "partnership", facet: "commercial", forms: ["partnership", "partner program", "reseller"] },
+  // Bare "support" is the single most over-matching word in an eng corpus
+  // ("we support Node 20"), so only the desk meaning counts.
+  { term: "support", facet: "commercial", forms: ["customer support", "support ticket", "support queue", "help desk"] },
+  // ----------------------------------------------------------------- people --
+  { term: "hiring", facet: "people", forms: ["hiring", "recruiting", "job opening", "headcount"] },
+  // Bare "interview" is a user interview as often as a hiring one, and that is
+  // product research, not this facet.
+  { term: "interview", facet: "people", forms: ["interview loop", "interview panel", "interview debrief", "hiring interview", "take-home exercise"] },
+  // "promotion" is auto-promotion of facts and promoting a staging build here;
+  // "1:1" is a 1:1 mapping far more often than a meeting.
+  { term: "performance-review", facet: "people", forms: ["performance review", "perf review", "career ladder", "one-on-one", "promotion cycle"] },
+  // Bare "ownership" is Rust ownership, data ownership, buffer ownership.
+  { term: "ownership", facet: "people", forms: ["code owner", "code ownership", "owning team", "dri", "accountable for", "raci"] },
+  { term: "escalation", facet: "people", forms: ["escalation", "escalation path"] },
+  { term: "team-structure", facet: "people", forms: ["team structure", "org chart", "reporting line"] },
+  { term: "availability", facet: "people", forms: ["time off", "pto", "vacation", "working hours", "holiday schedule"] },
+  // ---------------------------------------------------------------- product --
+  { term: "roadmap", facet: "product", forms: ["roadmap", "quarterly plan", "product plan"] },
+  { term: "requirement", facet: "product", forms: ["requirement", "acceptance criteria", "user story", "product spec"] },
+  // Bare "decision" would tag most of the corpus — `decision` is a document kind
+  // here. Only the artefact and the act of deciding count.
+  { term: "decision", facet: "product", forms: ["decision record", "architecture decision", "adr", "decision log", "we decided", "decided to"] },
+  { term: "tradeoff", facet: "product", forms: ["tradeoff", "trade-off", "trade off", "pros and cons"] },
+  { term: "deprecation", facet: "product", forms: ["deprecation", "deprecated", "sunset", "end of life", "eol"] },
+  { term: "feedback", facet: "product", forms: ["user feedback", "customer feedback", "feature request"] },
+  // Bare "launch" means starting a process in half this corpus.
+  { term: "launch", facet: "product", forms: ["product launch", "launch plan", "launch date", "go-live", "general availability", "beta program"] },
+  // The verb is out: "prioritize the fast path" is a routing decision.
+  { term: "prioritization", facet: "product", forms: ["prioritization", "priority order", "must-have"] },
+  { term: "backlog", facet: "product", forms: ["backlog", "icebox"] },
+  // ------------------------------------------------------------- operations --
+  // Bare "playbook" is out — a demo playbook is a script for a sales call, not
+  // an operating procedure — but the qualified ops senses stay.
+  { term: "runbook", facet: "operations", forms: ["runbook", "run book", "operating procedure", "ops playbook", "incident playbook"] },
+  { term: "sla", facet: "operations", forms: ["sla", "slo", "uptime target", "service level"] },
+  // Bare "budget" is taken: the resolver has a delivery budget and the insight
+  // scanner an emission budget, neither of which is money.
+  // ...and "spend" is the other half of the same word: the real title "Flat
+  // token_budget is the limit, never the spend" is about a token budget.
+  { term: "budget", facet: "operations", forms: ["annual budget", "budget approval", "budget owner", "cost cap", "burn rate"] },
+  { term: "compliance", facet: "operations", forms: ["compliance", "soc 2", "soc2", "gdpr", "hipaa", "iso 27001"] },
+  // Bare "audit" is taken too — a resolve audit is a debugging trace, not a
+  // control test.
+  { term: "audit", facet: "operations", forms: ["compliance audit", "external audit", "audit finding", "audit evidence", "auditor"] },
+  { term: "security-policy", facet: "operations", forms: ["security policy", "security review", "threat model", "vulnerability disclosure"] },
+  { term: "data-retention", facet: "operations", forms: ["data retention", "retention policy", "purge policy", "right to be forgotten"] },
+  { term: "access-control", facet: "operations", forms: ["access control", "access review", "least privilege", "permissions policy", "rbac"] },
+  // Bare "privacy" is a macOS settings pane and a /privacy route here, so the
+  // policy senses carry the term instead.
+  { term: "privacy", facet: "operations", forms: ["privacy policy", "data privacy", "pii", "personal data", "data processing agreement", "dpa"] },
+  // Bare "legal" is an adjective in this corpus — a legal value, a legal state,
+  // a legal move.
+  { term: "legal", facet: "operations", forms: ["legal review", "legal counsel", "legal team", "terms of service", "nda", "liability"] },
+  { term: "licensing", facet: "operations", forms: ["license", "licence", "licensing", "license compatibility"] },
+  { term: "vendor", facet: "operations", forms: ["vendor", "third-party provider", "subprocessor", "supplier"] },
+  { term: "disaster-recovery", facet: "operations", forms: ["disaster recovery", "backup policy", "business continuity", "rto", "rpo"] },
+  { term: "governance", facet: "operations", forms: ["governance", "approval policy", "change control", "sign-off"] }
+];
+var TAXONOMY_TERMS = new Set(MEMORY_TAXONOMY.map((e) => e.term));
+var TAXONOMY_CANONICAL_BY_FORM = new Map(
+  MEMORY_TAXONOMY.flatMap((e) => e.forms.map((f) => [f, e.term]))
+);
+var FACET_BY_TERM = new Map(
+  MEMORY_TAXONOMY.map((e) => [e.term, e.facet])
+);
 
 // packages/plugin-core/src/cli/resolve-args.ts
 function parseResolveArgs(argv) {
