@@ -63477,6 +63477,7 @@ var RERANK_TIMEOUT_MS = 4e3;
 var RERANK_EXCERPT_CHARS = 500;
 var RERANK_MIN_COVERAGE = 0.5;
 var RERANK_SKILL_MIN_SCORE = 0.15;
+var SKILL_RERANK_CANDIDATE_THRESHOLD = 0.4;
 var BRAND_GUIDELINES_LOGO_SIGNED_URL_TTL_SECONDS = 60 * 60;
 var KIND_THRESHOLDS = {
   skill: 0.5,
@@ -64370,12 +64371,22 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   const candidates = [];
   const omittedCandidates = [];
   const candidateIdsNeedingStatus = [];
+  const skipRerank = args.skip_rerank === true || args.interactive === true;
+  const rerankerConfigured = !!(ctx.hostedRerank || ctx.rerank);
+  const canUseRerankAdmission = rerankerConfigured && !skipRerank;
   for (const { kind: kind2, rows } of kindResults) {
     const threshold = customThresholds?.[kind2] ?? KIND_THRESHOLDS[kind2];
     for (const r2 of rows) {
       const hasCosineEvidence = typeof r2.cosine_sim === "number" && Number.isFinite(r2.cosine_sim);
       const thresholdScore = hasCosineEvidence ? r2.cosine_sim : r2.similarity;
-      if (!passesCandidateThreshold(r2.similarity, r2.cosine_sim, threshold)) {
+      const passesConfiguredThreshold = passesCandidateThreshold(
+        r2.similarity,
+        r2.cosine_sim,
+        threshold
+      );
+      const hasAbsoluteEvidence = hasCosineEvidence || !useHybrid;
+      const rerankAdmission = !passesConfiguredThreshold && kind2 === "skill" && thresholdsMode === "default" && canUseRerankAdmission && hasAbsoluteEvidence && thresholdScore >= SKILL_RERANK_CANDIDATE_THRESHOLD ? { thresholdScore, configuredThreshold: threshold } : void 0;
+      if (!passesConfiguredThreshold && !rerankAdmission) {
         omittedCandidates.push({
           id: r2.id,
           kind: kind2,
@@ -64395,6 +64406,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         title: r2.title,
         similarity: r2.similarity,
         score: r2.similarity * KIND_WEIGHTS[kind2],
+        rerankAdmission,
         citation: {
           path: r2.path,
           version_number: r2.version_number,
@@ -64751,9 +64763,26 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     functionBodyById,
     functionComponentById
   );
-  const skipRerank = args.skip_rerank === true || args.interactive === true;
-  const hasRerank = !!(ctx.hostedRerank || ctx.rerank);
-  if (hasRerank && candidates.length >= MIN_CANDIDATES_FOR_RERANK && !skipRerank) {
+  const skillRerankAdmissionCandidateIds = candidates.filter((candidate) => candidate.rerankAdmission).map((candidate) => candidate.id);
+  const dropUnverifiedRerankAdmissions = (detail) => {
+    for (let i2 = candidates.length - 1; i2 >= 0; i2--) {
+      const candidate = candidates[i2];
+      if (!candidate?.rerankAdmission) continue;
+      omittedCandidates.push({
+        id: candidate.id,
+        kind: candidate.kind,
+        title: candidate.title,
+        threshold_score: candidate.rerankAdmission.thresholdScore,
+        similarity: candidate.similarity,
+        reason: "rerank_filtered",
+        detail,
+        path: candidate.citation.path
+      });
+      candidates.splice(i2, 1);
+    }
+  };
+  const hasProvisionalSkill = skillRerankAdmissionCandidateIds.length > 0;
+  if (rerankerConfigured && (candidates.length >= MIN_CANDIDATES_FOR_RERANK || hasProvisionalSkill) && !skipRerank) {
     const rerankInputs = candidates.map((c2) => ({
       id: c2.id,
       kind: c2.kind,
@@ -64792,6 +64821,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         console.warn(
           `[resolver] rerank scored ${scoredCount}/${candidates.length} candidates (< quorum) \u2014 keeping cosine ordering`
         );
+        dropUnverifiedRerankAdmissions(
+          `provisional skill dropped because reranker returned ${rerankFallbackReason}`
+        );
       } else {
         rerankAuditScores = scores;
         for (let i2 = candidates.length - 1; i2 >= 0; i2--) {
@@ -64821,6 +64853,9 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       rerankAuditScores = null;
       rerankLatencyMs = null;
       rerankFallbackReason = "rerank_error";
+      dropUnverifiedRerankAdmissions(
+        "provisional skill dropped because reranker failed; configured threshold remains authoritative"
+      );
     }
   }
   let activeComponentId = null;
@@ -66111,6 +66146,14 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       dedupe: dedupeThreshold,
       _mode: thresholdsMode
     },
+    ...skillRerankAdmissionCandidateIds.length > 0 ? {
+      skill_rerank_admission: {
+        candidate_ids: skillRerankAdmissionCandidateIds,
+        delivered_ids: [primary, ...supportingSkills].filter((item) => Boolean(item)).map((item) => item.id).filter((id) => skillRerankAdmissionCandidateIds.includes(id)),
+        candidate_threshold: SKILL_RERANK_CANDIDATE_THRESHOLD,
+        application_floor: RERANK_SKILL_MIN_SCORE
+      }
+    } : {},
     agent_kind: audit.agentKind ?? null,
     agent_installation_id: audit.agentInstallationId ?? null,
     session_id: audit.sessionId ?? null,
@@ -68595,7 +68638,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.35";
+  cachedAgentVersion = "0.1.36";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -70312,7 +70355,7 @@ function readNearestPackageVersion() {
 var cachedAgentVersion2;
 function agentVersion2() {
   if (cachedAgentVersion2 !== void 0) return cachedAgentVersion2;
-  const env = "0.1.35"?.trim();
+  const env = "0.1.36"?.trim();
   cachedAgentVersion2 = env || readNearestPackageVersion();
   return cachedAgentVersion2;
 }
