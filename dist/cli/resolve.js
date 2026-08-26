@@ -3412,7 +3412,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs7 = __require("fs");
+    var fs8 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3496,7 +3496,7 @@ var require_gray_matter = __commonJS({
       return stringify(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs7.readFileSync(filepath, "utf8");
+      const str2 = fs8.readFileSync(filepath, "utf8");
       const file = matter3(str2, options2);
       file.path = filepath;
       return file;
@@ -3537,10 +3537,12 @@ __export(companion_client_exports, {
   companionDelegationEnabled: () => companionDelegationEnabled,
   companionForDelegation: () => companionForDelegation,
   companionGetToken: () => companionGetToken,
+  companionReadLocal: () => companionReadLocal,
   companionReportSession: () => companionReportSession,
   companionRequest: () => companionRequest,
   companionResolveWorkspace: () => companionResolveWorkspace,
   companionRunDir: () => companionRunDir,
+  companionSearchLocal: () => companionSearchLocal,
   companionSocketPath: () => companionSocketPath,
   companionStatus: () => companionStatus,
   companionSyncNow: () => companionSyncNow,
@@ -3645,6 +3647,12 @@ async function companionResolveWorkspace(cwd) {
 async function companionSyncNow(req) {
   return companionRequest("sync.now", req);
 }
+async function companionSearchLocal(req) {
+  return companionRequest("memory.search", req);
+}
+async function companionReadLocal(req) {
+  return companionRequest("memory.read", req);
+}
 async function companionReportSession(req) {
   return (await companionRequest("session.report", req))?.registered ?? false;
 }
@@ -3684,7 +3692,10 @@ var init_companion_client = __esm({
     CALL_TIMEOUTS = {
       "workspace.resolve": 2e3,
       "sync.now": 5e3,
-      "login.start": 1e4
+      "login.start": 1e4,
+      // Local-store reads walk the materialized doc tree on disk.
+      "memory.search": 2e3,
+      "memory.read": 2e3
     };
     socketDeadUntil = 0;
     SOCKET_DEAD_TTL_MS = 5e3;
@@ -4173,8 +4184,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path10, errorMaps, issueData } = params;
-  const fullPath = [...path10, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -4290,11 +4301,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path10, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path10;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -8513,6 +8524,73 @@ async function atomicRename(from, to, dependencies = {}) {
   }
 }
 
+// packages/plugin-core/src/backend-error.ts
+var MemlinApiError = class extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+    this.name = "MemlinApiError";
+  }
+  status;
+};
+function looksLikeHtml(text) {
+  const head = text.slice(0, 512).trimStart().toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html") || head.includes("<html") || head.startsWith("<") && /<\/(head|body|title|div|p)>/i.test(text);
+}
+function singleLine(text, max = 200) {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1)}\u2026`;
+}
+function describeOpaqueBody(status, text) {
+  const trimmed = text.trim();
+  if (!trimmed) return `HTTP ${status}`;
+  if (looksLikeHtml(trimmed)) {
+    const via = /cloudflare/i.test(trimmed) ? "Cloudflare " : "";
+    return `HTTP ${status} (${via}HTML error page suppressed, ${trimmed.length} chars)`;
+  }
+  return `HTTP ${status}: ${singleLine(trimmed)}`;
+}
+function backendUnreachableLine(detail) {
+  return `memlin: backend unreachable (${detail}), no memory available`;
+}
+var ROUTING_PATTERN = /account routing (unavailable|lookup failed)/i;
+var CLOUDFLARE_STATUS = /\b(52[0-7])\b/;
+function statusOf(err) {
+  if (err instanceof MemlinApiError) return err.status;
+  const status = err?.status;
+  if (typeof status === "number" && status >= 100 && status <= 599) return status;
+  const message = err instanceof Error ? err.message : String(err);
+  const arrow = message.match(/→ (\d{3}):/);
+  if (arrow) return Number(arrow[1]);
+  return null;
+}
+function summarizeBackendFailure(err) {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const status = statusOf(err);
+  if (ROUTING_PATTERN.test(message)) {
+    const embedded = message.match(CLOUDFLARE_STATUS)?.[1];
+    const code = embedded ?? (status !== null && status >= 500 ? String(status) : null);
+    const detail = code ? `routing ${code}` : "routing unavailable";
+    return { kind: "routing", status: code ? Number(code) : status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (status !== null && status >= 500) {
+    const detail = `HTTP ${status}`;
+    return { kind: "http", status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (/took longer than \d+ seconds/i.test(message)) {
+    return { kind: "network", status: null, detail: "timeout", line: backendUnreachableLine("timeout") };
+  }
+  if (/couldn'?t reach|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|network/i.test(message)) {
+    return {
+      kind: "network",
+      status: null,
+      detail: "network unreachable",
+      line: backendUnreachableLine("network unreachable")
+    };
+  }
+  return null;
+}
+
 // packages/plugin-core/src/auth.ts
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
@@ -8603,7 +8681,7 @@ async function writePersistedToken(t) {
   });
   await atomicRename(tmp, file);
 }
-async function refreshAccessToken(refreshToken) {
+async function refreshAccessToken(refreshToken, options2 = {}) {
   requireClientId();
   const body = new URLSearchParams({
     grant_type: "refresh_token",
@@ -8613,10 +8691,11 @@ async function refreshAccessToken(refreshToken) {
   const res = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString()
+    body: body.toString(),
+    signal: AbortSignal.timeout(Math.max(1, options2.timeoutMs ?? 15e3))
   });
   if (!res.ok) {
-    throw new Error(`refresh: ${res.status} ${await res.text()}`);
+    throw new Error(`refresh: ${describeOpaqueBody(res.status, await res.text())}`);
   }
   const json = await res.json();
   return toPersisted(json, refreshToken);
@@ -8626,17 +8705,17 @@ var DEFAULT_FRESHNESS_MARGIN_MS = 6e4;
 async function getValidAccessToken() {
   return ensureFreshToken(DEFAULT_FRESHNESS_MARGIN_MS);
 }
-async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS) {
+async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS, options2 = {}) {
   const persisted = await readPersistedToken();
   if (!persisted) throw new Error("not signed in \u2014 run `memlin login`");
   if (Date.now() < persisted.expires_at - marginMs) return persisted.access_token;
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = doRefresh(persisted, marginMs).finally(() => {
+  refreshInFlight = doRefresh(persisted, marginMs, options2).finally(() => {
     refreshInFlight = null;
   });
   return refreshInFlight;
 }
-async function doRefresh(stale, marginMs) {
+async function doRefresh(stale, marginMs, options2) {
   const latest = await readPersistedToken();
   if (latest && Date.now() < latest.expires_at - marginMs) return latest.access_token;
   try {
@@ -8653,7 +8732,7 @@ async function doRefresh(stale, marginMs) {
     throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
   }
   try {
-    const fresh = await refreshAccessToken(refreshToken);
+    const fresh = await refreshAccessToken(refreshToken, options2);
     return await withAuthFileLock(async () => {
       const beforeWrite = await readPersistedToken();
       if (!beforeWrite || beforeWrite.access_token !== refreshSource.access_token) {
@@ -8858,7 +8937,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.37";
+  cachedAgentVersion = "0.1.40";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -8871,7 +8950,7 @@ var NATIVE_MEMORY_BATCH_SIZE = 20;
 var NATIVE_MEMORY_BATCH_CONCURRENCY = 3;
 var NATIVE_MEMORY_REQUEST_TIMEOUT_MS = 9e4;
 var NATIVE_MEMORY_BATCH_INDEX = "# Native memory satellite batch\n";
-var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504]);
+var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
 var RETRIABLE_NETWORK_CODES = /* @__PURE__ */ new Set([
   "ECONNRESET",
   "ECONNREFUSED",
@@ -8988,8 +9067,9 @@ var MemlinApiClient = class {
         }
       }
       if (!res.ok) {
-        const errMsg = parsed?.error ?? text ?? `HTTP ${res.status}`;
-        throw new Error(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`);
+        const serverError = parsed?.error;
+        const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
+        throw new MemlinApiError(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`, res.status);
       }
       return parsed;
     }
@@ -9064,13 +9144,15 @@ var MemlinApiClient = class {
    *  Returns kind='decision' docs whose `metadata.enforce` is set —
    *  the PreToolUse handler in plugin-core's pre-tool-use-handler
    *  module is the primary caller. */
-  async listEnforceDecisions(opts = {}) {
+  async listEnforceDecisions(opts = {}, requestOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.project_id !== void 0) {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/decisions/enforce${suffix}`);
+    return this.request("GET", `/decisions/enforce${suffix}`, void 0, {
+      accountId: requestOpts.accountId
+    });
   }
   /** POST /usage/event — write a usage_events row from the client.
    *  Server-side enforces an allowlist of event_types (today:
@@ -9082,6 +9164,12 @@ var MemlinApiClient = class {
   async writeUsageEvent(input, opts = {}) {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
+  /** Batched, idempotent editor-agent telemetry. This stream is deliberately
+   * separate from usage_events: it powers live sessions, subagent visibility,
+   * model analytics, and operational timelines without affecting metering. */
+  async writeAgentActivityBatch(events, opts = {}) {
+    return this.request("POST", "/agent/activity", { events }, opts);
+  }
   /** GET /documents — list, filtered. */
   async listDocuments(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
@@ -9091,6 +9179,7 @@ var MemlinApiClient = class {
     if (opts.project_id !== void 0) {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
+    if (opts.has_trigger) qs.set("has_trigger", "true");
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
     return res.documents.map((d) => {
@@ -9171,19 +9260,24 @@ var MemlinApiClient = class {
       action
     });
   }
-  async listHandoffs(opts = {}) {
+  async listHandoffs(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.project_id) qs.set("project_id", opts.project_id);
     if (opts.target_agent_kind) qs.set("target_agent_kind", opts.target_agent_kind);
     if (opts.status) qs.set("status", opts.status);
     if (opts.limit) qs.set("limit", String(opts.limit));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/handoffs${suffix}`);
-  }
-  async updateHandoff(handoffId, action) {
-    return this.request("PATCH", `/handoffs/${encodeURIComponent(handoffId)}`, {
-      action
+    return this.request("GET", `/handoffs${suffix}`, void 0, {
+      accountId: callOpts.accountId
     });
+  }
+  async updateHandoff(handoffId, action, opts = {}) {
+    return this.request(
+      "PATCH",
+      `/handoffs/${encodeURIComponent(handoffId)}`,
+      { action },
+      { accountId: opts.accountId }
+    );
   }
   async createHandoff(input) {
     return this.request("POST", "/handoffs", input);
@@ -9286,8 +9380,13 @@ var MemlinApiClient = class {
     return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
   }
   /** GET /audit/<id>/replay — reconstruct a past resolve's exact bundle. */
-  async replayAudit(auditId) {
-    return this.request("GET", `/audit/${auditId}/replay`);
+  async replayAudit(auditId, opts = {}) {
+    return this.request(
+      "GET",
+      `/audit/${auditId}/replay`,
+      void 0,
+      { accountId: opts.accountId }
+    );
   }
   /** GET /audit/<id>/explain — per-item decomposition of a past resolve's
    *  ranking arithmetic (similarity, kind weight, component boost, rerank,
@@ -9442,8 +9541,8 @@ var MemlinApiClient = class {
    * companion plans row with status='drafted'. Returns the document_id
    * + version metadata for downstream URL construction.
    */
-  async pushPlan(input) {
-    return this.request("POST", "/plans", input);
+  async pushPlan(input, opts = {}) {
+    return this.request("POST", "/plans", input, { accountId: opts.accountId });
   }
   /**
    * GET /plans — list plans for the account, optionally filtered by
@@ -9451,7 +9550,7 @@ var MemlinApiClient = class {
    * UserPromptSubmit + SessionStart hooks to keep ~/.claude/plans/ in
    * sync with the server.
    */
-  async listPlans(opts = {}) {
+  async listPlans(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.status) qs.set("status", opts.status);
     if (opts.project_id !== void 0) {
@@ -9461,21 +9560,27 @@ var MemlinApiClient = class {
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const res = await this.request(
       "GET",
-      `/plans${suffix}`
+      `/plans${suffix}`,
+      void 0,
+      { accountId: callOpts.accountId }
     );
     return res.plans;
   }
   /** GET /plans/<id> — full plan detail (status + body + bundle ref). */
-  async getPlan(id) {
-    return this.request("GET", `/plans/${encodeURIComponent(id)}`);
+  async getPlan(id, opts = {}) {
+    return this.request("GET", `/plans/${encodeURIComponent(id)}`, void 0, {
+      accountId: opts.accountId
+    });
   }
   /**
    * PATCH /plans/<id> — replace the plan's body (creates a new
    * document_version, auto-embeds). Used by the PostToolUse hook to push
    * Claude Code edits back up to Memlin.
    */
-  async updatePlan(id, input) {
-    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input);
+  async updatePlan(id, input, opts = {}) {
+    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input, {
+      accountId: opts.accountId
+    });
   }
   /**
    * POST /projects — create a project in the caller's current account.
@@ -9871,6 +9976,7 @@ async function resolveProject(api, cwd, configProjectId) {
   const absCwd = path7.resolve(cwd);
   const remotes = detectGitRemotes(cwd);
   const hasGitRemote = remotes.length > 0;
+  let serverFailure;
   try {
     const result = await api.resolveProject({
       // Primary remote (back-compat with the single-remote server path).
@@ -9890,18 +9996,30 @@ async function resolveProject(api, cwd, configProjectId) {
         enforce_done_deployed: result.enforce_done_deployed
       };
     }
-  } catch {
+  } catch (e) {
+    serverFailure = summarizeBackendFailure(e) ?? void 0;
   }
   if (configProjectId) {
-    return {
-      project_id: configProjectId,
-      project_name: null,
-      account_id: null,
-      reason: "config",
-      hasGitRemote
-    };
+    const localBinding = await findWorkspaceBinding(absCwd).catch(() => null);
+    if (localBinding?.binding.project_id === configProjectId) {
+      return {
+        project_id: configProjectId,
+        project_name: null,
+        account_id: null,
+        reason: "config",
+        hasGitRemote,
+        server_failure: serverFailure
+      };
+    }
   }
-  return { project_id: null, project_name: null, account_id: null, reason: "none", hasGitRemote };
+  return {
+    project_id: null,
+    project_name: null,
+    account_id: null,
+    reason: "none",
+    hasGitRemote,
+    server_failure: serverFailure
+  };
 }
 function readGitRemote(cwd) {
   try {
@@ -10804,6 +10922,89 @@ function parseResolveArgs(argv) {
   };
 }
 
+// packages/plugin-core/src/bundle-cache.ts
+import crypto3 from "node:crypto";
+import { promises as fs7 } from "node:fs";
+import os8 from "node:os";
+import path10 from "node:path";
+var BUNDLE_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1e3;
+var MAX_SCAN_ENTRIES = 256;
+function bundleCacheDir() {
+  return process.env.MEMLIN_BUNDLE_CACHE_DIR ?? path10.join(os8.homedir(), ".config", "memlin", "bundle-cache");
+}
+function bundleCacheKey(accountId, projectId) {
+  return crypto3.createHash("sha256").update(JSON.stringify([accountId ?? null, projectId ?? null])).digest("hex");
+}
+function bundleCachePath(accountId, projectId) {
+  return path10.join(bundleCacheDir(), `${bundleCacheKey(accountId, projectId)}.json`);
+}
+function isValidEntry(entry) {
+  if (typeof entry !== "object" || entry === null) return false;
+  const e = entry;
+  return typeof e.task === "string" && typeof e.cwd === "string" && typeof e.resolved_at === "number" && typeof e.result === "object" && e.result !== null && typeof e.result.bundle === "object" && e.result.bundle !== null;
+}
+async function writeCachedBundle(entry) {
+  const file = bundleCachePath(entry.account_id, entry.project_id);
+  await fs7.mkdir(path10.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  await fs7.writeFile(tmp, JSON.stringify(entry), "utf8");
+  await atomicRename(tmp, file);
+}
+async function readEntryFile(file) {
+  let entry;
+  try {
+    entry = JSON.parse(await fs7.readFile(file, "utf8"));
+  } catch {
+    return null;
+  }
+  if (!isValidEntry(entry)) {
+    await fs7.rm(file, { force: true }).catch(() => {
+    });
+    return null;
+  }
+  if (Date.now() - entry.resolved_at > BUNDLE_CACHE_MAX_AGE_MS) {
+    await fs7.rm(file, { force: true }).catch(() => {
+    });
+    return null;
+  }
+  return entry;
+}
+async function readCachedBundle(accountId, projectId) {
+  return readEntryFile(bundleCachePath(accountId, projectId));
+}
+async function findCachedBundleForWorkspace(cwd, gitRemote) {
+  let names;
+  try {
+    names = await fs7.readdir(bundleCacheDir());
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const name of names.filter((n) => n.endsWith(".json")).slice(0, MAX_SCAN_ENTRIES)) {
+    const entry = await readEntryFile(path10.join(bundleCacheDir(), name));
+    if (!entry) continue;
+    const matches = entry.cwd === cwd || gitRemote !== null && entry.git_remote === gitRemote;
+    if (!matches) continue;
+    if (!best || entry.resolved_at > best.resolved_at) best = entry;
+  }
+  return best;
+}
+function humanizeAge(ageMs) {
+  const minutes = Math.max(1, Math.round(ageMs / 6e4));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.round(hours / 24)} d`;
+}
+function buildStaleBundleNotice(entry, failureDetail) {
+  const age = humanizeAge(Date.now() - entry.resolved_at);
+  return [
+    `# \u26A0 STALE MEMLIN CONTEXT \u2014 live resolve failed: backend unreachable (${failureDetail}).`,
+    `# Serving the last successful bundle for this project, resolved ${age} ago for task ${JSON.stringify(entry.task.slice(0, 140))}.`,
+    "# Treat as possibly out of date. Memory writes and fresh resolves are unavailable until the backend recovers."
+  ].join("\n");
+}
+
 // packages/plugin-core/src/cli/resolve.ts
 function printHelp() {
   console.log(
@@ -10855,6 +11056,36 @@ function readGitBranch(cwd) {
     return null;
   }
 }
+async function serveStaleBundle(opts) {
+  const { cached, failure } = opts;
+  const rendered = [
+    buildStaleBundleNotice(cached, failure.detail),
+    "",
+    compileBundle(cached.result, cached.task, opts.agent)
+  ].join("\n");
+  process.stdout.write(rendered);
+  if (opts.hookOutFile) {
+    try {
+      await writePendingBundle({
+        task: opts.task,
+        cwd: opts.cwd,
+        host: "windsurf",
+        session_id: process.env.MEMLIN_SESSION_ID ?? null,
+        rendered,
+        audit_id: cached.result.audit_id ?? null,
+        completed_at: Date.now(),
+        latency_ms: Date.now() - opts.startedAt,
+        deadline_ms: opts.deadlineMs,
+        stale: { reason: failure.detail, resolved_at: cached.resolved_at }
+      });
+    } catch {
+    }
+  }
+  console.error(
+    `${failure.line.replace(", no memory available", "")} \u2014 served the last good bundle (${humanizeAge(Date.now() - cached.resolved_at)} old) from the local cache.`
+  );
+  exitCli(0);
+}
 async function main() {
   const startedAt = Date.now();
   const hookOutFile = process.env.MEMLIN_RESOLVE_OUT ?? null;
@@ -10882,6 +11113,7 @@ async function main() {
   let projectId;
   let accountOverride = null;
   let resolvedAccountId = null;
+  let projectServerFailure;
   let bindingSource;
   if (parsed.project !== void 0) {
     projectId = parsed.project;
@@ -10890,6 +11122,7 @@ async function main() {
     const resolved = await resolveProject(api, cwd, config.project_id);
     projectId = resolved.project_id;
     resolvedAccountId = resolved.account_id;
+    projectServerFailure = resolved.server_failure;
     bindingSource = resolved.reason === "git-remote" ? "git_remote" : resolved.reason === "local-path" ? "local_path" : resolved.reason === "config" ? workspaceBound ? "workspace_pin" : "startup_default" : gitRemote ? "unresolved" : "account_scope";
     if (resolved.account_id && resolved.account_id !== config.account_id) {
       accountOverride = resolved.account_id;
@@ -10901,9 +11134,24 @@ async function main() {
     workspaceBound
   });
   if (!active) {
+    if (projectServerFailure) {
+      const cached = await findCachedBundleForWorkspace(cwd, gitRemote);
+      if (cached) {
+        await serveStaleBundle({
+          cached,
+          failure: projectServerFailure,
+          task: parsed.task,
+          agent: parsed.agent,
+          hookOutFile,
+          deadlineMs,
+          startedAt,
+          cwd
+        });
+      }
+    }
     if (process.stderr.isTTY) {
       console.error(
-        "memlin resolve: this directory isn't a known Memlin workspace. Run `memlin link --account <name>` to enable it, or `memlin link --list` to see your accounts."
+        projectServerFailure ? projectServerFailure.line : "memlin resolve: this directory isn't a known Memlin workspace. Run `memlin link --account <name>` to enable it, or `memlin link --list` to see your accounts."
       );
     }
     exitCli(0);
@@ -10934,17 +11182,50 @@ async function main() {
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("EMBEDDING_UNAVAILABLE") || msg.includes("503")) {
+    if (msg.includes("EMBEDDING_UNAVAILABLE")) {
       console.error(
         `memlin resolve: server-side embeddings unavailable (${msg}). The resolver requires OPENAI_API_KEY on the Memlin server. Contact your admin or use the hosted memlin.ai endpoint.`
       );
       exitCli(3);
+    }
+    const failure = summarizeBackendFailure(e);
+    if (failure) {
+      const cached = await readCachedBundle(accountOverride ?? config.account_id ?? null, projectId) ?? await findCachedBundleForWorkspace(cwd, gitRemote);
+      if (cached) {
+        await serveStaleBundle({
+          cached,
+          failure,
+          task: parsed.task,
+          agent: parsed.agent,
+          hookOutFile,
+          deadlineMs,
+          startedAt,
+          cwd
+        });
+      }
+      console.error(failure.line);
+      exitCli(1);
     }
     console.error(`memlin resolve failed: ${msg}`);
     exitCli(1);
   }
   const outString = compileBundle(result, parsed.task, parsed.agent);
   process.stdout.write(outString);
+  if (outString.trim()) {
+    try {
+      await writeCachedBundle({
+        result,
+        task: parsed.task,
+        project_id: projectId,
+        account_id: accountOverride ?? config.account_id ?? null,
+        cwd,
+        git_remote: gitRemote,
+        host: "windsurf",
+        resolved_at: Date.now()
+      });
+    } catch {
+    }
+  }
   const latencyMs = Date.now() - startedAt;
   const missedDeadline = deadlineMs !== null && latencyMs > deadlineMs;
   const host = "windsurf";
@@ -10960,20 +11241,25 @@ async function main() {
         audit_id: result.audit_id ?? null,
         completed_at: Date.now(),
         latency_ms: latencyMs,
-        deadline_ms: deadlineMs
+        deadline_ms: deadlineMs,
+        server_latency_ms: result.latency_ms?.total ?? null
       });
     } catch {
     }
   }
-  if (missedDeadline) {
+  if (hookOutFile) {
     try {
+      const serverLatencyMs = result.latency_ms?.total ?? null;
       await api.writeUsageEvent(
         {
           event_type: "resolve.delivery",
           metadata: {
-            outcome: "late",
+            outcome: missedDeadline ? "late" : "inline",
             audit_id: result.audit_id ?? null,
             latency_ms: latencyMs,
+            server_latency_ms: serverLatencyMs,
+            client_overhead_ms: serverLatencyMs === null ? null : Math.max(0, latencyMs - serverLatencyMs),
+            server_stages: result.latency_ms ?? null,
             deadline_ms: deadlineMs,
             session_id: sessionId,
             host,

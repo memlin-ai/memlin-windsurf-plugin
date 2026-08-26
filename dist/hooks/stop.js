@@ -54,10 +54,12 @@ __export(companion_client_exports, {
   companionDelegationEnabled: () => companionDelegationEnabled,
   companionForDelegation: () => companionForDelegation,
   companionGetToken: () => companionGetToken,
+  companionReadLocal: () => companionReadLocal,
   companionReportSession: () => companionReportSession,
   companionRequest: () => companionRequest,
   companionResolveWorkspace: () => companionResolveWorkspace,
   companionRunDir: () => companionRunDir,
+  companionSearchLocal: () => companionSearchLocal,
   companionSocketPath: () => companionSocketPath,
   companionStatus: () => companionStatus,
   companionSyncNow: () => companionSyncNow,
@@ -162,6 +164,12 @@ async function companionResolveWorkspace(cwd) {
 async function companionSyncNow(req) {
   return companionRequest("sync.now", req);
 }
+async function companionSearchLocal(req) {
+  return companionRequest("memory.search", req);
+}
+async function companionReadLocal(req) {
+  return companionRequest("memory.read", req);
+}
 async function companionReportSession(req) {
   return (await companionRequest("session.report", req))?.registered ?? false;
 }
@@ -201,7 +209,10 @@ var init_companion_client = __esm({
     CALL_TIMEOUTS = {
       "workspace.resolve": 2e3,
       "sync.now": 5e3,
-      "login.start": 1e4
+      "login.start": 1e4,
+      // Local-store reads walk the materialized doc tree on disk.
+      "memory.search": 2e3,
+      "memory.read": 2e3
     };
     socketDeadUntil = 0;
     SOCKET_DEAD_TTL_MS = 5e3;
@@ -3693,7 +3704,7 @@ var require_gray_matter = __commonJS({
 });
 
 // packages/plugin-core/dist/stop-handler.js
-import { execSync as execSync3 } from "node:child_process";
+import { execSync as execSync2 } from "node:child_process";
 import { promises as fs8 } from "node:fs";
 
 // packages/plugin-core/dist/client.js
@@ -3741,6 +3752,73 @@ async function atomicRename(from, to, dependencies = {}) {
   } finally {
     if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
   }
+}
+
+// packages/plugin-core/dist/backend-error.js
+var MemlinApiError = class extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+    this.name = "MemlinApiError";
+  }
+  status;
+};
+function looksLikeHtml(text) {
+  const head = text.slice(0, 512).trimStart().toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html") || head.includes("<html") || head.startsWith("<") && /<\/(head|body|title|div|p)>/i.test(text);
+}
+function singleLine(text, max = 200) {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1)}\u2026`;
+}
+function describeOpaqueBody(status, text) {
+  const trimmed = text.trim();
+  if (!trimmed) return `HTTP ${status}`;
+  if (looksLikeHtml(trimmed)) {
+    const via = /cloudflare/i.test(trimmed) ? "Cloudflare " : "";
+    return `HTTP ${status} (${via}HTML error page suppressed, ${trimmed.length} chars)`;
+  }
+  return `HTTP ${status}: ${singleLine(trimmed)}`;
+}
+function backendUnreachableLine(detail) {
+  return `memlin: backend unreachable (${detail}), no memory available`;
+}
+var ROUTING_PATTERN = /account routing (unavailable|lookup failed)/i;
+var CLOUDFLARE_STATUS = /\b(52[0-7])\b/;
+function statusOf(err) {
+  if (err instanceof MemlinApiError) return err.status;
+  const status = err?.status;
+  if (typeof status === "number" && status >= 100 && status <= 599) return status;
+  const message = err instanceof Error ? err.message : String(err);
+  const arrow = message.match(/→ (\d{3}):/);
+  if (arrow) return Number(arrow[1]);
+  return null;
+}
+function summarizeBackendFailure(err) {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const status = statusOf(err);
+  if (ROUTING_PATTERN.test(message)) {
+    const embedded = message.match(CLOUDFLARE_STATUS)?.[1];
+    const code = embedded ?? (status !== null && status >= 500 ? String(status) : null);
+    const detail = code ? `routing ${code}` : "routing unavailable";
+    return { kind: "routing", status: code ? Number(code) : status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (status !== null && status >= 500) {
+    const detail = `HTTP ${status}`;
+    return { kind: "http", status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (/took longer than \d+ seconds/i.test(message)) {
+    return { kind: "network", status: null, detail: "timeout", line: backendUnreachableLine("timeout") };
+  }
+  if (/couldn'?t reach|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|network/i.test(message)) {
+    return {
+      kind: "network",
+      status: null,
+      detail: "network unreachable",
+      line: backendUnreachableLine("network unreachable")
+    };
+  }
+  return null;
 }
 
 // packages/plugin-core/dist/auth.js
@@ -3833,7 +3911,7 @@ async function writePersistedToken(t) {
   });
   await atomicRename(tmp, file);
 }
-async function refreshAccessToken(refreshToken) {
+async function refreshAccessToken(refreshToken, options2 = {}) {
   requireClientId();
   const body = new URLSearchParams({
     grant_type: "refresh_token",
@@ -3843,10 +3921,11 @@ async function refreshAccessToken(refreshToken) {
   const res = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString()
+    body: body.toString(),
+    signal: AbortSignal.timeout(Math.max(1, options2.timeoutMs ?? 15e3))
   });
   if (!res.ok) {
-    throw new Error(`refresh: ${res.status} ${await res.text()}`);
+    throw new Error(`refresh: ${describeOpaqueBody(res.status, await res.text())}`);
   }
   const json = await res.json();
   return toPersisted(json, refreshToken);
@@ -3856,17 +3935,17 @@ var DEFAULT_FRESHNESS_MARGIN_MS = 6e4;
 async function getValidAccessToken() {
   return ensureFreshToken(DEFAULT_FRESHNESS_MARGIN_MS);
 }
-async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS) {
+async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS, options2 = {}) {
   const persisted = await readPersistedToken();
   if (!persisted) throw new Error("not signed in \u2014 run `memlin login`");
   if (Date.now() < persisted.expires_at - marginMs) return persisted.access_token;
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = doRefresh(persisted, marginMs).finally(() => {
+  refreshInFlight = doRefresh(persisted, marginMs, options2).finally(() => {
     refreshInFlight = null;
   });
   return refreshInFlight;
 }
-async function doRefresh(stale, marginMs) {
+async function doRefresh(stale, marginMs, options2) {
   const latest = await readPersistedToken();
   if (latest && Date.now() < latest.expires_at - marginMs) return latest.access_token;
   try {
@@ -3883,7 +3962,7 @@ async function doRefresh(stale, marginMs) {
     throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
   }
   try {
-    const fresh = await refreshAccessToken(refreshToken);
+    const fresh = await refreshAccessToken(refreshToken, options2);
     return await withAuthFileLock(async () => {
       const beforeWrite = await readPersistedToken();
       if (!beforeWrite || beforeWrite.access_token !== refreshSource.access_token) {
@@ -4102,7 +4181,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.37";
+  cachedAgentVersion = "0.1.40";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -4115,7 +4194,7 @@ var NATIVE_MEMORY_BATCH_SIZE = 20;
 var NATIVE_MEMORY_BATCH_CONCURRENCY = 3;
 var NATIVE_MEMORY_REQUEST_TIMEOUT_MS = 9e4;
 var NATIVE_MEMORY_BATCH_INDEX = "# Native memory satellite batch\n";
-var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504]);
+var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
 var RETRIABLE_NETWORK_CODES = /* @__PURE__ */ new Set([
   "ECONNRESET",
   "ECONNREFUSED",
@@ -4232,8 +4311,9 @@ var MemlinApiClient = class {
         }
       }
       if (!res.ok) {
-        const errMsg = parsed?.error ?? text ?? `HTTP ${res.status}`;
-        throw new Error(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`);
+        const serverError = parsed?.error;
+        const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
+        throw new MemlinApiError(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`, res.status);
       }
       return parsed;
     }
@@ -4308,13 +4388,15 @@ var MemlinApiClient = class {
    *  Returns kind='decision' docs whose `metadata.enforce` is set —
    *  the PreToolUse handler in plugin-core's pre-tool-use-handler
    *  module is the primary caller. */
-  async listEnforceDecisions(opts = {}) {
+  async listEnforceDecisions(opts = {}, requestOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.project_id !== void 0) {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/decisions/enforce${suffix}`);
+    return this.request("GET", `/decisions/enforce${suffix}`, void 0, {
+      accountId: requestOpts.accountId
+    });
   }
   /** POST /usage/event — write a usage_events row from the client.
    *  Server-side enforces an allowlist of event_types (today:
@@ -4326,6 +4408,12 @@ var MemlinApiClient = class {
   async writeUsageEvent(input, opts = {}) {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
+  /** Batched, idempotent editor-agent telemetry. This stream is deliberately
+   * separate from usage_events: it powers live sessions, subagent visibility,
+   * model analytics, and operational timelines without affecting metering. */
+  async writeAgentActivityBatch(events, opts = {}) {
+    return this.request("POST", "/agent/activity", { events }, opts);
+  }
   /** GET /documents — list, filtered. */
   async listDocuments(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
@@ -4335,6 +4423,7 @@ var MemlinApiClient = class {
     if (opts.project_id !== void 0) {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
+    if (opts.has_trigger) qs.set("has_trigger", "true");
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
     return res.documents.map((d) => {
@@ -4415,19 +4504,24 @@ var MemlinApiClient = class {
       action
     });
   }
-  async listHandoffs(opts = {}) {
+  async listHandoffs(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.project_id) qs.set("project_id", opts.project_id);
     if (opts.target_agent_kind) qs.set("target_agent_kind", opts.target_agent_kind);
     if (opts.status) qs.set("status", opts.status);
     if (opts.limit) qs.set("limit", String(opts.limit));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/handoffs${suffix}`);
-  }
-  async updateHandoff(handoffId, action) {
-    return this.request("PATCH", `/handoffs/${encodeURIComponent(handoffId)}`, {
-      action
+    return this.request("GET", `/handoffs${suffix}`, void 0, {
+      accountId: callOpts.accountId
     });
+  }
+  async updateHandoff(handoffId, action, opts = {}) {
+    return this.request(
+      "PATCH",
+      `/handoffs/${encodeURIComponent(handoffId)}`,
+      { action },
+      { accountId: opts.accountId }
+    );
   }
   async createHandoff(input) {
     return this.request("POST", "/handoffs", input);
@@ -4530,8 +4624,13 @@ var MemlinApiClient = class {
     return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
   }
   /** GET /audit/<id>/replay — reconstruct a past resolve's exact bundle. */
-  async replayAudit(auditId) {
-    return this.request("GET", `/audit/${auditId}/replay`);
+  async replayAudit(auditId, opts = {}) {
+    return this.request(
+      "GET",
+      `/audit/${auditId}/replay`,
+      void 0,
+      { accountId: opts.accountId }
+    );
   }
   /** GET /audit/<id>/explain — per-item decomposition of a past resolve's
    *  ranking arithmetic (similarity, kind weight, component boost, rerank,
@@ -4686,8 +4785,8 @@ var MemlinApiClient = class {
    * companion plans row with status='drafted'. Returns the document_id
    * + version metadata for downstream URL construction.
    */
-  async pushPlan(input) {
-    return this.request("POST", "/plans", input);
+  async pushPlan(input, opts = {}) {
+    return this.request("POST", "/plans", input, { accountId: opts.accountId });
   }
   /**
    * GET /plans — list plans for the account, optionally filtered by
@@ -4695,7 +4794,7 @@ var MemlinApiClient = class {
    * UserPromptSubmit + SessionStart hooks to keep ~/.claude/plans/ in
    * sync with the server.
    */
-  async listPlans(opts = {}) {
+  async listPlans(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.status) qs.set("status", opts.status);
     if (opts.project_id !== void 0) {
@@ -4705,21 +4804,27 @@ var MemlinApiClient = class {
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const res = await this.request(
       "GET",
-      `/plans${suffix}`
+      `/plans${suffix}`,
+      void 0,
+      { accountId: callOpts.accountId }
     );
     return res.plans;
   }
   /** GET /plans/<id> — full plan detail (status + body + bundle ref). */
-  async getPlan(id) {
-    return this.request("GET", `/plans/${encodeURIComponent(id)}`);
+  async getPlan(id, opts = {}) {
+    return this.request("GET", `/plans/${encodeURIComponent(id)}`, void 0, {
+      accountId: opts.accountId
+    });
   }
   /**
    * PATCH /plans/<id> — replace the plan's body (creates a new
    * document_version, auto-embeds). Used by the PostToolUse hook to push
    * Claude Code edits back up to Memlin.
    */
-  async updatePlan(id, input) {
-    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input);
+  async updatePlan(id, input, opts = {}) {
+    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input, {
+      accountId: opts.accountId
+    });
   }
   /**
    * POST /projects — create a project in the caller's current account.
@@ -5073,13 +5178,14 @@ function log(msg) {
 
 // packages/plugin-core/dist/done-gate.js
 init_companion_client();
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { promises as fs5 } from "node:fs";
 import path7 from "node:path";
-var CLAIM = /\bit'?s (now )?(live|deployed|done|fixed|shipped)\b|\bnow live\b|\bis live\b|\bis deployed\b|\bdeployed to prod\b|\ball done\b|\bfully (fixed|working|deployed|shipped)\b|\bfix(ed)? (and|&) deployed\b|\bmerged (and|&) deployed\b|✅/i;
+var CLAIM = /\bit'?s (now )?(live|deployed|done|fixed|shipped)\b|\bnow live\b|\bis live\b|\bis deployed\b|\bdeployed to prod\b|\ball done\b|\bfully (fixed|working|deployed|shipped)\b|\bfix(ed)? (and|&) deployed\b|\bmerged (and|&) deployed\b|(^|\n)\s*[-*•\s]*(done|deployed|shipped|fixed)\b|✅/i;
 var HARD = /(^|\n)\s*[-*✅•\s]*\s*(fixed|deployed|shipped|done)\b[.! ]*\s*$/im;
 var HONEST = /not (yet )?(live|merged|deployed|shipped)|isn'?t (live|merged|deployed|shipped)|remaining step|next step (is|to)|not on main|still on (the |a )?(feature )?branch|needs? (to be )?merg|to be merged|before (this|it) is live|to make (it|this) live|awaiting (merge|deploy)|hold(ing)? the merge/i;
 var OVERRIDE = /\[skip-done-gate\]|done-gate:\s*override/i;
+var DELIVERY_REQUEST = /\b(?:fix|repair|implement|build|create|add|change|update|remove|refactor|deploy(?:ed|ing|ment)?|ship(?:ped|ping)?|publish(?:ed|ing)?|release(?:d|ing)?)\b|\bmake\b[^\n.!?]{0,80}\bwork(?:ing)?\b/i;
 function isOff(v) {
   const s = (v || "").trim().toLowerCase();
   return s === "off" || s === "0" || s === "false" || s === "no";
@@ -5091,7 +5197,15 @@ async function readMarker(cwd) {
     try {
       const raw = await fs5.readFile(file, "utf8");
       const parsed = JSON.parse(raw);
-      return { enabled: parsed.enabled !== false, base: parsed.base || "origin/main" };
+      const deploymentEvidence = Array.isArray(parsed.deploymentEvidence) ? parsed.deploymentEvidence.filter(
+        (item) => item && typeof item.name === "string" && typeof item.tag === "string" && Array.isArray(item.paths) && item.paths.every((p) => typeof p === "string" && p.length > 0)
+      ) : [];
+      return {
+        enabled: parsed.enabled !== false,
+        base: parsed.base || "origin/main",
+        strict: parsed.strict === true,
+        deploymentEvidence
+      };
     } catch {
     }
     const parent = path7.dirname(dir);
@@ -5118,16 +5232,32 @@ async function resolveGate(cwd) {
   const envOn = env === "1" || env === "true";
   const enabled = serverEnabled === true || marker?.enabled === true || envOn;
   if (!enabled) return null;
-  return { enabled: true, base: marker?.base || "origin/main" };
+  return {
+    enabled: true,
+    base: marker?.base || "origin/main",
+    strict: marker?.strict === true,
+    deploymentEvidence: marker?.deploymentEvidence ?? []
+  };
 }
-async function lastAssistantText(transcriptPath) {
+function contentText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((block) => {
+    if (!block || typeof block !== "object") return "";
+    const item = block;
+    return item.type === "text" || item.type === "input_text" || item.type === "output_text" ? String(item.text ?? "") : "";
+  }).join(" ");
+}
+async function readTranscript(transcriptPath) {
   let raw;
   try {
     raw = await fs5.readFile(transcriptPath, "utf8");
   } catch {
-    return "";
+    return null;
   }
-  let text = "";
+  let lastAssistantText = "";
+  const userTexts = [];
+  let baselineCommit = null;
   for (const line of raw.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -5137,24 +5267,34 @@ async function lastAssistantText(transcriptPath) {
     } catch {
       continue;
     }
-    const msg = ev.message;
-    if (!msg || msg.role !== "assistant") continue;
-    const content = msg.content;
-    let chunk = "";
-    if (typeof content === "string") {
-      chunk = content;
-    } else if (Array.isArray(content)) {
-      chunk = content.map(
-        (b) => b && typeof b === "object" && b.type === "text" ? String(b.text ?? "") : ""
-      ).join(" ");
+    const row = ev;
+    if (!baselineCommit && row.type === "session_meta") {
+      const commit = row.payload?.git?.commit_hash;
+      if (typeof commit === "string" && commit) baselineCommit = commit;
     }
-    if (chunk.trim()) text = chunk;
+    const msg = row.message;
+    if (msg?.role === "assistant") {
+      const chunk = contentText(msg.content);
+      if (chunk.trim()) lastAssistantText = chunk;
+    } else if (msg?.role === "user") {
+      const chunk = contentText(msg.content);
+      if (chunk.trim()) userTexts.push(chunk);
+    }
+    const payload = row.payload;
+    if (row.type === "response_item" && payload?.type === "message") {
+      const chunk = contentText(payload.content);
+      if (payload.role === "assistant" && chunk.trim()) lastAssistantText = chunk;
+      if (payload.role === "user" && chunk.trim()) userTexts.push(chunk);
+    } else if (row.type === "event_msg" && payload?.type === "user_message") {
+      const chunk = typeof payload.message === "string" ? payload.message : "";
+      if (chunk.trim()) userTexts.push(chunk);
+    }
   }
-  return text;
+  return { lastAssistantText, userTexts, baselineCommit };
 }
 function git(args, cwd) {
   try {
-    return execSync(`git ${args}`, {
+    return execFileSync("git", args, {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
@@ -5166,7 +5306,7 @@ function git(args, cwd) {
 }
 function gitOk(args, cwd) {
   try {
-    execSync(`git ${args}`, {
+    execFileSync("git", args, {
       cwd,
       stdio: ["ignore", "ignore", "ignore"],
       timeout: 5e3
@@ -5176,25 +5316,105 @@ function gitOk(args, cwd) {
     return false;
   }
 }
+function changedPathsSince(baseline, cwd) {
+  if (!baseline || !gitOk(["rev-parse", "--verify", `${baseline}^{commit}`], cwd)) return null;
+  const output = git(["diff", "--name-only", `${baseline}..HEAD`], cwd);
+  return output === null ? null : output.split("\n").map((p) => p.trim()).filter(Boolean);
+}
+function changedEvidencePaths(evidence, cwd) {
+  const paths = /* @__PURE__ */ new Set();
+  for (const item of evidence) {
+    if (!gitOk(["rev-parse", "--verify", `${item.tag}^{commit}`], cwd)) {
+      for (const prefix of item.paths) paths.add(prefix);
+      continue;
+    }
+    const output = git(["diff", "--name-only", `${item.tag}..HEAD`, "--", ...item.paths], cwd);
+    for (const file of output?.split("\n") ?? []) {
+      if (file.trim()) paths.add(file.trim());
+    }
+  }
+  return [...paths];
+}
+function pathMatchesPrefix(file, prefix) {
+  const normalized = prefix.replace(/^\.\//, "").replace(/\/$/, "");
+  return file === normalized || file.startsWith(`${normalized}/`);
+}
+function pendingDeploymentEvidence(evidence, changedPaths, cwd) {
+  const pending = [];
+  for (const item of evidence) {
+    const applies = changedPaths.some(
+      (file) => item.paths.some((prefix) => pathMatchesPrefix(file, prefix))
+    );
+    if (!applies) continue;
+    const tagRef = `${item.tag}^{commit}`;
+    if (!gitOk(["rev-parse", "--verify", tagRef], cwd)) {
+      pending.push(`${item.name}: deployment tag ${item.tag} is missing`);
+      continue;
+    }
+    if (!gitOk(["diff", "--quiet", `${item.tag}..HEAD`, "--", ...item.paths], cwd)) {
+      pending.push(`${item.name}: ${item.tag} does not contain the task's current code`);
+    }
+  }
+  return pending;
+}
+function strictBlock(reasons, base) {
+  return {
+    decision: "block",
+    reason: "HOLD \u2014 this session has an unfinished delivery obligation: " + reasons.join("; ") + `. Keep working until the change is committed, merged into ${base}, deployed, and verified by the configured production evidence. An honest \u201Cnot deployed\u201D status does not complete the task. Only the user may cancel the requirement or disable the gate.`
+  };
+}
 async function enforceDoneMeansDeployed(payload) {
+  let strictConfig = null;
   try {
-    if (payload.stop_hook_active) return null;
     const cwd = payload.cwd || process.cwd();
+    const cfg = await resolveGate(cwd);
+    if (!cfg) return null;
+    strictConfig = cfg.strict ? cfg : null;
     const transcript = payload.transcript_path;
-    if (!transcript) return null;
-    const text = await lastAssistantText(transcript);
+    if (!transcript) {
+      return cfg.strict ? strictBlock(["the host supplied no transcript, so completion cannot be verified"], cfg.base) : null;
+    }
+    const snapshot = await readTranscript(transcript);
+    if (!snapshot) {
+      return cfg.strict ? strictBlock(["the transcript could not be read, so completion cannot be verified"], cfg.base) : null;
+    }
+    const text = snapshot.lastAssistantText;
+    const deliveryRequested = snapshot.userTexts.some((userText) => DELIVERY_REQUEST.test(userText));
+    if (cfg.strict && deliveryRequested) {
+      const why2 = [];
+      if (!gitOk(["rev-parse", "--verify", cfg.base], cwd)) {
+        why2.push(`the configured base ref ${cfg.base} is unavailable`);
+        return strictBlock(why2, cfg.base);
+      }
+      const branchOutput = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+      const branch2 = branchOutput || "HEAD";
+      const status = git(["status", "--porcelain"], cwd);
+      const dirty2 = Boolean(status);
+      const merged2 = gitOk(["merge-base", "--is-ancestor", "HEAD", cfg.base], cwd);
+      const onMain2 = branch2 === "main" || branch2 === "master";
+      const unpushed2 = onMain2 ? Boolean(git(["rev-list", `${cfg.base}..HEAD`], cwd)) : false;
+      if (!merged2) why2.push(`HEAD (${branch2}) is not merged into ${cfg.base}`);
+      if (branchOutput === null) why2.push("the current Git branch could not be inspected");
+      if (status === null) why2.push("the working tree could not be inspected");
+      if (dirty2) why2.push("the working tree has uncommitted changes");
+      if (unpushed2) why2.push(`there are unpushed commits (${cfg.base}..HEAD)`);
+      const changedPaths = changedPathsSince(snapshot.baselineCommit, cwd);
+      const scopedPaths = changedPaths ?? changedEvidencePaths(cfg.deploymentEvidence, cwd);
+      why2.push(...pendingDeploymentEvidence(cfg.deploymentEvidence, scopedPaths, cwd));
+      if (why2.length > 0) return strictBlock(why2, cfg.base);
+      return null;
+    }
+    if (payload.stop_hook_active) return null;
     if (!text) return null;
     if (HONEST.test(text)) return null;
     if (OVERRIDE.test(text)) return null;
     if (!CLAIM.test(text) && !HARD.test(text)) return null;
-    const cfg = await resolveGate(cwd);
-    if (!cfg) return null;
-    if (!gitOk(`rev-parse --verify ${cfg.base}`, cwd)) return null;
-    const branch = git("rev-parse --abbrev-ref HEAD", cwd) || "HEAD";
-    const dirty = Boolean(git("status --porcelain", cwd));
-    const merged = gitOk(`merge-base --is-ancestor HEAD ${cfg.base}`, cwd);
+    if (!gitOk(["rev-parse", "--verify", cfg.base], cwd)) return null;
+    const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd) || "HEAD";
+    const dirty = Boolean(git(["status", "--porcelain"], cwd));
+    const merged = gitOk(["merge-base", "--is-ancestor", "HEAD", cfg.base], cwd);
     const onMain = branch === "main" || branch === "master";
-    const unpushed = onMain ? Boolean(git(`rev-list ${cfg.base}..HEAD`, cwd)) : false;
+    const unpushed = onMain ? Boolean(git(["rev-list", `${cfg.base}..HEAD`], cwd)) : false;
     const live = merged && !dirty && !unpushed;
     if (live) return null;
     const why = [];
@@ -5206,7 +5426,13 @@ async function enforceDoneMeansDeployed(payload) {
   (2) If you cannot merge right now (a concurrent deploy is in flight, you need sign-off, CI is red), say so plainly and state the exact remaining step \u2014 but do NOT call it done, fixed, or deployed.
 Override (deliberate): include [skip-done-gate] in your message to ship-anyway this once, or disable the gate entirely with MEMLIN_DONE_GATE=off (or set "enabled": false in .memlin/enforce-done-deployed.json). The gate is opt-in and read-only \u2014 it never edits your files.`;
     return { decision: "block", reason };
-  } catch {
+  } catch (error) {
+    if (strictConfig) {
+      return strictBlock(
+        [`verification failed: ${error instanceof Error ? error.message : String(error)}`],
+        strictConfig.base
+      );
+    }
     return null;
   }
 }
@@ -5215,12 +5441,120 @@ Override (deliberate): include [skip-done-gate] in your message to ship-anyway t
 import crypto from "node:crypto";
 import { promises as fs6 } from "node:fs";
 import os6 from "node:os";
+import path9 from "node:path";
+
+// packages/plugin-core/dist/project-resolver.js
+import { execSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import path8 from "node:path";
+var ALLOW_ACCOUNT_MISMATCH_ENV = "MEMLIN_ALLOW_ACCOUNT_MISMATCH";
+function allowAccountMismatch(env = process.env) {
+  const v = env[ALLOW_ACCOUNT_MISMATCH_ENV];
+  return v === "1" || v === "true" || v === "yes";
+}
+function accountBindingHazard(r, opts = {}) {
+  if (!r.hasGitRemote || !r.project_id) return "none";
+  if (r.reason === "local-path") return opts.allowMismatch ? "warn" : "block";
+  if (r.reason === "config") return "warn";
+  return "none";
+}
+async function resolveProject(api, cwd, configProjectId) {
+  const absCwd = path8.resolve(cwd);
+  const remotes = detectGitRemotes(cwd);
+  const hasGitRemote = remotes.length > 0;
+  let serverFailure;
+  try {
+    const result = await api.resolveProject({
+      // Primary remote (back-compat with the single-remote server path).
+      git_remote: remotes[0] ?? null,
+      // All detected remotes — for the workspace-root-of-repos case, this is
+      // every sibling repo so the server resolves to the owning project.
+      git_remotes: remotes,
+      cwd: absCwd
+    });
+    if (result.project_id) {
+      return {
+        project_id: result.project_id,
+        project_name: result.name,
+        account_id: result.account_id,
+        reason: result.reason === "none" ? "config" : result.reason,
+        hasGitRemote,
+        enforce_done_deployed: result.enforce_done_deployed
+      };
+    }
+  } catch (e) {
+    serverFailure = summarizeBackendFailure(e) ?? void 0;
+  }
+  if (configProjectId) {
+    const localBinding = await findWorkspaceBinding(absCwd).catch(() => null);
+    if (localBinding?.binding.project_id === configProjectId) {
+      return {
+        project_id: configProjectId,
+        project_name: null,
+        account_id: null,
+        reason: "config",
+        hasGitRemote,
+        server_failure: serverFailure
+      };
+    }
+  }
+  return {
+    project_id: null,
+    project_name: null,
+    account_id: null,
+    reason: "none",
+    hasGitRemote,
+    server_failure: serverFailure
+  };
+}
+function readGitRemote(cwd) {
+  try {
+    const url = execSync("git remote get-url origin", {
+      windowsHide: true,
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8"
+    }).trim();
+    return normalizeGitRemote(url);
+  } catch {
+    return null;
+  }
+}
+var MAX_WORKSPACE_SCAN = 64;
+function detectGitRemotes(cwd) {
+  const enclosing = readGitRemote(cwd);
+  if (enclosing) return [enclosing];
+  const out = [];
+  try {
+    let scanned = 0;
+    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
+      if (scanned >= MAX_WORKSPACE_SCAN) break;
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+      scanned++;
+      const child = path8.join(cwd, entry.name);
+      if (!existsSync(path8.join(child, ".git"))) continue;
+      const remote = readGitRemote(child);
+      if (remote && !out.includes(remote)) out.push(remote);
+    }
+  } catch {
+  }
+  return out;
+}
+function isWorkspaceActive(input) {
+  return Boolean(input.resolvedProjectId) || input.workspaceBound;
+}
+function effectiveAccountId(input) {
+  return input.resolvedAccountId ?? input.configAccountId;
+}
+
+// packages/plugin-core/dist/heartbeat.js
 var DEFAULT_THROTTLE_MS = 6e4;
 var HEARTBEAT_REQUEST_TIMEOUT_MS = 750;
 function statePath(cwd, host) {
   const key = crypto.createHash("sha256").update(cwd).digest("hex").slice(0, 16);
-  return path8.join(os6.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
+  return path9.join(os6.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
 }
 async function recentlySent(file, throttleMs) {
   try {
@@ -5239,7 +5573,18 @@ async function recordInstallHeartbeat(cwd, reason, opts = {}) {
   try {
     const ctx = await getApi({ cwd });
     if (!ctx) return;
+    const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
+    if (!isWorkspaceActive({
+      resolvedProjectId: resolved.project_id,
+      workspaceBound: ctx.workspaceBound
+    })) {
+      return;
+    }
     await ctx.api.getAccount({
+      accountId: effectiveAccountId({
+        configAccountId: ctx.config.account_id,
+        resolvedAccountId: resolved.account_id
+      }),
       requestTimeoutMs: HEARTBEAT_REQUEST_TIMEOUT_MS,
       maxRetries: 0
     });
@@ -5399,10 +5744,10 @@ function attributeAppliedItems(agentMessage, replay) {
 
 // packages/plugin-core/dist/state.js
 import { promises as fs7 } from "node:fs";
-import path9 from "node:path";
+import path10 from "node:path";
 import os7 from "node:os";
 import crypto2 from "node:crypto";
-var STATE_FILE = path9.join(os7.homedir(), ".config", "memlin", "state.json");
+var STATE_FILE = path10.join(os7.homedir(), ".config", "memlin", "state.json");
 var EMPTY = { documents: {} };
 async function readState() {
   try {
@@ -5413,7 +5758,7 @@ async function readState() {
   }
 }
 async function writeState(state) {
-  await fs7.mkdir(path9.dirname(STATE_FILE), { recursive: true });
+  await fs7.mkdir(path10.dirname(STATE_FILE), { recursive: true });
   const tmp = `${STATE_FILE}.${process.pid}.tmp`;
   await fs7.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
   await atomicRename(tmp, STATE_FILE);
@@ -5443,96 +5788,6 @@ function accumulateScribeNotice(existing, input) {
     session_id: input.sessionId,
     at: input.at
   };
-}
-
-// packages/plugin-core/dist/project-resolver.js
-import { execSync as execSync2 } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
-import path10 from "node:path";
-var ALLOW_ACCOUNT_MISMATCH_ENV = "MEMLIN_ALLOW_ACCOUNT_MISMATCH";
-function allowAccountMismatch(env = process.env) {
-  const v = env[ALLOW_ACCOUNT_MISMATCH_ENV];
-  return v === "1" || v === "true" || v === "yes";
-}
-function accountBindingHazard(r, opts = {}) {
-  if (!r.hasGitRemote || !r.project_id) return "none";
-  if (r.reason === "local-path") return opts.allowMismatch ? "warn" : "block";
-  if (r.reason === "config") return "warn";
-  return "none";
-}
-async function resolveProject(api, cwd, configProjectId) {
-  const absCwd = path10.resolve(cwd);
-  const remotes = detectGitRemotes(cwd);
-  const hasGitRemote = remotes.length > 0;
-  try {
-    const result = await api.resolveProject({
-      // Primary remote (back-compat with the single-remote server path).
-      git_remote: remotes[0] ?? null,
-      // All detected remotes — for the workspace-root-of-repos case, this is
-      // every sibling repo so the server resolves to the owning project.
-      git_remotes: remotes,
-      cwd: absCwd
-    });
-    if (result.project_id) {
-      return {
-        project_id: result.project_id,
-        project_name: result.name,
-        account_id: result.account_id,
-        reason: result.reason === "none" ? "config" : result.reason,
-        hasGitRemote,
-        enforce_done_deployed: result.enforce_done_deployed
-      };
-    }
-  } catch {
-  }
-  if (configProjectId) {
-    return {
-      project_id: configProjectId,
-      project_name: null,
-      account_id: null,
-      reason: "config",
-      hasGitRemote
-    };
-  }
-  return { project_id: null, project_name: null, account_id: null, reason: "none", hasGitRemote };
-}
-function readGitRemote(cwd) {
-  try {
-    const url = execSync2("git remote get-url origin", {
-      windowsHide: true,
-      cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8"
-    }).trim();
-    return normalizeGitRemote(url);
-  } catch {
-    return null;
-  }
-}
-var MAX_WORKSPACE_SCAN = 64;
-function detectGitRemotes(cwd) {
-  const enclosing = readGitRemote(cwd);
-  if (enclosing) return [enclosing];
-  const out = [];
-  try {
-    let scanned = 0;
-    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
-      if (scanned >= MAX_WORKSPACE_SCAN) break;
-      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
-        continue;
-      }
-      scanned++;
-      const child = path10.join(cwd, entry.name);
-      if (!existsSync(path10.join(child, ".git"))) continue;
-      const remote = readGitRemote(child);
-      if (remote && !out.includes(remote)) out.push(remote);
-    }
-  } catch {
-  }
-  return out;
-}
-function isWorkspaceActive(input) {
-  return Boolean(input.resolvedProjectId) || input.workspaceBound;
 }
 
 // packages/plugin-core/dist/transcript.js
@@ -10865,7 +11120,7 @@ async function heartbeat(cwd) {
 }
 function readGitRemote2(cwd) {
   try {
-    const url = execSync3("git remote get-url origin", {
+    const url = execSync2("git remote get-url origin", {
       windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
@@ -10876,7 +11131,31 @@ function readGitRemote2(cwd) {
     return null;
   }
 }
-async function maybeProposeMemory(ctx, payload) {
+async function resolveStopWorkspaceRouting(ctx, cwd) {
+  let resolvedProjectId = null;
+  let resolvedAccountId = null;
+  let hazard = "none";
+  try {
+    const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
+    resolvedProjectId = resolved.project_id;
+    resolvedAccountId = resolved.account_id;
+    hazard = accountBindingHazard(resolved, { allowMismatch: allowAccountMismatch() });
+  } catch {
+  }
+  return {
+    accountId: effectiveAccountId({
+      configAccountId: ctx.config.account_id,
+      resolvedAccountId
+    }),
+    projectId: resolvedProjectId,
+    active: isWorkspaceActive({
+      resolvedProjectId,
+      workspaceBound: ctx.workspaceBound
+    }),
+    hazard
+  };
+}
+async function maybeProposeMemory(ctx, payload, routing) {
   if (!payload.transcript_path) return;
   const exchange = await readLastExchange(payload.transcript_path);
   if (!exchange) {
@@ -10889,27 +11168,11 @@ async function maybeProposeMemory(ctx, payload) {
   }
   const cwd = payload.cwd ?? process.cwd();
   const gitRemote = readGitRemote2(cwd);
-  let accountOverride;
-  let resolvedProjectId = null;
-  let hazard = "none";
-  try {
-    const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
-    resolvedProjectId = resolved.project_id;
-    if (resolved.account_id && resolved.account_id !== ctx.config.account_id) {
-      accountOverride = resolved.account_id;
-    }
-    hazard = accountBindingHazard(resolved, { allowMismatch: allowAccountMismatch() });
-  } catch {
-  }
-  const active = isWorkspaceActive({
-    resolvedProjectId,
-    workspaceBound: ctx.workspaceBound
-  });
-  if (!active) {
+  if (!routing.active) {
     log("memory propose: skipped \u2014 not a known Memlin workspace");
     return;
   }
-  if (hazard === "block") {
+  if (routing.hazard === "block") {
     log(
       "memory propose: BLOCKED \u2014 account-binding mismatch (git remote not owned by the resolved project). Re-link with `memlin add-project`, or set MEMLIN_ALLOW_ACCOUNT_MISMATCH=1 to record here anyway."
     );
@@ -10922,7 +11185,7 @@ async function maybeProposeMemory(ctx, payload) {
       cwd,
       git_remote: gitRemote
     },
-    accountOverride ? { accountId: accountOverride } : {}
+    { accountId: routing.accountId }
   );
   try {
     const result = await withTimeout(propose, TIMEOUT_MS, { ok: false, proposed: 0 });
@@ -10941,7 +11204,7 @@ async function maybeProposeMemory(ctx, payload) {
   }
 }
 var TURN_TIMING_OUTLIER_MS = 30 * 60 * 1e3;
-async function maybeRecordTurnTiming(ctx, payload) {
+async function maybeRecordTurnTiming(ctx, payload, routing) {
   const state = await readState();
   const sessionId = payload.session_id ?? sessionIdFromTranscriptPath(payload.transcript_path) ?? null;
   const lastResolve = getLastResolveForSession(state, sessionId);
@@ -10954,32 +11217,35 @@ async function maybeRecordTurnTiming(ctx, payload) {
   if (wallClockMs < 0) return;
   const usage = payload.transcript_path ? await readLastAssistantUsage(payload.transcript_path) : null;
   try {
-    await ctx.api.writeUsageEvent({
-      event_type: "turn.timing",
-      metadata: {
-        audit_id: lastResolve.audit_id,
-        // join key → invocation + outcome
-        session_id: sessionId,
-        host: lastResolve.host ?? null,
-        turn_started_at: lastResolve.turn_started_at,
-        answer_delivered_at: answerDeliveredAt,
-        wall_clock_ms: wallClockMs,
-        outlier: wallClockMs > TURN_TIMING_OUTLIER_MS,
-        ...usage ? {
-          turn_input_tokens: usage.input_tokens,
-          turn_output_tokens: usage.output_tokens,
-          turn_cache_read_input_tokens: usage.cache_read_input_tokens,
-          turn_cache_creation_input_tokens: usage.cache_creation_input_tokens,
-          turn_model: usage.model
-        } : {}
-      }
-    });
+    await ctx.api.writeUsageEvent(
+      {
+        event_type: "turn.timing",
+        metadata: {
+          audit_id: lastResolve.audit_id,
+          // join key → invocation + outcome
+          session_id: sessionId,
+          host: lastResolve.host ?? null,
+          turn_started_at: lastResolve.turn_started_at,
+          answer_delivered_at: answerDeliveredAt,
+          wall_clock_ms: wallClockMs,
+          outlier: wallClockMs > TURN_TIMING_OUTLIER_MS,
+          ...usage ? {
+            turn_input_tokens: usage.input_tokens,
+            turn_output_tokens: usage.output_tokens,
+            turn_cache_read_input_tokens: usage.cache_read_input_tokens,
+            turn_cache_creation_input_tokens: usage.cache_creation_input_tokens,
+            turn_model: usage.model
+          } : {}
+        }
+      },
+      { accountId: routing.accountId }
+    );
     log(`recorded turn.timing: ${wallClockMs}ms for audit ${lastResolve.audit_id}`);
   } catch (err) {
     log(`failed to record turn.timing: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
-async function maybeRecordOutcome(ctx, payload) {
+async function maybeRecordOutcome(ctx, payload, routing) {
   const state = await readState();
   const transcriptSessionId = sessionIdFromTranscriptPath(payload.transcript_path);
   const sessionId = payload.session_id ?? transcriptSessionId ?? null;
@@ -11005,7 +11271,7 @@ async function maybeRecordOutcome(ctx, payload) {
   };
   try {
     const replay = await withTimeout(
-      ctx.api.replayAudit(lastResolve.audit_id),
+      ctx.api.replayAudit(lastResolve.audit_id, { accountId: routing.accountId }),
       OUTCOME_ATTRIBUTION_TIMEOUT_MS,
       null
     );
@@ -11016,20 +11282,23 @@ async function maybeRecordOutcome(ctx, payload) {
     );
   }
   try {
-    await ctx.api.writeUsageEvent({
-      event_type: "resolve.outcome",
-      metadata: {
-        audit_id: lastResolve.audit_id,
-        outcome,
-        severity,
-        kinds: feedback.kinds,
-        agent_apology: agentApology,
-        task_category: taskCategory,
-        applied_item_ids: attribution.applied_item_ids,
-        referenced_item_ids: attribution.referenced_item_ids,
-        attribution_mode: attribution.attribution_mode
-      }
-    });
+    await ctx.api.writeUsageEvent(
+      {
+        event_type: "resolve.outcome",
+        metadata: {
+          audit_id: lastResolve.audit_id,
+          outcome,
+          severity,
+          kinds: feedback.kinds,
+          agent_apology: agentApology,
+          task_category: taskCategory,
+          applied_item_ids: attribution.applied_item_ids,
+          referenced_item_ids: attribution.referenced_item_ids,
+          attribution_mode: attribution.attribution_mode
+        }
+      },
+      { accountId: routing.accountId }
+    );
     log(
       `recorded resolve.outcome: ${outcome} for audit ${lastResolve.audit_id} (${attribution.attribution_mode}, ${attribution.applied_item_ids.length} applied)`
     );
@@ -11039,13 +11308,16 @@ async function maybeRecordOutcome(ctx, payload) {
         `resolver outcome is negative; capturing correction rule for audit ${lastResolve.audit_id}...`
       );
       try {
-        const propose = ctx.api.proposeMemory({
-          user_message: exchange.user_message,
-          agent_message: exchange.agent_message,
-          cwd,
-          git_remote: gitRemote,
-          negative_outcome_audit_id: lastResolve.audit_id
-        });
+        const propose = ctx.api.proposeMemory(
+          {
+            user_message: exchange.user_message,
+            agent_message: exchange.agent_message,
+            cwd,
+            git_remote: gitRemote,
+            negative_outcome_audit_id: lastResolve.audit_id
+          },
+          { accountId: routing.accountId }
+        );
         const res = await withTimeout(propose, TIMEOUT_MS, { ok: false, proposed: 0 });
         if (res.correction_rule) {
           const next = await readState();
@@ -11099,7 +11371,7 @@ function lastTurnHasInsistence(raw) {
   }
   return false;
 }
-async function maybeScribeSession(ctx, payload) {
+async function maybeScribeSession(ctx, payload, routing) {
   if (!payload.transcript_path) return;
   let raw;
   try {
@@ -11122,22 +11394,10 @@ async function maybeScribeSession(ctx, payload) {
     log("scribe force-flush \u2014 insistence signal in last user turn");
   }
   const cwd = payload.cwd ?? process.cwd();
-  let resolvedProjectId = null;
-  let accountOverride;
-  let hazard = "none";
-  try {
-    const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
-    resolvedProjectId = resolved.project_id;
-    if (resolved.account_id && resolved.account_id !== ctx.config.account_id) {
-      accountOverride = resolved.account_id;
-    }
-    hazard = accountBindingHazard(resolved, { allowMismatch: allowAccountMismatch() });
-  } catch {
-  }
-  if (!isWorkspaceActive({ resolvedProjectId, workspaceBound: ctx.workspaceBound })) {
+  if (!routing.active) {
     return;
   }
-  if (hazard === "block") {
+  if (routing.hazard === "block") {
     log(
       "session scribe: BLOCKED \u2014 account-binding mismatch. Re-link with `memlin add-project`, or set MEMLIN_ALLOW_ACCOUNT_MISMATCH=1 to record here anyway."
     );
@@ -11171,11 +11431,11 @@ ${text}`);
     {
       session_id: sessionId,
       transcript: delta,
-      project_id: resolvedProjectId,
+      project_id: routing.projectId,
       cwd,
       git_remote: readGitRemote2(cwd)
     },
-    accountOverride ? { accountId: accountOverride } : {}
+    { accountId: routing.accountId }
   );
   try {
     const result = await withTimeout(scribe, SCRIBE_TIMEOUT_MS, {
@@ -11242,7 +11502,7 @@ function truncateWorkingText(text, max) {
   if (text.length <= max) return text;
   return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}\u2026`;
 }
-async function maybeUpsertWorkingMemory(ctx, payload) {
+async function maybeUpsertWorkingMemory(ctx, payload, routing) {
   const transcriptSessionId = sessionIdFromTranscriptPath(payload.transcript_path);
   const sessionId = payload.session_id ?? transcriptSessionId ?? null;
   if (!sessionId) {
@@ -11250,26 +11510,11 @@ async function maybeUpsertWorkingMemory(ctx, payload) {
     return;
   }
   const cwd = payload.cwd ?? process.cwd();
-  let accountOverride;
-  let resolvedProjectId = null;
-  let hazard = "none";
-  try {
-    const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
-    resolvedProjectId = resolved.project_id;
-    if (resolved.account_id && resolved.account_id !== ctx.config.account_id) {
-      accountOverride = resolved.account_id;
-    }
-    hazard = accountBindingHazard(resolved, { allowMismatch: allowAccountMismatch() });
-  } catch {
-  }
-  if (!isWorkspaceActive({
-    resolvedProjectId,
-    workspaceBound: ctx.workspaceBound
-  })) {
+  if (!routing.active) {
     log("working memory: skipped \u2014 not a known Memlin workspace");
     return;
   }
-  if (hazard === "block") {
+  if (routing.hazard === "block") {
     log("working memory: BLOCKED \u2014 account-binding mismatch");
     return;
   }
@@ -11287,7 +11532,7 @@ async function maybeUpsertWorkingMemory(ctx, payload) {
     return;
   }
   const path11 = workingMemoryPath(sessionId);
-  const callOpts = accountOverride ? { accountId: accountOverride } : {};
+  const callOpts = { accountId: routing.accountId };
   let documentId = state.working_memory_ids?.[sessionId] ?? null;
   if (!documentId) {
     try {
@@ -11295,7 +11540,7 @@ async function maybeUpsertWorkingMemory(ctx, payload) {
         ctx.api.listDocuments(
           {
             kinds: ["memory"],
-            ...resolvedProjectId ? { project_id: resolvedProjectId } : {}
+            ...routing.projectId ? { project_id: routing.projectId } : {}
           },
           callOpts
         ),
@@ -11314,13 +11559,13 @@ async function maybeUpsertWorkingMemory(ctx, payload) {
     const write = ctx.api.writeDocument(
       {
         document_id: documentId,
-        scope: resolvedProjectId ? "project" : "team",
+        scope: routing.projectId ? "project" : "team",
         kind: "memory",
         title: `Working memory \u2014 ${sessionId.slice(0, 12)}`,
         path: path11,
         content,
         commit_message: "session working memory",
-        project_id: resolvedProjectId,
+        project_id: routing.projectId,
         metadata: {
           memory_type: "working",
           session_id: sessionId
@@ -11357,13 +11602,14 @@ async function runStopHandler(payload) {
   }
   const ctx = await getApi({ cwd });
   if (!ctx) return;
+  const routing = await resolveStopWorkspaceRouting(ctx, cwd);
   await Promise.allSettled([
     heartbeat(cwd),
-    maybeProposeMemory(ctx, payload),
-    maybeScribeSession(ctx, payload),
-    maybeRecordOutcome(ctx, payload),
-    maybeRecordTurnTiming(ctx, payload),
-    maybeUpsertWorkingMemory(ctx, payload)
+    maybeProposeMemory(ctx, payload, routing),
+    maybeScribeSession(ctx, payload, routing),
+    maybeRecordOutcome(ctx, payload, routing),
+    maybeRecordTurnTiming(ctx, payload, routing),
+    maybeUpsertWorkingMemory(ctx, payload, routing)
   ]);
 }
 

@@ -3412,7 +3412,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs5 = __require("fs");
+    var fs6 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3496,7 +3496,7 @@ var require_gray_matter = __commonJS({
       return stringify(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs5.readFileSync(filepath, "utf8");
+      const str2 = fs6.readFileSync(filepath, "utf8");
       const file = matter3(str2, options2);
       file.path = filepath;
       return file;
@@ -3537,10 +3537,12 @@ __export(companion_client_exports, {
   companionDelegationEnabled: () => companionDelegationEnabled,
   companionForDelegation: () => companionForDelegation,
   companionGetToken: () => companionGetToken,
+  companionReadLocal: () => companionReadLocal,
   companionReportSession: () => companionReportSession,
   companionRequest: () => companionRequest,
   companionResolveWorkspace: () => companionResolveWorkspace,
   companionRunDir: () => companionRunDir,
+  companionSearchLocal: () => companionSearchLocal,
   companionSocketPath: () => companionSocketPath,
   companionStatus: () => companionStatus,
   companionSyncNow: () => companionSyncNow,
@@ -3645,6 +3647,12 @@ async function companionResolveWorkspace(cwd) {
 async function companionSyncNow(req) {
   return companionRequest("sync.now", req);
 }
+async function companionSearchLocal(req) {
+  return companionRequest("memory.search", req);
+}
+async function companionReadLocal(req) {
+  return companionRequest("memory.read", req);
+}
 async function companionReportSession(req) {
   return (await companionRequest("session.report", req))?.registered ?? false;
 }
@@ -3684,7 +3692,10 @@ var init_companion_client = __esm({
     CALL_TIMEOUTS = {
       "workspace.resolve": 2e3,
       "sync.now": 5e3,
-      "login.start": 1e4
+      "login.start": 1e4,
+      // Local-store reads walk the materialized doc tree on disk.
+      "memory.search": 2e3,
+      "memory.read": 2e3
     };
     socketDeadUntil = 0;
     SOCKET_DEAD_TTL_MS = 5e3;
@@ -3694,7 +3705,7 @@ var init_companion_client = __esm({
 
 // packages/plugin-core/dist/pre-tool-use-handler.js
 import { execSync as execSync3 } from "node:child_process";
-import path9 from "node:path";
+import path10 from "node:path";
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
@@ -4174,8 +4185,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path10, errorMaps, issueData } = params;
-  const fullPath = [...path10, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -4291,11 +4302,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path10, key) {
+  constructor(parent, value, path11, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path10;
+    this._path = path11;
     this._key = key;
   }
   get path() {
@@ -8246,6 +8257,111 @@ function strongestVerdict(hits) {
   return "advisory";
 }
 
+// packages/shared/dist/trigger-memories.js
+var MEMORY_TRIGGER_MODES = ["warn", "deny"];
+var TRIGGER_MAX_PATTERN_LENGTH = 200;
+var TRIGGER_MAX_PATTERN_TOKENS = 8;
+var TRIGGER_MAX_PATH_PREFIX_LENGTH = 300;
+var TRIGGER_MAX_MESSAGE_LENGTH = 2e3;
+function parseMemoryTrigger(raw) {
+  if (raw === null || raw === void 0 || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, errors: ["trigger must be an object"] };
+  }
+  const obj = raw;
+  const errors = [];
+  const commandPattern = normalizeCommandPattern(obj.command_pattern, errors);
+  const pathPrefix = normalizePathPrefix(obj.path_prefix, errors);
+  const mode = normalizeMode(obj.mode, errors);
+  const message = normalizeMessage(obj.message, errors);
+  if (!commandPattern && !pathPrefix && errors.length === 0) {
+    errors.push("trigger requires at least one of command_pattern / path_prefix");
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return {
+    ok: true,
+    trigger: {
+      command_pattern: commandPattern,
+      path_prefix: pathPrefix,
+      mode: mode ?? "warn",
+      message
+    }
+  };
+}
+function normalizeCommandPattern(raw, errors) {
+  if (raw === null || raw === void 0) return null;
+  if (typeof raw !== "string") {
+    errors.push("command_pattern must be a string");
+    return null;
+  }
+  const pattern = raw.trim().replace(/\s+/g, " ");
+  if (!pattern) {
+    errors.push("command_pattern must not be empty");
+    return null;
+  }
+  if (pattern.length > TRIGGER_MAX_PATTERN_LENGTH) {
+    errors.push(`command_pattern longer than ${TRIGGER_MAX_PATTERN_LENGTH} chars`);
+    return null;
+  }
+  if (/[;&|()\n`]/.test(pattern)) {
+    errors.push("command_pattern must be a single command prefix (no ; & | ( ) or newlines)");
+    return null;
+  }
+  const tokens = pattern.split(" ");
+  if (tokens.length > TRIGGER_MAX_PATTERN_TOKENS) {
+    errors.push(`command_pattern has more than ${TRIGGER_MAX_PATTERN_TOKENS} tokens`);
+    return null;
+  }
+  return pattern;
+}
+function normalizePathPrefix(raw, errors) {
+  if (raw === null || raw === void 0) return null;
+  if (typeof raw !== "string") {
+    errors.push("path_prefix must be a string");
+    return null;
+  }
+  if (raw.length > TRIGGER_MAX_PATH_PREFIX_LENGTH) {
+    errors.push(`path_prefix longer than ${TRIGGER_MAX_PATH_PREFIX_LENGTH} chars`);
+    return null;
+  }
+  const slashed = raw.trim().replace(/\\/g, "/");
+  if (slashed.startsWith("/") || /^[A-Za-z]:/.test(slashed)) {
+    errors.push("path_prefix must be workspace-relative, not absolute");
+    return null;
+  }
+  const prefix = slashed.replace(/^(\.\/)+/, "").replace(/\/+$/, "");
+  if (!prefix) {
+    errors.push("path_prefix must not be empty");
+    return null;
+  }
+  if (prefix.split("/").some((seg) => seg === ".." || seg === "")) {
+    errors.push('path_prefix must not contain ".." or empty segments');
+    return null;
+  }
+  return prefix;
+}
+function normalizeMode(raw, errors) {
+  if (raw === null || raw === void 0) return null;
+  if (typeof raw !== "string" || !MEMORY_TRIGGER_MODES.includes(raw)) {
+    errors.push(`mode must be one of ${MEMORY_TRIGGER_MODES.join(" | ")}`);
+    return null;
+  }
+  return raw;
+}
+function normalizeMessage(raw, errors) {
+  if (raw === null || raw === void 0) return null;
+  if (typeof raw !== "string") {
+    errors.push("message must be a string");
+    return null;
+  }
+  const message = raw.trim();
+  if (!message) return null;
+  if (message.length > TRIGGER_MAX_MESSAGE_LENGTH) {
+    errors.push(`message longer than ${TRIGGER_MAX_MESSAGE_LENGTH} chars`);
+    return null;
+  }
+  return message;
+}
+
 // packages/shared/dist/action-metadata.js
 var ActionNameSchema = external_exports.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9._-]*$/, {
   message: "action name must be lowercase alphanumeric + dot/underscore/hyphen, 1-64 chars"
@@ -8599,6 +8715,73 @@ async function atomicRename(from, to, dependencies = {}) {
   }
 }
 
+// packages/plugin-core/dist/backend-error.js
+var MemlinApiError = class extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+    this.name = "MemlinApiError";
+  }
+  status;
+};
+function looksLikeHtml(text) {
+  const head = text.slice(0, 512).trimStart().toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html") || head.includes("<html") || head.startsWith("<") && /<\/(head|body|title|div|p)>/i.test(text);
+}
+function singleLine(text, max = 200) {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1)}\u2026`;
+}
+function describeOpaqueBody(status, text) {
+  const trimmed = text.trim();
+  if (!trimmed) return `HTTP ${status}`;
+  if (looksLikeHtml(trimmed)) {
+    const via = /cloudflare/i.test(trimmed) ? "Cloudflare " : "";
+    return `HTTP ${status} (${via}HTML error page suppressed, ${trimmed.length} chars)`;
+  }
+  return `HTTP ${status}: ${singleLine(trimmed)}`;
+}
+function backendUnreachableLine(detail) {
+  return `memlin: backend unreachable (${detail}), no memory available`;
+}
+var ROUTING_PATTERN = /account routing (unavailable|lookup failed)/i;
+var CLOUDFLARE_STATUS = /\b(52[0-7])\b/;
+function statusOf(err) {
+  if (err instanceof MemlinApiError) return err.status;
+  const status = err?.status;
+  if (typeof status === "number" && status >= 100 && status <= 599) return status;
+  const message = err instanceof Error ? err.message : String(err);
+  const arrow = message.match(/→ (\d{3}):/);
+  if (arrow) return Number(arrow[1]);
+  return null;
+}
+function summarizeBackendFailure(err) {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const status = statusOf(err);
+  if (ROUTING_PATTERN.test(message)) {
+    const embedded = message.match(CLOUDFLARE_STATUS)?.[1];
+    const code = embedded ?? (status !== null && status >= 500 ? String(status) : null);
+    const detail = code ? `routing ${code}` : "routing unavailable";
+    return { kind: "routing", status: code ? Number(code) : status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (status !== null && status >= 500) {
+    const detail = `HTTP ${status}`;
+    return { kind: "http", status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (/took longer than \d+ seconds/i.test(message)) {
+    return { kind: "network", status: null, detail: "timeout", line: backendUnreachableLine("timeout") };
+  }
+  if (/couldn'?t reach|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|network/i.test(message)) {
+    return {
+      kind: "network",
+      status: null,
+      detail: "network unreachable",
+      line: backendUnreachableLine("network unreachable")
+    };
+  }
+  return null;
+}
+
 // packages/plugin-core/dist/auth.js
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
@@ -8689,7 +8872,7 @@ async function writePersistedToken(t) {
   });
   await atomicRename(tmp, file);
 }
-async function refreshAccessToken(refreshToken) {
+async function refreshAccessToken(refreshToken, options2 = {}) {
   requireClientId();
   const body = new URLSearchParams({
     grant_type: "refresh_token",
@@ -8699,10 +8882,11 @@ async function refreshAccessToken(refreshToken) {
   const res = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString()
+    body: body.toString(),
+    signal: AbortSignal.timeout(Math.max(1, options2.timeoutMs ?? 15e3))
   });
   if (!res.ok) {
-    throw new Error(`refresh: ${res.status} ${await res.text()}`);
+    throw new Error(`refresh: ${describeOpaqueBody(res.status, await res.text())}`);
   }
   const json = await res.json();
   return toPersisted(json, refreshToken);
@@ -8712,17 +8896,17 @@ var DEFAULT_FRESHNESS_MARGIN_MS = 6e4;
 async function getValidAccessToken() {
   return ensureFreshToken(DEFAULT_FRESHNESS_MARGIN_MS);
 }
-async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS) {
+async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS, options2 = {}) {
   const persisted = await readPersistedToken();
   if (!persisted) throw new Error("not signed in \u2014 run `memlin login`");
   if (Date.now() < persisted.expires_at - marginMs) return persisted.access_token;
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = doRefresh(persisted, marginMs).finally(() => {
+  refreshInFlight = doRefresh(persisted, marginMs, options2).finally(() => {
     refreshInFlight = null;
   });
   return refreshInFlight;
 }
-async function doRefresh(stale, marginMs) {
+async function doRefresh(stale, marginMs, options2) {
   const latest = await readPersistedToken();
   if (latest && Date.now() < latest.expires_at - marginMs) return latest.access_token;
   try {
@@ -8739,7 +8923,7 @@ async function doRefresh(stale, marginMs) {
     throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
   }
   try {
-    const fresh = await refreshAccessToken(refreshToken);
+    const fresh = await refreshAccessToken(refreshToken, options2);
     return await withAuthFileLock(async () => {
       const beforeWrite = await readPersistedToken();
       if (!beforeWrite || beforeWrite.access_token !== refreshSource.access_token) {
@@ -8958,7 +9142,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.37";
+  cachedAgentVersion = "0.1.40";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -8971,7 +9155,7 @@ var NATIVE_MEMORY_BATCH_SIZE = 20;
 var NATIVE_MEMORY_BATCH_CONCURRENCY = 3;
 var NATIVE_MEMORY_REQUEST_TIMEOUT_MS = 9e4;
 var NATIVE_MEMORY_BATCH_INDEX = "# Native memory satellite batch\n";
-var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504]);
+var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
 var RETRIABLE_NETWORK_CODES = /* @__PURE__ */ new Set([
   "ECONNRESET",
   "ECONNREFUSED",
@@ -9088,8 +9272,9 @@ var MemlinApiClient = class {
         }
       }
       if (!res.ok) {
-        const errMsg = parsed?.error ?? text ?? `HTTP ${res.status}`;
-        throw new Error(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`);
+        const serverError = parsed?.error;
+        const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
+        throw new MemlinApiError(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`, res.status);
       }
       return parsed;
     }
@@ -9164,13 +9349,15 @@ var MemlinApiClient = class {
    *  Returns kind='decision' docs whose `metadata.enforce` is set —
    *  the PreToolUse handler in plugin-core's pre-tool-use-handler
    *  module is the primary caller. */
-  async listEnforceDecisions(opts = {}) {
+  async listEnforceDecisions(opts = {}, requestOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.project_id !== void 0) {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/decisions/enforce${suffix}`);
+    return this.request("GET", `/decisions/enforce${suffix}`, void 0, {
+      accountId: requestOpts.accountId
+    });
   }
   /** POST /usage/event — write a usage_events row from the client.
    *  Server-side enforces an allowlist of event_types (today:
@@ -9182,6 +9369,12 @@ var MemlinApiClient = class {
   async writeUsageEvent(input, opts = {}) {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
+  /** Batched, idempotent editor-agent telemetry. This stream is deliberately
+   * separate from usage_events: it powers live sessions, subagent visibility,
+   * model analytics, and operational timelines without affecting metering. */
+  async writeAgentActivityBatch(events, opts = {}) {
+    return this.request("POST", "/agent/activity", { events }, opts);
+  }
   /** GET /documents — list, filtered. */
   async listDocuments(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
@@ -9191,6 +9384,7 @@ var MemlinApiClient = class {
     if (opts.project_id !== void 0) {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
+    if (opts.has_trigger) qs.set("has_trigger", "true");
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
     return res.documents.map((d) => {
@@ -9271,19 +9465,24 @@ var MemlinApiClient = class {
       action
     });
   }
-  async listHandoffs(opts = {}) {
+  async listHandoffs(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.project_id) qs.set("project_id", opts.project_id);
     if (opts.target_agent_kind) qs.set("target_agent_kind", opts.target_agent_kind);
     if (opts.status) qs.set("status", opts.status);
     if (opts.limit) qs.set("limit", String(opts.limit));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/handoffs${suffix}`);
-  }
-  async updateHandoff(handoffId, action) {
-    return this.request("PATCH", `/handoffs/${encodeURIComponent(handoffId)}`, {
-      action
+    return this.request("GET", `/handoffs${suffix}`, void 0, {
+      accountId: callOpts.accountId
     });
+  }
+  async updateHandoff(handoffId, action, opts = {}) {
+    return this.request(
+      "PATCH",
+      `/handoffs/${encodeURIComponent(handoffId)}`,
+      { action },
+      { accountId: opts.accountId }
+    );
   }
   async createHandoff(input) {
     return this.request("POST", "/handoffs", input);
@@ -9386,8 +9585,13 @@ var MemlinApiClient = class {
     return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
   }
   /** GET /audit/<id>/replay — reconstruct a past resolve's exact bundle. */
-  async replayAudit(auditId) {
-    return this.request("GET", `/audit/${auditId}/replay`);
+  async replayAudit(auditId, opts = {}) {
+    return this.request(
+      "GET",
+      `/audit/${auditId}/replay`,
+      void 0,
+      { accountId: opts.accountId }
+    );
   }
   /** GET /audit/<id>/explain — per-item decomposition of a past resolve's
    *  ranking arithmetic (similarity, kind weight, component boost, rerank,
@@ -9542,8 +9746,8 @@ var MemlinApiClient = class {
    * companion plans row with status='drafted'. Returns the document_id
    * + version metadata for downstream URL construction.
    */
-  async pushPlan(input) {
-    return this.request("POST", "/plans", input);
+  async pushPlan(input, opts = {}) {
+    return this.request("POST", "/plans", input, { accountId: opts.accountId });
   }
   /**
    * GET /plans — list plans for the account, optionally filtered by
@@ -9551,7 +9755,7 @@ var MemlinApiClient = class {
    * UserPromptSubmit + SessionStart hooks to keep ~/.claude/plans/ in
    * sync with the server.
    */
-  async listPlans(opts = {}) {
+  async listPlans(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.status) qs.set("status", opts.status);
     if (opts.project_id !== void 0) {
@@ -9561,21 +9765,27 @@ var MemlinApiClient = class {
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const res = await this.request(
       "GET",
-      `/plans${suffix}`
+      `/plans${suffix}`,
+      void 0,
+      { accountId: callOpts.accountId }
     );
     return res.plans;
   }
   /** GET /plans/<id> — full plan detail (status + body + bundle ref). */
-  async getPlan(id) {
-    return this.request("GET", `/plans/${encodeURIComponent(id)}`);
+  async getPlan(id, opts = {}) {
+    return this.request("GET", `/plans/${encodeURIComponent(id)}`, void 0, {
+      accountId: opts.accountId
+    });
   }
   /**
    * PATCH /plans/<id> — replace the plan's body (creates a new
    * document_version, auto-embeds). Used by the PostToolUse hook to push
    * Claude Code edits back up to Memlin.
    */
-  async updatePlan(id, input) {
-    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input);
+  async updatePlan(id, input, opts = {}) {
+    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input, {
+      accountId: opts.accountId
+    });
   }
   /**
    * POST /projects — create a project in the caller's current account.
@@ -9935,6 +10145,7 @@ async function resolveProject(api, cwd, configProjectId) {
   const absCwd = path7.resolve(cwd);
   const remotes = detectGitRemotes(cwd);
   const hasGitRemote = remotes.length > 0;
+  let serverFailure;
   try {
     const result = await api.resolveProject({
       // Primary remote (back-compat with the single-remote server path).
@@ -9954,18 +10165,30 @@ async function resolveProject(api, cwd, configProjectId) {
         enforce_done_deployed: result.enforce_done_deployed
       };
     }
-  } catch {
+  } catch (e) {
+    serverFailure = summarizeBackendFailure(e) ?? void 0;
   }
   if (configProjectId) {
-    return {
-      project_id: configProjectId,
-      project_name: null,
-      account_id: null,
-      reason: "config",
-      hasGitRemote
-    };
+    const localBinding = await findWorkspaceBinding(absCwd).catch(() => null);
+    if (localBinding?.binding.project_id === configProjectId) {
+      return {
+        project_id: configProjectId,
+        project_name: null,
+        account_id: null,
+        reason: "config",
+        hasGitRemote,
+        server_failure: serverFailure
+      };
+    }
   }
-  return { project_id: null, project_name: null, account_id: null, reason: "none", hasGitRemote };
+  return {
+    project_id: null,
+    project_name: null,
+    account_id: null,
+    reason: "none",
+    hasGitRemote,
+    server_failure: serverFailure
+  };
 }
 function readGitRemote(cwd) {
   try {
@@ -10002,6 +10225,9 @@ function detectGitRemotes(cwd) {
   }
   return out;
 }
+function isWorkspaceActive(input) {
+  return Boolean(input.resolvedProjectId) || input.workspaceBound;
+}
 
 // packages/plugin-core/dist/edit-activity.js
 import { execSync as execSync2 } from "node:child_process";
@@ -10029,6 +10255,315 @@ function repoRelativePath(absPath, cwd) {
   } catch {
   }
   return path8.basename(absPath);
+}
+
+// packages/plugin-core/dist/trigger-memories.js
+import { promises as fs5 } from "node:fs";
+import os7 from "node:os";
+import path9 from "node:path";
+var WORKSPACE_TRIGGERS_FILE = "triggers.json";
+function commandSegments(command) {
+  const segments = [];
+  let current = "";
+  let quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote === "'") {
+      current += ch;
+      if (ch === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === "\\" && i + 1 < command.length) {
+        current += ch + command[i + 1];
+        i++;
+        continue;
+      }
+      current += ch;
+      if (ch === '"') quote = null;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < command.length) {
+      current += ch + command[i + 1];
+      i++;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "\n" || ch === ";" || ch === "&" || ch === "|" || ch === "(" || ch === ")") {
+      if (current.trim()) segments.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) segments.push(current);
+  return segments;
+}
+var ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+function segmentLeadingTokens(segment) {
+  const tokens = segment.replace(/^[\s{]+/, "").split(/\s+/).filter(Boolean);
+  let start = 0;
+  while (start < tokens.length && ENV_ASSIGNMENT.test(tokens[start])) start++;
+  return tokens.slice(start);
+}
+function stripOuterQuotes(token) {
+  if (token.length >= 2) {
+    const first = token[0];
+    if ((first === '"' || first === "'") && token[token.length - 1] === first) {
+      return token.slice(1, -1);
+    }
+  }
+  return token;
+}
+var TOKEN_BOUNDARY = /* @__PURE__ */ new Set([".", "=", ":", "@", "/"]);
+function tokenMatches(commandToken, patternToken) {
+  const tok = stripOuterQuotes(commandToken).toLowerCase();
+  const pat = patternToken.toLowerCase();
+  if (tok === pat) return true;
+  return tok.length > pat.length && tok.startsWith(pat) && TOKEN_BOUNDARY.has(tok[pat.length]);
+}
+function commandMatchesPattern(command, pattern) {
+  const patternTokens = pattern.trim().split(/\s+/).filter(Boolean);
+  if (patternTokens.length === 0) return false;
+  for (const segment of commandSegments(command)) {
+    const tokens = segmentLeadingTokens(segment);
+    if (tokens.length < patternTokens.length) continue;
+    if (patternTokens.every((p, i) => tokenMatches(tokens[i], p))) return true;
+  }
+  return false;
+}
+function normalizeRelPath(p) {
+  return p.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/^\/+/, "").replace(/\/+$/, "");
+}
+function pathUnderPrefix(relPath, prefix) {
+  const p = normalizeRelPath(relPath);
+  const pre = normalizeRelPath(prefix);
+  if (!pre || !p) return false;
+  return p === pre || p.startsWith(pre + "/");
+}
+var MAX_PATH_TOKENS = 64;
+function commandPathCandidates(command, cwd, root) {
+  const out = [];
+  let budget = MAX_PATH_TOKENS;
+  for (const segment of commandSegments(command)) {
+    for (const raw of segment.split(/\s+/).filter(Boolean)) {
+      if (budget-- <= 0) return out;
+      const token = stripOuterQuotes(raw);
+      const candidates = [token];
+      const eq = token.indexOf("=");
+      if (eq > 0 && eq < token.length - 1) candidates.push(token.slice(eq + 1));
+      for (const cand of candidates) {
+        if (!cand || cand.startsWith("-") || cand.includes("$")) continue;
+        const rel = toRootRelative(path9.resolve(cwd, cand), root);
+        if (rel !== null) out.push(rel);
+      }
+    }
+  }
+  return out;
+}
+function toRootRelative(absPath, root) {
+  const rel = path9.relative(root, absPath);
+  if (!rel) return "";
+  if (rel === ".." || rel.startsWith(`..${path9.sep}`) || path9.isAbsolute(rel)) return null;
+  return rel.split(path9.sep).join("/");
+}
+function entryMatches(entry, input) {
+  const { command_pattern: pattern, path_prefix: prefix } = entry;
+  if (!pattern && !prefix) return false;
+  if (pattern) {
+    if (input.command === null) return false;
+    if (!commandMatchesPattern(input.command, pattern)) return false;
+    if (!prefix) return true;
+    return input.command_paths.some((p) => pathUnderPrefix(p, prefix)) || // cwd_relative '' (the root itself) is never "under" a non-empty
+    // prefix, which pathUnderPrefix already encodes.
+    input.cwd_relative !== null && pathUnderPrefix(input.cwd_relative, prefix);
+  }
+  if (input.edited_paths.some((p) => pathUnderPrefix(p, prefix))) return true;
+  if (input.command !== null && input.command_paths.some((p) => pathUnderPrefix(p, prefix))) {
+    return true;
+  }
+  return false;
+}
+function evaluateTriggerEntries(entries, input, source) {
+  const hits = [];
+  for (const entry of entries) {
+    try {
+      if (entryMatches(entry, input)) hits.push({ entry, source });
+    } catch {
+    }
+  }
+  return hits;
+}
+function compiledTriggersPath() {
+  return path9.join(os7.homedir(), ".config", "memlin", "triggers.json");
+}
+function decodeStoredEntry(raw, fallbackId) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = raw;
+  const parsed = parseMemoryTrigger({
+    command_pattern: obj.command_pattern ?? null,
+    path_prefix: obj.path_prefix ?? null,
+    mode: obj.mode ?? void 0,
+    message: obj.message ?? null
+  });
+  if (!parsed.ok) return null;
+  const title = typeof obj.title === "string" && obj.title.trim() ? obj.title.trim() : null;
+  if (!title) return null;
+  const id = typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : fallbackId;
+  return {
+    id,
+    title: title.slice(0, 200),
+    mode: parsed.trigger.mode,
+    command_pattern: parsed.trigger.command_pattern,
+    path_prefix: parsed.trigger.path_prefix,
+    message: parsed.trigger.message
+  };
+}
+async function readCompiledTriggers(file = compiledTriggersPath()) {
+  const empty = { version: 1, workspaces: {} };
+  let raw;
+  try {
+    raw = await fs5.readFile(file, "utf8");
+  } catch {
+    return empty;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || typeof parsed.workspaces !== "object") {
+      return empty;
+    }
+    const workspaces = {};
+    for (const [root, section] of Object.entries(parsed.workspaces ?? {})) {
+      if (!section || typeof section !== "object") continue;
+      const s = section;
+      const rawTriggers = Array.isArray(s.triggers) ? s.triggers : [];
+      const triggers = rawTriggers.map((t, i) => decodeStoredEntry(t, `${root}#${i}`)).filter((t) => t !== null);
+      workspaces[root] = {
+        account_id: typeof s.account_id === "string" ? s.account_id : null,
+        project_id: typeof s.project_id === "string" ? s.project_id : null,
+        compiled_at: typeof s.compiled_at === "string" ? s.compiled_at : "",
+        triggers
+      };
+    }
+    return { version: 1, workspaces };
+  } catch {
+    return empty;
+  }
+}
+async function canonicalRoot(dir) {
+  const resolved = path9.resolve(dir);
+  try {
+    return await fs5.realpath(resolved);
+  } catch {
+    return resolved;
+  }
+}
+var WORKSPACE_FILE_MAX_ENTRIES = 200;
+var WALK_CAP = 64;
+async function readWorkspaceTriggersFile(startDir) {
+  let dir = path9.resolve(startDir);
+  for (let i = 0; i < WALK_CAP; i++) {
+    const candidate = path9.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_TRIGGERS_FILE);
+    let raw = null;
+    try {
+      raw = await fs5.readFile(candidate, "utf8");
+    } catch {
+      raw = null;
+    }
+    if (raw !== null) {
+      try {
+        const parsed = JSON.parse(raw);
+        const rows = Array.isArray(parsed?.triggers) ? parsed.triggers : [];
+        const entries = rows.slice(0, WORKSPACE_FILE_MAX_ENTRIES).map((row, i2) => decodeStoredEntry(row, `workspace-trigger-${i2}`)).filter((e) => e !== null);
+        return { root: await canonicalRoot(dir), entries };
+      } catch {
+        return { root: await canonicalRoot(dir), entries: [] };
+      }
+    }
+    const parent = path9.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+  return null;
+}
+function buildMatchInput(payload, root) {
+  const command = payload.tool_name === "Bash" && typeof payload.tool_input?.command === "string" ? payload.tool_input.command : null;
+  const edited = editedPathsFromHook(payload.tool_name, payload.tool_input).map((p) => toRootRelative(path9.resolve(payload.cwd, p), root)).filter((p) => p !== null);
+  return {
+    tool_name: payload.tool_name,
+    command,
+    edited_paths: edited,
+    command_paths: command ? commandPathCandidates(command, payload.cwd, root) : [],
+    cwd_relative: toRootRelative(path9.resolve(payload.cwd), root)
+  };
+}
+var REASON_MESSAGE_MAX = 700;
+function formatReason(top, extraCount) {
+  const lines = [`Memlin trigger memory \xB7 ${top.entry.title}`];
+  if (top.entry.message) {
+    const msg = top.entry.message;
+    lines.push(msg.length > REASON_MESSAGE_MAX ? `${msg.slice(0, REASON_MESSAGE_MAX - 1)}\u2026` : msg);
+  }
+  const origin = top.source === "workspace-file" ? ".memlin/triggers.json" : "synced Memlin memory";
+  const matchedOn = top.entry.command_pattern ? `"${top.entry.command_pattern}"` : `path ${top.entry.path_prefix}`;
+  const extra = extraCount > 0 ? `; +${extraCount} more trigger memor${extraCount === 1 ? "y" : "ies"} matched` : "";
+  lines.push(`(trigger: ${matchedOn} \xB7 source: ${origin}${extra})`);
+  return lines.join("\n");
+}
+async function evaluateTriggerMemories(payload, opts = {}) {
+  try {
+    if (!payload.tool_name) return null;
+    const cwd = payload.cwd ?? process.cwd();
+    const isBash = payload.tool_name === "Bash" && typeof payload.tool_input?.command === "string";
+    const editedCount = editedPathsFromHook(payload.tool_name, payload.tool_input).length;
+    if (!isBash && editedCount === 0) return null;
+    const hits = [];
+    const workspaceFile = await readWorkspaceTriggersFile(cwd);
+    if (workspaceFile && workspaceFile.entries.length > 0) {
+      const input = buildMatchInput({ ...payload, cwd }, workspaceFile.root);
+      hits.push(...evaluateTriggerEntries(workspaceFile.entries, input, "workspace-file"));
+    }
+    const compiled = await readCompiledTriggers(opts.compiledFile);
+    const sections = Object.entries(compiled.workspaces);
+    if (sections.length > 0) {
+      const realCwd = await canonicalRoot(cwd);
+      let binding = null;
+      try {
+        binding = await findWorkspaceBinding(cwd);
+      } catch {
+        binding = null;
+      }
+      const seen = new Set(hits.map((h) => h.entry.id));
+      for (const [root, section] of sections) {
+        if (section.triggers.length === 0) continue;
+        const cwdInside = toRootRelative(realCwd, root) !== null;
+        const pinMatch = binding !== null && section.account_id === binding.binding.account_id && (section.project_id === null || section.project_id === binding.binding.project_id);
+        if (!cwdInside && !pinMatch) continue;
+        const base = cwdInside ? root : binding.workspaceRoot;
+        const input = buildMatchInput({ ...payload, cwd }, base);
+        for (const hit of evaluateTriggerEntries(section.triggers, input, "compiled-sync")) {
+          if (seen.has(hit.entry.id)) continue;
+          seen.add(hit.entry.id);
+          hits.push(hit);
+        }
+      }
+    }
+    if (hits.length === 0) return null;
+    const denies = hits.filter((h) => h.entry.mode === "deny");
+    const ranked = denies.length > 0 ? denies : hits;
+    const top = ranked.find((h) => h.source === "workspace-file") ?? ranked[0];
+    return {
+      decision: denies.length > 0 ? "block" : "ask",
+      reason: formatReason(top, hits.length - 1),
+      matched: [...new Set(hits.map((h) => h.entry.id))]
+    };
+  } catch {
+    return null;
+  }
 }
 
 // packages/plugin-core/dist/pre-tool-use-handler.js
@@ -10087,14 +10622,15 @@ var decisionCache = /* @__PURE__ */ new Map();
 function cacheKey(accountId, projectId) {
   return `${accountId}::${projectId ?? "none"}`;
 }
-async function loadEnforcementDecisions(ctx, projectId) {
-  const key = cacheKey(ctx.config.account_id, projectId);
+async function loadEnforcementDecisions(ctx, projectId, accountId) {
+  const key = cacheKey(accountId, projectId);
   const cached = decisionCache.get(key);
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.decisions;
   try {
-    const { decisions: rows } = await ctx.api.listEnforceDecisions({
-      project_id: projectId
-    });
+    const { decisions: rows } = await ctx.api.listEnforceDecisions(
+      { project_id: projectId },
+      { accountId }
+    );
     const decisions = rows.map((r) => ({
       id: r.id,
       title: r.title,
@@ -10112,6 +10648,7 @@ async function loadEnforcementDecisions(ctx, projectId) {
 async function recordGuardrailEvent(ctx, args) {
   const metadata = {
     tool: args.payload.tool_name,
+    cwd: path10.resolve(args.payload.cwd ?? process.cwd()),
     project_id: args.projectId,
     session_id: args.payload.session_id ?? null,
     enforcement_on: args.enforcementOn,
@@ -10124,10 +10661,13 @@ async function recordGuardrailEvent(ctx, args) {
     }))
   };
   try {
-    await ctx.api.writeUsageEvent({
-      event_type: "tool.guardrail",
-      metadata
-    });
+    await ctx.api.writeUsageEvent(
+      {
+        event_type: "tool.guardrail",
+        metadata
+      },
+      { accountId: args.accountId }
+    );
   } catch (err) {
     log(
       `pre-tool-use: audit write failed (continuing): ${err instanceof Error ? err.message : String(err)}`
@@ -10204,7 +10744,7 @@ async function evaluateEditCollision(ctx, payload, projectId, projectAccountId) 
   if (rawPaths.length === 0) return null;
   const cwd = payload.cwd ?? process.cwd();
   const relPaths = [
-    ...new Set(rawPaths.map((p) => repoRelativePath(path9.resolve(cwd, p), cwd)))
+    ...new Set(rawPaths.map((p) => repoRelativePath(path10.resolve(cwd, p), cwd)))
   ];
   if (relPaths.length === 0) return null;
   let res;
@@ -10235,34 +10775,82 @@ async function evaluateEditCollision(ctx, payload, projectId, projectAccountId) 
     matched_decisions: []
   };
 }
+var TRIGGER_AUDIT_TIMEOUT_MS = 1500;
+async function recordTriggerGuardrailEvent(payload, verdict) {
+  try {
+    const ctx = await getApi({ cwd: payload.cwd ?? process.cwd() });
+    if (!ctx) return;
+    await withTimeout(
+      ctx.api.writeUsageEvent({
+        event_type: "tool.guardrail",
+        metadata: {
+          tool: payload.tool_name,
+          cwd: path10.resolve(payload.cwd ?? process.cwd()),
+          session_id: payload.session_id ?? null,
+          trigger_memory: true,
+          outcome: verdict.decision === "block" ? "blocked" : "asked",
+          matched_decisions: verdict.matched.map((id) => ({ id }))
+        }
+      }),
+      TRIGGER_AUDIT_TIMEOUT_MS,
+      { ok: false, audit_id: null }
+    );
+  } catch {
+  }
+}
 async function runPreToolUseHandler(payload) {
   if (!payload.tool_name) {
     return { decision: "allow", reason: null, matched_decisions: [] };
   }
+  const triggerVerdict = await evaluateTriggerMemories({
+    tool_name: payload.tool_name,
+    ...payload.tool_input !== void 0 ? { tool_input: payload.tool_input } : {},
+    cwd: payload.cwd ?? process.cwd()
+  });
+  if (triggerVerdict) {
+    await recordTriggerGuardrailEvent(payload, triggerVerdict);
+    return {
+      decision: triggerVerdict.decision,
+      reason: triggerVerdict.reason,
+      matched_decisions: triggerVerdict.matched
+    };
+  }
   let ctx;
   try {
-    ctx = await getApi();
+    ctx = await getApi({ cwd: payload.cwd ?? process.cwd() });
   } catch {
     return { decision: "allow", reason: null, matched_decisions: [] };
   }
   if (!ctx) return { decision: "allow", reason: null, matched_decisions: [] };
   let projectId = null;
   let projectAccountId = null;
-  try {
-    const resolved = await resolveProject(
-      ctx.api,
-      payload.cwd ?? process.cwd(),
-      ctx.config.project_id
-    );
-    projectId = resolved.project_id;
-    projectAccountId = resolved.account_id;
-  } catch {
+  if (payload.routing_authoritative) {
+    projectId = payload.routed_project_id ?? null;
+    projectAccountId = payload.routed_account_id ?? ctx.config.account_id;
+  } else {
+    try {
+      const resolved = await resolveProject(
+        ctx.api,
+        payload.cwd ?? process.cwd(),
+        ctx.config.project_id
+      );
+      projectId = resolved.project_id;
+      projectAccountId = resolved.account_id;
+    } catch {
+    }
   }
+  if (!payload.routing_authoritative && !isWorkspaceActive({
+    resolvedProjectId: projectId,
+    workspaceBound: ctx.workspaceBound
+  })) {
+    return { decision: "allow", reason: null, matched_decisions: [] };
+  }
+  const effectiveAccountId = projectAccountId ?? ctx.config.account_id;
   const deployVerdict = await evaluateDeployGuard(ctx, payload, projectId, projectAccountId);
   if (deployVerdict) return deployVerdict;
   const editVerdict = await evaluateEditCollision(ctx, payload, projectId, projectAccountId);
   if (editVerdict) return editVerdict;
-  const decisions = await loadEnforcementDecisions(ctx, projectId);
+  const decisions = await loadEnforcementDecisions(ctx, projectId, effectiveAccountId);
   if (decisions.length === 0) {
     return { decision: "allow", reason: null, matched_decisions: [] };
   }
@@ -10280,7 +10868,7 @@ async function runPreToolUseHandler(payload) {
   let outcome = "allow";
   let enforcementOn = false;
   try {
-    const account = await ctx.api.getAccount();
+    const account = await ctx.api.getAccount({ accountId: effectiveAccountId });
     const flag = account.controller_enforcement_enabled;
     enforcementOn = flag === true;
   } catch {
@@ -10305,6 +10893,7 @@ async function runPreToolUseHandler(payload) {
     hits,
     outcome,
     projectId,
+    accountId: effectiveAccountId,
     enforcementOn
   });
   if (!enforcementOn || verdict === null || verdict === "advisory") {

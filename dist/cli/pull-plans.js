@@ -25,10 +25,12 @@ __export(companion_client_exports, {
   companionDelegationEnabled: () => companionDelegationEnabled,
   companionForDelegation: () => companionForDelegation,
   companionGetToken: () => companionGetToken,
+  companionReadLocal: () => companionReadLocal,
   companionReportSession: () => companionReportSession,
   companionRequest: () => companionRequest,
   companionResolveWorkspace: () => companionResolveWorkspace,
   companionRunDir: () => companionRunDir,
+  companionSearchLocal: () => companionSearchLocal,
   companionSocketPath: () => companionSocketPath,
   companionStatus: () => companionStatus,
   companionSyncNow: () => companionSyncNow,
@@ -133,6 +135,12 @@ async function companionResolveWorkspace(cwd) {
 async function companionSyncNow(req) {
   return companionRequest("sync.now", req);
 }
+async function companionSearchLocal(req) {
+  return companionRequest("memory.search", req);
+}
+async function companionReadLocal(req) {
+  return companionRequest("memory.read", req);
+}
 async function companionReportSession(req) {
   return (await companionRequest("session.report", req))?.registered ?? false;
 }
@@ -172,7 +180,10 @@ var init_companion_client = __esm({
     CALL_TIMEOUTS = {
       "workspace.resolve": 2e3,
       "sync.now": 5e3,
-      "login.start": 1e4
+      "login.start": 1e4,
+      // Local-store reads walk the materialized doc tree on disk.
+      "memory.search": 2e3,
+      "memory.read": 2e3
     };
     socketDeadUntil = 0;
     SOCKET_DEAD_TTL_MS = 5e3;
@@ -225,6 +236,73 @@ async function atomicRename(from, to, dependencies = {}) {
   } finally {
     if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
   }
+}
+
+// packages/plugin-core/src/backend-error.ts
+var MemlinApiError = class extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+    this.name = "MemlinApiError";
+  }
+  status;
+};
+function looksLikeHtml(text) {
+  const head = text.slice(0, 512).trimStart().toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html") || head.includes("<html") || head.startsWith("<") && /<\/(head|body|title|div|p)>/i.test(text);
+}
+function singleLine(text, max = 200) {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1)}\u2026`;
+}
+function describeOpaqueBody(status, text) {
+  const trimmed = text.trim();
+  if (!trimmed) return `HTTP ${status}`;
+  if (looksLikeHtml(trimmed)) {
+    const via = /cloudflare/i.test(trimmed) ? "Cloudflare " : "";
+    return `HTTP ${status} (${via}HTML error page suppressed, ${trimmed.length} chars)`;
+  }
+  return `HTTP ${status}: ${singleLine(trimmed)}`;
+}
+function backendUnreachableLine(detail) {
+  return `memlin: backend unreachable (${detail}), no memory available`;
+}
+var ROUTING_PATTERN = /account routing (unavailable|lookup failed)/i;
+var CLOUDFLARE_STATUS = /\b(52[0-7])\b/;
+function statusOf(err) {
+  if (err instanceof MemlinApiError) return err.status;
+  const status = err?.status;
+  if (typeof status === "number" && status >= 100 && status <= 599) return status;
+  const message = err instanceof Error ? err.message : String(err);
+  const arrow = message.match(/→ (\d{3}):/);
+  if (arrow) return Number(arrow[1]);
+  return null;
+}
+function summarizeBackendFailure(err) {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const status = statusOf(err);
+  if (ROUTING_PATTERN.test(message)) {
+    const embedded = message.match(CLOUDFLARE_STATUS)?.[1];
+    const code = embedded ?? (status !== null && status >= 500 ? String(status) : null);
+    const detail = code ? `routing ${code}` : "routing unavailable";
+    return { kind: "routing", status: code ? Number(code) : status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (status !== null && status >= 500) {
+    const detail = `HTTP ${status}`;
+    return { kind: "http", status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (/took longer than \d+ seconds/i.test(message)) {
+    return { kind: "network", status: null, detail: "timeout", line: backendUnreachableLine("timeout") };
+  }
+  if (/couldn'?t reach|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|network/i.test(message)) {
+    return {
+      kind: "network",
+      status: null,
+      detail: "network unreachable",
+      line: backendUnreachableLine("network unreachable")
+    };
+  }
+  return null;
 }
 
 // packages/plugin-core/src/auth.ts
@@ -317,7 +395,7 @@ async function writePersistedToken(t) {
   });
   await atomicRename(tmp, file);
 }
-async function refreshAccessToken(refreshToken) {
+async function refreshAccessToken(refreshToken, options = {}) {
   requireClientId();
   const body = new URLSearchParams({
     grant_type: "refresh_token",
@@ -327,10 +405,11 @@ async function refreshAccessToken(refreshToken) {
   const res = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString()
+    body: body.toString(),
+    signal: AbortSignal.timeout(Math.max(1, options.timeoutMs ?? 15e3))
   });
   if (!res.ok) {
-    throw new Error(`refresh: ${res.status} ${await res.text()}`);
+    throw new Error(`refresh: ${describeOpaqueBody(res.status, await res.text())}`);
   }
   const json = await res.json();
   return toPersisted(json, refreshToken);
@@ -340,17 +419,17 @@ var DEFAULT_FRESHNESS_MARGIN_MS = 6e4;
 async function getValidAccessToken() {
   return ensureFreshToken(DEFAULT_FRESHNESS_MARGIN_MS);
 }
-async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS) {
+async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS, options = {}) {
   const persisted = await readPersistedToken();
   if (!persisted) throw new Error("not signed in \u2014 run `memlin login`");
   if (Date.now() < persisted.expires_at - marginMs) return persisted.access_token;
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = doRefresh(persisted, marginMs).finally(() => {
+  refreshInFlight = doRefresh(persisted, marginMs, options).finally(() => {
     refreshInFlight = null;
   });
   return refreshInFlight;
 }
-async function doRefresh(stale, marginMs) {
+async function doRefresh(stale, marginMs, options) {
   const latest = await readPersistedToken();
   if (latest && Date.now() < latest.expires_at - marginMs) return latest.access_token;
   try {
@@ -367,7 +446,7 @@ async function doRefresh(stale, marginMs) {
     throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
   }
   try {
-    const fresh = await refreshAccessToken(refreshToken);
+    const fresh = await refreshAccessToken(refreshToken, options);
     return await withAuthFileLock(async () => {
       const beforeWrite = await readPersistedToken();
       if (!beforeWrite || beforeWrite.access_token !== refreshSource.access_token) {
@@ -554,7 +633,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.37";
+  cachedAgentVersion = "0.1.40";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -567,7 +646,7 @@ var NATIVE_MEMORY_BATCH_SIZE = 20;
 var NATIVE_MEMORY_BATCH_CONCURRENCY = 3;
 var NATIVE_MEMORY_REQUEST_TIMEOUT_MS = 9e4;
 var NATIVE_MEMORY_BATCH_INDEX = "# Native memory satellite batch\n";
-var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504]);
+var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
 var RETRIABLE_NETWORK_CODES = /* @__PURE__ */ new Set([
   "ECONNRESET",
   "ECONNREFUSED",
@@ -684,8 +763,9 @@ var MemlinApiClient = class {
         }
       }
       if (!res.ok) {
-        const errMsg = parsed?.error ?? text ?? `HTTP ${res.status}`;
-        throw new Error(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`);
+        const serverError = parsed?.error;
+        const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
+        throw new MemlinApiError(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`, res.status);
       }
       return parsed;
     }
@@ -760,13 +840,15 @@ var MemlinApiClient = class {
    *  Returns kind='decision' docs whose `metadata.enforce` is set —
    *  the PreToolUse handler in plugin-core's pre-tool-use-handler
    *  module is the primary caller. */
-  async listEnforceDecisions(opts = {}) {
+  async listEnforceDecisions(opts = {}, requestOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.project_id !== void 0) {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/decisions/enforce${suffix}`);
+    return this.request("GET", `/decisions/enforce${suffix}`, void 0, {
+      accountId: requestOpts.accountId
+    });
   }
   /** POST /usage/event — write a usage_events row from the client.
    *  Server-side enforces an allowlist of event_types (today:
@@ -778,6 +860,12 @@ var MemlinApiClient = class {
   async writeUsageEvent(input, opts = {}) {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
+  /** Batched, idempotent editor-agent telemetry. This stream is deliberately
+   * separate from usage_events: it powers live sessions, subagent visibility,
+   * model analytics, and operational timelines without affecting metering. */
+  async writeAgentActivityBatch(events, opts = {}) {
+    return this.request("POST", "/agent/activity", { events }, opts);
+  }
   /** GET /documents — list, filtered. */
   async listDocuments(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
@@ -787,6 +875,7 @@ var MemlinApiClient = class {
     if (opts.project_id !== void 0) {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
+    if (opts.has_trigger) qs.set("has_trigger", "true");
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
     return res.documents.map((d) => {
@@ -867,19 +956,24 @@ var MemlinApiClient = class {
       action
     });
   }
-  async listHandoffs(opts = {}) {
+  async listHandoffs(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.project_id) qs.set("project_id", opts.project_id);
     if (opts.target_agent_kind) qs.set("target_agent_kind", opts.target_agent_kind);
     if (opts.status) qs.set("status", opts.status);
     if (opts.limit) qs.set("limit", String(opts.limit));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/handoffs${suffix}`);
-  }
-  async updateHandoff(handoffId, action) {
-    return this.request("PATCH", `/handoffs/${encodeURIComponent(handoffId)}`, {
-      action
+    return this.request("GET", `/handoffs${suffix}`, void 0, {
+      accountId: callOpts.accountId
     });
+  }
+  async updateHandoff(handoffId, action, opts = {}) {
+    return this.request(
+      "PATCH",
+      `/handoffs/${encodeURIComponent(handoffId)}`,
+      { action },
+      { accountId: opts.accountId }
+    );
   }
   async createHandoff(input) {
     return this.request("POST", "/handoffs", input);
@@ -982,8 +1076,13 @@ var MemlinApiClient = class {
     return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
   }
   /** GET /audit/<id>/replay — reconstruct a past resolve's exact bundle. */
-  async replayAudit(auditId) {
-    return this.request("GET", `/audit/${auditId}/replay`);
+  async replayAudit(auditId, opts = {}) {
+    return this.request(
+      "GET",
+      `/audit/${auditId}/replay`,
+      void 0,
+      { accountId: opts.accountId }
+    );
   }
   /** GET /audit/<id>/explain — per-item decomposition of a past resolve's
    *  ranking arithmetic (similarity, kind weight, component boost, rerank,
@@ -1138,8 +1237,8 @@ var MemlinApiClient = class {
    * companion plans row with status='drafted'. Returns the document_id
    * + version metadata for downstream URL construction.
    */
-  async pushPlan(input) {
-    return this.request("POST", "/plans", input);
+  async pushPlan(input, opts = {}) {
+    return this.request("POST", "/plans", input, { accountId: opts.accountId });
   }
   /**
    * GET /plans — list plans for the account, optionally filtered by
@@ -1147,7 +1246,7 @@ var MemlinApiClient = class {
    * UserPromptSubmit + SessionStart hooks to keep ~/.claude/plans/ in
    * sync with the server.
    */
-  async listPlans(opts = {}) {
+  async listPlans(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.status) qs.set("status", opts.status);
     if (opts.project_id !== void 0) {
@@ -1157,21 +1256,27 @@ var MemlinApiClient = class {
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const res = await this.request(
       "GET",
-      `/plans${suffix}`
+      `/plans${suffix}`,
+      void 0,
+      { accountId: callOpts.accountId }
     );
     return res.plans;
   }
   /** GET /plans/<id> — full plan detail (status + body + bundle ref). */
-  async getPlan(id) {
-    return this.request("GET", `/plans/${encodeURIComponent(id)}`);
+  async getPlan(id, opts = {}) {
+    return this.request("GET", `/plans/${encodeURIComponent(id)}`, void 0, {
+      accountId: opts.accountId
+    });
   }
   /**
    * PATCH /plans/<id> — replace the plan's body (creates a new
    * document_version, auto-embeds). Used by the PostToolUse hook to push
    * Claude Code edits back up to Memlin.
    */
-  async updatePlan(id, input) {
-    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input);
+  async updatePlan(id, input, opts = {}) {
+    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input, {
+      accountId: opts.accountId
+    });
   }
   /**
    * POST /projects — create a project in the caller's current account.
@@ -1525,6 +1630,7 @@ async function resolveProject(api, cwd, configProjectId) {
   const absCwd = path7.resolve(cwd);
   const remotes = detectGitRemotes(cwd);
   const hasGitRemote = remotes.length > 0;
+  let serverFailure;
   try {
     const result = await api.resolveProject({
       // Primary remote (back-compat with the single-remote server path).
@@ -1544,18 +1650,30 @@ async function resolveProject(api, cwd, configProjectId) {
         enforce_done_deployed: result.enforce_done_deployed
       };
     }
-  } catch {
+  } catch (e) {
+    serverFailure = summarizeBackendFailure(e) ?? void 0;
   }
   if (configProjectId) {
-    return {
-      project_id: configProjectId,
-      project_name: null,
-      account_id: null,
-      reason: "config",
-      hasGitRemote
-    };
+    const localBinding = await findWorkspaceBinding(absCwd).catch(() => null);
+    if (localBinding?.binding.project_id === configProjectId) {
+      return {
+        project_id: configProjectId,
+        project_name: null,
+        account_id: null,
+        reason: "config",
+        hasGitRemote,
+        server_failure: serverFailure
+      };
+    }
   }
-  return { project_id: null, project_name: null, account_id: null, reason: "none", hasGitRemote };
+  return {
+    project_id: null,
+    project_name: null,
+    account_id: null,
+    reason: "none",
+    hasGitRemote,
+    server_failure: serverFailure
+  };
 }
 function readGitRemote(cwd) {
   try {
@@ -1591,6 +1709,12 @@ function detectGitRemotes(cwd) {
   } catch {
   }
   return out;
+}
+function isWorkspaceActive(input) {
+  return Boolean(input.resolvedProjectId) || input.workspaceBound;
+}
+function effectiveAccountId(input) {
+  return input.resolvedAccountId ?? input.configAccountId;
 }
 
 // packages/plugin-core/src/plan-sync.ts
@@ -1667,11 +1791,23 @@ function hash(content) {
 function plansDir(host) {
   return (host ?? resolveHost()).plansDir();
 }
+async function fetchPlanPullRows(api, fetchOpts, accountId) {
+  const callOpts = accountId ? { accountId } : {};
+  const list = await api.listPlans(fetchOpts, callOpts);
+  const rows = [];
+  for (const plan of list) {
+    try {
+      rows.push({ plan, detail: await api.getPlan(plan.document_id, callOpts) });
+    } catch {
+    }
+  }
+  return rows;
+}
 async function pullPlans(api, opts = {}) {
   const fetchOpts = {};
   if (opts.projectId !== void 0) fetchOpts.project_id = opts.projectId;
   if (opts.since) fetchOpts.updated_after = opts.since;
-  const list = await api.listPlans(fetchOpts);
+  const rows = await fetchPlanPullRows(api, fetchOpts, opts.accountId);
   await fs6.mkdir(plansDir(opts.host), { recursive: true });
   const state = await readState();
   const newEntries = {};
@@ -1680,19 +1816,13 @@ async function pullPlans(api, opts = {}) {
   const removed = [];
   const isFullSync = !opts.since;
   const seenPaths = /* @__PURE__ */ new Set();
-  for (const p of list) {
+  for (const { plan: p, detail } of rows) {
     const slug = p.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 48);
     const filename = `${p.document_id.slice(0, 8)}-${slug || "plan"}.md`;
     const localPath = path9.join("plans", filename);
     const full = path9.join(plansDir(opts.host), filename);
     seenPaths.add(localPath);
-    let body;
-    try {
-      const detail = await api.getPlan(p.document_id);
-      body = detail.body;
-    } catch {
-      continue;
-    }
+    const body = detail.body;
     const fileContent = formatPlanFile(p.title, body, p.status, {
       documentId: p.document_id,
       projectId: p.project_id
@@ -1761,16 +1891,28 @@ function parseArgs(argv) {
 async function main() {
   const argv = process.argv.slice(2);
   const parsed = parseArgs(argv);
-  const ctx = await getApi();
+  const cwd = runtimeCwd();
+  const ctx = await getApi({ cwd });
   if (!ctx) return;
-  const resolved = await resolveProject(ctx.api, runtimeCwd(), ctx.config.project_id).catch(() => ({
-    project_id: null
+  const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id).catch(() => ({
+    project_id: null,
+    account_id: null
   }));
+  if (!isWorkspaceActive({
+    resolvedProjectId: resolved.project_id,
+    workspaceBound: ctx.workspaceBound
+  })) {
+    return;
+  }
   const state = await readState();
   const cursor = getLastPlanPullCursor(state);
   try {
     const opts = {
-      projectId: resolved.project_id
+      projectId: resolved.project_id,
+      accountId: effectiveAccountId({
+        configAccountId: ctx.config.account_id,
+        resolvedAccountId: resolved.account_id
+      })
     };
     if (!parsed.full && !parsed.planId && cursor) {
       opts.since = cursor;

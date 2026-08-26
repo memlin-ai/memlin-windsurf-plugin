@@ -329,25 +329,52 @@ function runResolveWithBudget(opts) {
       return;
     }
     let settled = false;
+    let claimInFlight = null;
+    const claimBundle = () => {
+      if (claimInFlight) return claimInFlight;
+      claimInFlight = takePendingBundle(opts.cwd, opts.host, {
+        sessionId: opts.sessionId ?? null,
+        task: opts.task
+      }).finally(() => {
+        claimInFlight = null;
+      });
+      return claimInFlight;
+    };
+    const settleFromBundle = async () => {
+      const bundle = await claimBundle();
+      if (!bundle || settled) return false;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(bundlePoll);
+      child.unref();
+      resolve({ bundle, stillRunning: false });
+      return true;
+    };
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      clearInterval(bundlePoll);
       child.unref();
       resolve({ bundle: null, stillRunning: true });
     }, budget);
+    const bundlePoll = setInterval(() => {
+      if (!settled) void settleFromBundle();
+    }, 40);
     child.on("exit", () => {
       if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      void takePendingBundle(opts.cwd, opts.host, {
-        sessionId: opts.sessionId ?? null,
-        task: opts.task
-      }).then((bundle) => resolve({ bundle, stillRunning: false }));
+      void settleFromBundle().then((found) => {
+        if (found || settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearInterval(bundlePoll);
+        resolve({ bundle: null, stillRunning: false });
+      });
     });
     child.on("error", () => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearInterval(bundlePoll);
       resolve({ bundle: null, stillRunning: false });
     });
   });
@@ -357,10 +384,36 @@ function buildLateDeliveryEnvelope(bundle) {
     "<memlin-late-context>",
     "# Memlin context resolved for the PREVIOUS prompt \u2014 it finished after that",
     `# turn's delivery deadline. Task it was resolved for: ${JSON.stringify(bundle.task.slice(0, 140))}`,
+    ...bundle.stale ? [
+      `# ADDITIONALLY: the backend was unreachable (${bundle.stale.reason}) \u2014 this is a STALE`,
+      "# fallback bundle, not a live resolve. Weigh it accordingly."
+    ] : [],
     "# Treat as background context; invoke memlin_resolve_task if this turn needs fresh context.",
     "",
     bundle.rendered,
     "</memlin-late-context>"
+  ].join("\n");
+}
+function buildInlineDeliveryEnvelope(bundle) {
+  if (bundle.stale) {
+    return [
+      "<memlin-stale-context>",
+      `# Memlin backend unreachable (${bundle.stale.reason}) \u2014 this is the LAST SUCCESSFUL bundle`,
+      "# for this project, not a live resolve. Treat as possibly out of date; retry",
+      "# memlin_resolve_task later for fresh context. Memory writes are unavailable.",
+      "",
+      bundle.rendered,
+      "</memlin-stale-context>"
+    ].join("\n");
+  }
+  return [
+    "<memlin-resolved-context>",
+    "# Auto-resolved by Memlin \u2014 authoritative project context. Apply skills; honor",
+    "# approved goals and required/pinned decisions/directives; use other decisions as cited",
+    "# context; validate schemas; cite sources; do not re-invoke memlin_resolve_task.",
+    "",
+    bundle.rendered,
+    "</memlin-resolved-context>"
   ].join("\n");
 }
 
@@ -528,7 +581,7 @@ async function main() {
     sessionId
   });
   if (outcome.bundle?.rendered) {
-    const block = [
+    const block = outcome.bundle.stale ? buildInlineDeliveryEnvelope(outcome.bundle) : [
       "<memlin-resolved-context>",
       "# Auto-resolved by Memlin for the prompt below. Authoritative project",
       "# context \u2014 apply skills; honor approved goals and required/pinned decisions/directives;",
