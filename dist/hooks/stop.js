@@ -41,185 +41,6 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// packages/plugin-core/dist/companion-client.js
-var companion_client_exports = {};
-__export(companion_client_exports, {
-  COMPANION_PROTOCOL: () => COMPANION_PROTOCOL,
-  COMPANION_SOCKET_ENV: () => COMPANION_SOCKET_ENV,
-  IS_COMPANION_ENV: () => IS_COMPANION_ENV,
-  MAX_COMPANION_PROTOCOL: () => MAX_COMPANION_PROTOCOL,
-  MIN_COMPANION_PROTOCOL: () => MIN_COMPANION_PROTOCOL,
-  NO_COMPANION_ENV: () => NO_COMPANION_ENV,
-  USE_COMPANION_ENV: () => USE_COMPANION_ENV,
-  companionDelegationEnabled: () => companionDelegationEnabled,
-  companionForDelegation: () => companionForDelegation,
-  companionGetToken: () => companionGetToken,
-  companionReadLocal: () => companionReadLocal,
-  companionReportSession: () => companionReportSession,
-  companionRequest: () => companionRequest,
-  companionResolveWorkspace: () => companionResolveWorkspace,
-  companionRunDir: () => companionRunDir,
-  companionSearchLocal: () => companionSearchLocal,
-  companionSocketPath: () => companionSocketPath,
-  companionStatus: () => companionStatus,
-  companionSyncNow: () => companionSyncNow,
-  isCompanionHealthyForDelegation: () => isCompanionHealthyForDelegation,
-  resetCompanionClientCache: () => resetCompanionClientCache
-});
-import http from "node:http";
-import os from "node:os";
-import path2 from "node:path";
-function companionSocketPath(env = process.env) {
-  const override = env[COMPANION_SOCKET_ENV];
-  if (override) return override;
-  if (process.platform === "win32") {
-    return `\\\\.\\pipe\\memlin-companion-${os.userInfo().username}`;
-  }
-  return path2.join(os.homedir(), ".config", "memlin", "run", "companion.sock");
-}
-function companionRunDir() {
-  return path2.join(os.homedir(), ".config", "memlin", "run");
-}
-function companionDisabled(env = process.env) {
-  const off = env[NO_COMPANION_ENV];
-  if (off === "1" || off === "true" || off === "yes") return true;
-  return env[IS_COMPANION_ENV] === "1";
-}
-async function companionRequest(method, body, opts = {}) {
-  const env = opts.env ?? process.env;
-  if (companionDisabled(env)) return null;
-  if (Date.now() < socketDeadUntil) return null;
-  const timeoutMs = opts.timeoutMs ?? CALL_TIMEOUTS[method] ?? DEFAULT_CALL_TIMEOUT_MS;
-  const payload = JSON.stringify(body ?? {});
-  return new Promise((resolve) => {
-    let settled = false;
-    const fail = (markDead) => {
-      if (settled) return;
-      settled = true;
-      if (markDead) socketDeadUntil = Date.now() + SOCKET_DEAD_TTL_MS;
-      resolve(null);
-    };
-    const req = http.request(
-      {
-        socketPath: companionSocketPath(env),
-        path: `/v1/${method}`,
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(payload),
-          "memlin-client-protocol": String(COMPANION_PROTOCOL)
-        },
-        // Overall call budget; the connect phase gets its own tighter cap
-        // below via the socket timeout before the connection exists.
-        timeout: timeoutMs
-      },
-      (res) => {
-        const chunks = [];
-        res.on("data", (c) => chunks.push(c));
-        res.on("end", () => {
-          if (settled) return;
-          settled = true;
-          if (res.statusCode !== 200) return resolve(null);
-          try {
-            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-          } catch {
-            resolve(null);
-          }
-        });
-        res.on("error", () => fail(false));
-      }
-    );
-    const connectTimer = setTimeout(() => {
-      req.destroy();
-      fail(true);
-    }, CONNECT_TIMEOUT_MS);
-    connectTimer.unref?.();
-    req.on("socket", (socket) => {
-      socket.once("connect", () => clearTimeout(connectTimer));
-    });
-    req.on("timeout", () => {
-      req.destroy();
-      fail(false);
-    });
-    req.on("error", () => fail(true));
-    req.end(payload);
-  });
-}
-async function companionStatus() {
-  const status = await companionRequest("status.get", {});
-  if (!status) return null;
-  if (status.protocol < MIN_COMPANION_PROTOCOL || status.protocol > MAX_COMPANION_PROTOCOL) {
-    return null;
-  }
-  return status;
-}
-async function companionGetToken() {
-  const token = await companionRequest("token.get", {});
-  if (!token || token.expires_at <= Date.now() + 6e4) return null;
-  return token;
-}
-async function companionResolveWorkspace(cwd) {
-  return companionRequest("workspace.resolve", { cwd });
-}
-async function companionSyncNow(req) {
-  return companionRequest("sync.now", req);
-}
-async function companionSearchLocal(req) {
-  return companionRequest("memory.search", req);
-}
-async function companionReadLocal(req) {
-  return companionRequest("memory.read", req);
-}
-async function companionReportSession(req) {
-  return (await companionRequest("session.report", req))?.registered ?? false;
-}
-function isCompanionHealthyForDelegation(status) {
-  if (!status) return false;
-  if (status.auth.state !== "ok") return false;
-  if (status.sync.mode === "realtime") return true;
-  if (status.sync.mode !== "polling") return false;
-  if (!status.sync.last_delta_at) return false;
-  const age = Date.now() - Date.parse(status.sync.last_delta_at);
-  return Number.isFinite(age) && age < 5 * 6e4;
-}
-function companionDelegationEnabled(env = process.env) {
-  const v = env[USE_COMPANION_ENV];
-  return v === "1" || v === "true" || v === "yes";
-}
-async function companionForDelegation() {
-  if (!companionDelegationEnabled()) return null;
-  const status = await companionStatus();
-  return isCompanionHealthyForDelegation(status) ? status : null;
-}
-function resetCompanionClientCache() {
-  socketDeadUntil = 0;
-}
-var COMPANION_PROTOCOL, MIN_COMPANION_PROTOCOL, MAX_COMPANION_PROTOCOL, NO_COMPANION_ENV, IS_COMPANION_ENV, COMPANION_SOCKET_ENV, CONNECT_TIMEOUT_MS, DEFAULT_CALL_TIMEOUT_MS, CALL_TIMEOUTS, socketDeadUntil, SOCKET_DEAD_TTL_MS, USE_COMPANION_ENV;
-var init_companion_client = __esm({
-  "packages/plugin-core/dist/companion-client.js"() {
-    "use strict";
-    COMPANION_PROTOCOL = 1;
-    MIN_COMPANION_PROTOCOL = 1;
-    MAX_COMPANION_PROTOCOL = 1;
-    NO_COMPANION_ENV = "MEMLIN_NO_DAEMON";
-    IS_COMPANION_ENV = "MEMLIN_DAEMON";
-    COMPANION_SOCKET_ENV = "MEMLIN_COMPANION_SOCKET";
-    CONNECT_TIMEOUT_MS = 150;
-    DEFAULT_CALL_TIMEOUT_MS = 1e3;
-    CALL_TIMEOUTS = {
-      "workspace.resolve": 2e3,
-      "sync.now": 5e3,
-      "login.start": 1e4,
-      // Local-store reads walk the materialized doc tree on disk.
-      "memory.search": 2e3,
-      "memory.read": 2e3
-    };
-    socketDeadUntil = 0;
-    SOCKET_DEAD_TTL_MS = 5e3;
-    USE_COMPANION_ENV = "MEMLIN_USE_DAEMON";
-  }
-});
-
 // node_modules/.pnpm/kind-of@6.0.3/node_modules/kind-of/index.js
 var require_kind_of = __commonJS({
   "node_modules/.pnpm/kind-of@6.0.3/node_modules/kind-of/index.js"(exports2, module2) {
@@ -355,15 +176,15 @@ var require_is_extendable = __commonJS({
 var require_extend_shallow = __commonJS({
   "node_modules/.pnpm/extend-shallow@2.0.1/node_modules/extend-shallow/index.js"(exports2, module2) {
     "use strict";
-    var isObject = require_is_extendable();
-    module2.exports = function extend(o) {
-      if (!isObject(o)) {
+    var isObject2 = require_is_extendable();
+    module2.exports = function extend2(o) {
+      if (!isObject2(o)) {
         o = {};
       }
       var len = arguments.length;
       for (var i = 1; i < len; i++) {
         var obj = arguments[i];
-        if (isObject(obj)) {
+        if (isObject2(obj)) {
           assign(o, obj);
         }
       }
@@ -387,22 +208,22 @@ var require_section_matter = __commonJS({
   "node_modules/.pnpm/section-matter@1.0.0/node_modules/section-matter/index.js"(exports2, module2) {
     "use strict";
     var typeOf = require_kind_of();
-    var extend = require_extend_shallow();
+    var extend2 = require_extend_shallow();
     module2.exports = function(input, options2) {
       if (typeof options2 === "function") {
         options2 = { parse: options2 };
       }
-      var file = toObject(input);
+      var file2 = toObject(input);
       var defaults = { section_delimiter: "---", parse: identity };
-      var opts = extend({}, defaults, options2);
+      var opts = extend2({}, defaults, options2);
       var delim = opts.section_delimiter;
-      var lines = file.content.split(/\r?\n/);
+      var lines = file2.content.split(/\r?\n/);
       var sections = null;
       var section = createSection();
       var content = [];
       var stack = [];
       function initSections(val) {
-        file.content = val;
+        file2.content = val;
         sections = [];
         content = [];
       }
@@ -448,8 +269,8 @@ var require_section_matter = __commonJS({
       } else {
         closeSection(content.join("\n"));
       }
-      file.sections = sections;
-      return file;
+      file2.sections = sections;
+      return file2;
     };
     function isDelimiter(line, delim) {
       if (line.slice(0, delim.length) !== delim) {
@@ -496,7 +317,7 @@ var require_common = __commonJS({
     function isNothing(subject) {
       return typeof subject === "undefined" || subject === null;
     }
-    function isObject(subject) {
+    function isObject2(subject) {
       return typeof subject === "object" && subject !== null;
     }
     function toArray(sequence) {
@@ -504,7 +325,7 @@ var require_common = __commonJS({
       else if (isNothing(sequence)) return [];
       return [sequence];
     }
-    function extend(target, source) {
+    function extend2(target, source) {
       var index, length, key, sourceKeys;
       if (source) {
         sourceKeys = Object.keys(source);
@@ -515,22 +336,22 @@ var require_common = __commonJS({
       }
       return target;
     }
-    function repeat(string, count2) {
+    function repeat(string4, count2) {
       var result = "", cycle;
       for (cycle = 0; cycle < count2; cycle += 1) {
-        result += string;
+        result += string4;
       }
       return result;
     }
-    function isNegativeZero(number) {
-      return number === 0 && Number.NEGATIVE_INFINITY === 1 / number;
+    function isNegativeZero(number4) {
+      return number4 === 0 && Number.NEGATIVE_INFINITY === 1 / number4;
     }
     module2.exports.isNothing = isNothing;
-    module2.exports.isObject = isObject;
+    module2.exports.isObject = isObject2;
     module2.exports.toArray = toArray;
     module2.exports.repeat = repeat;
     module2.exports.isNegativeZero = isNegativeZero;
-    module2.exports.extend = extend;
+    module2.exports.extend = extend2;
   }
 });
 
@@ -568,7 +389,7 @@ var require_exception = __commonJS({
 var require_mark = __commonJS({
   "node_modules/.pnpm/js-yaml@3.14.2/node_modules/js-yaml/lib/js-yaml/mark.js"(exports2, module2) {
     "use strict";
-    var common = require_common();
+    var common2 = require_common();
     function Mark(name, buffer, position, line, column) {
       this.name = name;
       this.buffer = buffer;
@@ -602,7 +423,7 @@ var require_mark = __commonJS({
         }
       }
       snippet = this.buffer.slice(start, end);
-      return common.repeat(" ", indent) + head + snippet + tail + "\n" + common.repeat(" ", indent + this.position - start + head.length) + "^";
+      return common2.repeat(" ", indent) + head + snippet + tail + "\n" + common2.repeat(" ", indent + this.position - start + head.length) + "^";
     };
     Mark.prototype.toString = function toString(compact) {
       var snippet, where = "";
@@ -642,11 +463,11 @@ var require_type = __commonJS({
       "sequence",
       "mapping"
     ];
-    function compileStyleAliases(map) {
+    function compileStyleAliases(map2) {
       var result = {};
-      if (map !== null) {
-        Object.keys(map).forEach(function(style) {
-          map[style].forEach(function(alias) {
+      if (map2 !== null) {
+        Object.keys(map2).forEach(function(style) {
+          map2[style].forEach(function(alias) {
             result[String(alias)] = style;
           });
         });
@@ -685,7 +506,7 @@ var require_type = __commonJS({
 var require_schema = __commonJS({
   "node_modules/.pnpm/js-yaml@3.14.2/node_modules/js-yaml/lib/js-yaml/schema.js"(exports2, module2) {
     "use strict";
-    var common = require_common();
+    var common2 = require_common();
     var YAMLException = require_exception();
     var Type = require_type();
     function compileList(schema, name, result) {
@@ -748,8 +569,8 @@ var require_schema = __commonJS({
         default:
           throw new YAMLException("Wrong number of arguments for Schema.create function");
       }
-      schemas = common.toArray(schemas);
-      types = common.toArray(types);
+      schemas = common2.toArray(schemas);
+      types = common2.toArray(types);
       if (!schemas.every(function(schema) {
         return schema instanceof Schema;
       })) {
@@ -839,8 +660,8 @@ var require_null = __commonJS({
     function constructYamlNull() {
       return null;
     }
-    function isNull(object) {
-      return object === null;
+    function isNull(object2) {
+      return object2 === null;
     }
     module2.exports = new Type("tag:yaml.org,2002:null", {
       kind: "scalar",
@@ -879,8 +700,8 @@ var require_bool = __commonJS({
     function constructYamlBoolean(data) {
       return data === "true" || data === "True" || data === "TRUE";
     }
-    function isBoolean(object) {
-      return Object.prototype.toString.call(object) === "[object Boolean]";
+    function isBoolean(object2) {
+      return Object.prototype.toString.call(object2) === "[object Boolean]";
     }
     module2.exports = new Type("tag:yaml.org,2002:bool", {
       kind: "scalar",
@@ -888,14 +709,14 @@ var require_bool = __commonJS({
       construct: constructYamlBoolean,
       predicate: isBoolean,
       represent: {
-        lowercase: function(object) {
-          return object ? "true" : "false";
+        lowercase: function(object2) {
+          return object2 ? "true" : "false";
         },
-        uppercase: function(object) {
-          return object ? "TRUE" : "FALSE";
+        uppercase: function(object2) {
+          return object2 ? "TRUE" : "FALSE";
         },
-        camelcase: function(object) {
-          return object ? "True" : "False";
+        camelcase: function(object2) {
+          return object2 ? "True" : "False";
         }
       },
       defaultStyle: "lowercase"
@@ -907,7 +728,7 @@ var require_bool = __commonJS({
 var require_int = __commonJS({
   "node_modules/.pnpm/js-yaml@3.14.2/node_modules/js-yaml/lib/js-yaml/type/int.js"(exports2, module2) {
     "use strict";
-    var common = require_common();
+    var common2 = require_common();
     var Type = require_type();
     function isHexCode(c) {
       return 48 <= c && c <= 57 || 65 <= c && c <= 70 || 97 <= c && c <= 102;
@@ -1002,8 +823,8 @@ var require_int = __commonJS({
       }
       return sign * parseInt(value, 10);
     }
-    function isInteger(object) {
-      return Object.prototype.toString.call(object) === "[object Number]" && (object % 1 === 0 && !common.isNegativeZero(object));
+    function isInteger(object2) {
+      return Object.prototype.toString.call(object2) === "[object Number]" && (object2 % 1 === 0 && !common2.isNegativeZero(object2));
     }
     module2.exports = new Type("tag:yaml.org,2002:int", {
       kind: "scalar",
@@ -1040,7 +861,7 @@ var require_int = __commonJS({
 var require_float = __commonJS({
   "node_modules/.pnpm/js-yaml@3.14.2/node_modules/js-yaml/lib/js-yaml/type/float.js"(exports2, module2) {
     "use strict";
-    var common = require_common();
+    var common2 = require_common();
     var Type = require_type();
     var YAML_FLOAT_PATTERN = new RegExp(
       // 2.5e4, 2.5 and integers
@@ -1082,9 +903,9 @@ var require_float = __commonJS({
       return sign * parseFloat(value, 10);
     }
     var SCIENTIFIC_WITHOUT_DOT = /^[-+]?[0-9]+e/;
-    function representYamlFloat(object, style) {
+    function representYamlFloat(object2, style) {
       var res;
-      if (isNaN(object)) {
+      if (isNaN(object2)) {
         switch (style) {
           case "lowercase":
             return ".nan";
@@ -1093,7 +914,7 @@ var require_float = __commonJS({
           case "camelcase":
             return ".NaN";
         }
-      } else if (Number.POSITIVE_INFINITY === object) {
+      } else if (Number.POSITIVE_INFINITY === object2) {
         switch (style) {
           case "lowercase":
             return ".inf";
@@ -1102,7 +923,7 @@ var require_float = __commonJS({
           case "camelcase":
             return ".Inf";
         }
-      } else if (Number.NEGATIVE_INFINITY === object) {
+      } else if (Number.NEGATIVE_INFINITY === object2) {
         switch (style) {
           case "lowercase":
             return "-.inf";
@@ -1111,14 +932,14 @@ var require_float = __commonJS({
           case "camelcase":
             return "-.Inf";
         }
-      } else if (common.isNegativeZero(object)) {
+      } else if (common2.isNegativeZero(object2)) {
         return "-0.0";
       }
-      res = object.toString(10);
+      res = object2.toString(10);
       return SCIENTIFIC_WITHOUT_DOT.test(res) ? res.replace("e", ".e") : res;
     }
-    function isFloat(object) {
-      return Object.prototype.toString.call(object) === "[object Number]" && (object % 1 !== 0 || common.isNegativeZero(object));
+    function isFloat(object2) {
+      return Object.prototype.toString.call(object2) === "[object Number]" && (object2 % 1 !== 0 || common2.isNegativeZero(object2));
     }
     module2.exports = new Type("tag:yaml.org,2002:float", {
       kind: "scalar",
@@ -1181,7 +1002,7 @@ var require_timestamp = __commonJS({
       return false;
     }
     function constructYamlTimestamp(data) {
-      var match, year, month, day, hour, minute, second, fraction = 0, delta = null, tz_hour, tz_minute, date;
+      var match, year, month, day, hour, minute, second, fraction = 0, delta = null, tz_hour, tz_minute, date5;
       match = YAML_DATE_REGEXP.exec(data);
       if (match === null) match = YAML_TIMESTAMP_REGEXP.exec(data);
       if (match === null) throw new Error("Date resolve error");
@@ -1207,12 +1028,12 @@ var require_timestamp = __commonJS({
         delta = (tz_hour * 60 + tz_minute) * 6e4;
         if (match[9] === "-") delta = -delta;
       }
-      date = new Date(Date.UTC(year, month, day, hour, minute, second, fraction));
-      if (delta) date.setTime(date.getTime() - delta);
-      return date;
+      date5 = new Date(Date.UTC(year, month, day, hour, minute, second, fraction));
+      if (delta) date5.setTime(date5.getTime() - delta);
+      return date5;
     }
-    function representYamlTimestamp(object) {
-      return object.toISOString();
+    function representYamlTimestamp(object2) {
+      return object2.toISOString();
     }
     module2.exports = new Type("tag:yaml.org,2002:timestamp", {
       kind: "scalar",
@@ -1254,9 +1075,9 @@ var require_binary = __commonJS({
     var BASE64_MAP = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\n\r";
     function resolveYamlBinary(data) {
       if (data === null) return false;
-      var code, idx, bitlen = 0, max = data.length, map = BASE64_MAP;
+      var code, idx, bitlen = 0, max = data.length, map2 = BASE64_MAP;
       for (idx = 0; idx < max; idx++) {
-        code = map.indexOf(data.charAt(idx));
+        code = map2.indexOf(data.charAt(idx));
         if (code > 64) continue;
         if (code < 0) return false;
         bitlen += 6;
@@ -1264,14 +1085,14 @@ var require_binary = __commonJS({
       return bitlen % 8 === 0;
     }
     function constructYamlBinary(data) {
-      var idx, tailbits, input = data.replace(/[\r\n=]/g, ""), max = input.length, map = BASE64_MAP, bits = 0, result = [];
+      var idx, tailbits, input = data.replace(/[\r\n=]/g, ""), max = input.length, map2 = BASE64_MAP, bits = 0, result = [];
       for (idx = 0; idx < max; idx++) {
         if (idx % 4 === 0 && idx) {
           result.push(bits >> 16 & 255);
           result.push(bits >> 8 & 255);
           result.push(bits & 255);
         }
-        bits = bits << 6 | map.indexOf(input.charAt(idx));
+        bits = bits << 6 | map2.indexOf(input.charAt(idx));
       }
       tailbits = max % 4 * 6;
       if (tailbits === 0) {
@@ -1289,38 +1110,38 @@ var require_binary = __commonJS({
       }
       return result;
     }
-    function representYamlBinary(object) {
-      var result = "", bits = 0, idx, tail, max = object.length, map = BASE64_MAP;
+    function representYamlBinary(object2) {
+      var result = "", bits = 0, idx, tail, max = object2.length, map2 = BASE64_MAP;
       for (idx = 0; idx < max; idx++) {
         if (idx % 3 === 0 && idx) {
-          result += map[bits >> 18 & 63];
-          result += map[bits >> 12 & 63];
-          result += map[bits >> 6 & 63];
-          result += map[bits & 63];
+          result += map2[bits >> 18 & 63];
+          result += map2[bits >> 12 & 63];
+          result += map2[bits >> 6 & 63];
+          result += map2[bits & 63];
         }
-        bits = (bits << 8) + object[idx];
+        bits = (bits << 8) + object2[idx];
       }
       tail = max % 3;
       if (tail === 0) {
-        result += map[bits >> 18 & 63];
-        result += map[bits >> 12 & 63];
-        result += map[bits >> 6 & 63];
-        result += map[bits & 63];
+        result += map2[bits >> 18 & 63];
+        result += map2[bits >> 12 & 63];
+        result += map2[bits >> 6 & 63];
+        result += map2[bits & 63];
       } else if (tail === 2) {
-        result += map[bits >> 10 & 63];
-        result += map[bits >> 4 & 63];
-        result += map[bits << 2 & 63];
-        result += map[64];
+        result += map2[bits >> 10 & 63];
+        result += map2[bits >> 4 & 63];
+        result += map2[bits << 2 & 63];
+        result += map2[64];
       } else if (tail === 1) {
-        result += map[bits >> 2 & 63];
-        result += map[bits << 4 & 63];
-        result += map[64];
-        result += map[64];
+        result += map2[bits >> 2 & 63];
+        result += map2[bits << 4 & 63];
+        result += map2[64];
+        result += map2[64];
       }
       return result;
     }
-    function isBinary(object) {
-      return NodeBuffer && NodeBuffer.isBuffer(object);
+    function isBinary(object2) {
+      return NodeBuffer && NodeBuffer.isBuffer(object2);
     }
     module2.exports = new Type("tag:yaml.org,2002:binary", {
       kind: "scalar",
@@ -1341,9 +1162,9 @@ var require_omap = __commonJS({
     var _toString = Object.prototype.toString;
     function resolveYamlOmap(data) {
       if (data === null) return true;
-      var objectKeys = [], index, length, pair, pairKey, pairHasKey, object = data;
-      for (index = 0, length = object.length; index < length; index += 1) {
-        pair = object[index];
+      var objectKeys = [], index, length, pair, pairKey, pairHasKey, object2 = data;
+      for (index = 0, length = object2.length; index < length; index += 1) {
+        pair = object2[index];
         pairHasKey = false;
         if (_toString.call(pair) !== "[object Object]") return false;
         for (pairKey in pair) {
@@ -1377,10 +1198,10 @@ var require_pairs = __commonJS({
     var _toString = Object.prototype.toString;
     function resolveYamlPairs(data) {
       if (data === null) return true;
-      var index, length, pair, keys, result, object = data;
-      result = new Array(object.length);
-      for (index = 0, length = object.length; index < length; index += 1) {
-        pair = object[index];
+      var index, length, pair, keys, result, object2 = data;
+      result = new Array(object2.length);
+      for (index = 0, length = object2.length; index < length; index += 1) {
+        pair = object2[index];
         if (_toString.call(pair) !== "[object Object]") return false;
         keys = Object.keys(pair);
         if (keys.length !== 1) return false;
@@ -1390,10 +1211,10 @@ var require_pairs = __commonJS({
     }
     function constructYamlPairs(data) {
       if (data === null) return [];
-      var index, length, pair, keys, result, object = data;
-      result = new Array(object.length);
-      for (index = 0, length = object.length; index < length; index += 1) {
-        pair = object[index];
+      var index, length, pair, keys, result, object2 = data;
+      result = new Array(object2.length);
+      for (index = 0, length = object2.length; index < length; index += 1) {
+        pair = object2[index];
         keys = Object.keys(pair);
         result[index] = [keys[0], pair[keys[0]]];
       }
@@ -1415,10 +1236,10 @@ var require_set = __commonJS({
     var _hasOwnProperty = Object.prototype.hasOwnProperty;
     function resolveYamlSet(data) {
       if (data === null) return true;
-      var key, object = data;
-      for (key in object) {
-        if (_hasOwnProperty.call(object, key)) {
-          if (object[key] !== null) return false;
+      var key, object2 = data;
+      for (key in object2) {
+        if (_hasOwnProperty.call(object2, key)) {
+          if (object2[key] !== null) return false;
         }
       }
       return true;
@@ -1471,8 +1292,8 @@ var require_undefined = __commonJS({
     function representJavascriptUndefined() {
       return "";
     }
-    function isUndefined(object) {
-      return typeof object === "undefined";
+    function isUndefined(object2) {
+      return typeof object2 === "undefined";
     }
     module2.exports = new Type("tag:yaml.org,2002:js/undefined", {
       kind: "scalar",
@@ -1508,15 +1329,15 @@ var require_regexp = __commonJS({
       }
       return new RegExp(regexp, modifiers);
     }
-    function representJavascriptRegExp(object) {
-      var result = "/" + object.source + "/";
-      if (object.global) result += "g";
-      if (object.multiline) result += "m";
-      if (object.ignoreCase) result += "i";
+    function representJavascriptRegExp(object2) {
+      var result = "/" + object2.source + "/";
+      if (object2.global) result += "g";
+      if (object2.multiline) result += "m";
+      if (object2.ignoreCase) result += "i";
       return result;
     }
-    function isRegExp(object) {
-      return Object.prototype.toString.call(object) === "[object RegExp]";
+    function isRegExp(object2) {
+      return Object.prototype.toString.call(object2) === "[object RegExp]";
     }
     module2.exports = new Type("tag:yaml.org,2002:js/regexp", {
       kind: "scalar",
@@ -1567,11 +1388,11 @@ var require_function = __commonJS({
       }
       return new Function(params, "return " + source.slice(body[0], body[1]));
     }
-    function representJavascriptFunction(object) {
-      return object.toString();
+    function representJavascriptFunction(object2) {
+      return object2.toString();
     }
-    function isFunction(object) {
-      return Object.prototype.toString.call(object) === "[object Function]";
+    function isFunction(object2) {
+      return Object.prototype.toString.call(object2) === "[object Function]";
     }
     module2.exports = new Type("tag:yaml.org,2002:js/function", {
       kind: "scalar",
@@ -1605,7 +1426,7 @@ var require_default_full = __commonJS({
 var require_loader = __commonJS({
   "node_modules/.pnpm/js-yaml@3.14.2/node_modules/js-yaml/lib/js-yaml/loader.js"(exports2, module2) {
     "use strict";
-    var common = require_common();
+    var common2 = require_common();
     var YAMLException = require_exception();
     var Mark = require_mark();
     var DEFAULT_SAFE_SCHEMA = require_default_safe();
@@ -1679,16 +1500,16 @@ var require_loader = __commonJS({
         (c - 65536 & 1023) + 56320
       );
     }
-    function setProperty(object, key, value) {
+    function setProperty(object2, key, value) {
       if (key === "__proto__") {
-        Object.defineProperty(object, key, {
+        Object.defineProperty(object2, key, {
           configurable: true,
           enumerable: true,
           writable: true,
           value
         });
       } else {
-        object[key] = value;
+        object2[key] = value;
       }
     }
     var simpleEscapeCheck = new Array(256);
@@ -1773,11 +1594,11 @@ var require_loader = __commonJS({
       }
     };
     function captureSegment(state, start, end, checkJson) {
-      var _position, _length, _character, _result;
+      var _position, _length2, _character, _result;
       if (start < end) {
         _result = state.input.slice(start, end);
         if (checkJson) {
-          for (_position = 0, _length = _result.length; _position < _length; _position += 1) {
+          for (_position = 0, _length2 = _result.length; _position < _length2; _position += 1) {
             _character = _result.charCodeAt(_position);
             if (!(_character === 9 || 32 <= _character && _character <= 1114111)) {
               throwError(state, "expected valid JSON character");
@@ -1791,7 +1612,7 @@ var require_loader = __commonJS({
     }
     function mergeMappings(state, destination, source, overridableKeys) {
       var sourceKeys, key, index, quantity;
-      if (!common.isObject(source)) {
+      if (!common2.isObject(source)) {
         throwError(state, "cannot merge mappings; the provided source object is unacceptable");
       }
       sourceKeys = Object.keys(source);
@@ -1903,7 +1724,7 @@ var require_loader = __commonJS({
       if (count2 === 1) {
         state.result += " ";
       } else if (count2 > 1) {
-        state.result += common.repeat("\n", count2 - 1);
+        state.result += common2.repeat("\n", count2 - 1);
       }
     }
     function readPlainScalar(state, nodeIndent, withinFlowCollection) {
@@ -2190,7 +2011,7 @@ var require_loader = __commonJS({
         }
         if (state.lineIndent < textIndent) {
           if (chomping === CHOMPING_KEEP) {
-            state.result += common.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+            state.result += common2.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
           } else if (chomping === CHOMPING_CLIP) {
             if (didReadContent) {
               state.result += "\n";
@@ -2201,19 +2022,19 @@ var require_loader = __commonJS({
         if (folding) {
           if (is_WHITE_SPACE(ch)) {
             atMoreIndented = true;
-            state.result += common.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+            state.result += common2.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
           } else if (atMoreIndented) {
             atMoreIndented = false;
-            state.result += common.repeat("\n", emptyLines + 1);
+            state.result += common2.repeat("\n", emptyLines + 1);
           } else if (emptyLines === 0) {
             if (didReadContent) {
               state.result += " ";
             }
           } else {
-            state.result += common.repeat("\n", emptyLines);
+            state.result += common2.repeat("\n", emptyLines);
           }
         } else {
-          state.result += common.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+          state.result += common2.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
         }
         didReadContent = true;
         detectedIndent = true;
@@ -2708,10 +2529,10 @@ var require_loader = __commonJS({
         options2 = iterator;
         iterator = null;
       }
-      return loadAll(input, iterator, common.extend({ schema: DEFAULT_SAFE_SCHEMA }, options2));
+      return loadAll(input, iterator, common2.extend({ schema: DEFAULT_SAFE_SCHEMA }, options2));
     }
     function safeLoad(input, options2) {
-      return load(input, common.extend({ schema: DEFAULT_SAFE_SCHEMA }, options2));
+      return load(input, common2.extend({ schema: DEFAULT_SAFE_SCHEMA }, options2));
     }
     module2.exports.loadAll = loadAll;
     module2.exports.load = load;
@@ -2724,7 +2545,7 @@ var require_loader = __commonJS({
 var require_dumper = __commonJS({
   "node_modules/.pnpm/js-yaml@3.14.2/node_modules/js-yaml/lib/js-yaml/dumper.js"(exports2, module2) {
     "use strict";
-    var common = require_common();
+    var common2 = require_common();
     var YAMLException = require_exception();
     var DEFAULT_FULL_SCHEMA = require_default_full();
     var DEFAULT_SAFE_SCHEMA = require_default_safe();
@@ -2788,14 +2609,14 @@ var require_dumper = __commonJS({
       "Off",
       "OFF"
     ];
-    function compileStyleMap(schema, map) {
+    function compileStyleMap(schema, map2) {
       var result, keys, index, length, tag, style, type;
-      if (map === null) return {};
+      if (map2 === null) return {};
       result = {};
-      keys = Object.keys(map);
+      keys = Object.keys(map2);
       for (index = 0, length = keys.length; index < length; index += 1) {
         tag = keys[index];
-        style = String(map[tag]);
+        style = String(map2[tag]);
         if (tag.slice(0, 2) === "!!") {
           tag = "tag:yaml.org,2002:" + tag.slice(2);
         }
@@ -2808,8 +2629,8 @@ var require_dumper = __commonJS({
       return result;
     }
     function encodeHex(character) {
-      var string, handle, length;
-      string = character.toString(16).toUpperCase();
+      var string4, handle, length;
+      string4 = character.toString(16).toUpperCase();
       if (character <= 255) {
         handle = "x";
         length = 2;
@@ -2822,14 +2643,14 @@ var require_dumper = __commonJS({
       } else {
         throw new YAMLException("code point within a string may not be greater than 0xFFFFFFFF");
       }
-      return "\\" + handle + common.repeat("0", length - string.length) + string;
+      return "\\" + handle + common2.repeat("0", length - string4.length) + string4;
     }
     function State(options2) {
       this.schema = options2["schema"] || DEFAULT_FULL_SCHEMA;
       this.indent = Math.max(1, options2["indent"] || 2);
       this.noArrayIndent = options2["noArrayIndent"] || false;
       this.skipInvalid = options2["skipInvalid"] || false;
-      this.flowLevel = common.isNothing(options2["flowLevel"]) ? -1 : options2["flowLevel"];
+      this.flowLevel = common2.isNothing(options2["flowLevel"]) ? -1 : options2["flowLevel"];
       this.styleMap = compileStyleMap(this.schema, options2["styles"] || null);
       this.sortKeys = options2["sortKeys"] || false;
       this.lineWidth = options2["lineWidth"] || 80;
@@ -2843,15 +2664,15 @@ var require_dumper = __commonJS({
       this.duplicates = [];
       this.usedDuplicates = null;
     }
-    function indentString(string, spaces) {
-      var ind = common.repeat(" ", spaces), position = 0, next = -1, result = "", line, length = string.length;
+    function indentString(string4, spaces) {
+      var ind = common2.repeat(" ", spaces), position = 0, next = -1, result = "", line, length = string4.length;
       while (position < length) {
-        next = string.indexOf("\n", position);
+        next = string4.indexOf("\n", position);
         if (next === -1) {
-          line = string.slice(position);
+          line = string4.slice(position);
           position = length;
         } else {
-          line = string.slice(position, next + 1);
+          line = string4.slice(position, next + 1);
           position = next + 1;
         }
         if (line.length && line !== "\n") result += ind;
@@ -2860,7 +2681,7 @@ var require_dumper = __commonJS({
       return result;
     }
     function generateNextLine(state, level) {
-      return "\n" + common.repeat(" ", state.indent * level);
+      return "\n" + common2.repeat(" ", state.indent * level);
     }
     function testImplicitResolving(state, str2) {
       var index, length, type;
@@ -2887,110 +2708,110 @@ var require_dumper = __commonJS({
     function isPlainSafeFirst(c) {
       return isPrintable(c) && c !== 65279 && !isWhitespace(c) && c !== CHAR_MINUS && c !== CHAR_QUESTION && c !== CHAR_COLON && c !== CHAR_COMMA && c !== CHAR_LEFT_SQUARE_BRACKET && c !== CHAR_RIGHT_SQUARE_BRACKET && c !== CHAR_LEFT_CURLY_BRACKET && c !== CHAR_RIGHT_CURLY_BRACKET && c !== CHAR_SHARP && c !== CHAR_AMPERSAND && c !== CHAR_ASTERISK && c !== CHAR_EXCLAMATION && c !== CHAR_VERTICAL_LINE && c !== CHAR_EQUALS && c !== CHAR_GREATER_THAN && c !== CHAR_SINGLE_QUOTE && c !== CHAR_DOUBLE_QUOTE && c !== CHAR_PERCENT && c !== CHAR_COMMERCIAL_AT && c !== CHAR_GRAVE_ACCENT;
     }
-    function needIndentIndicator(string) {
+    function needIndentIndicator(string4) {
       var leadingSpaceRe = /^\n* /;
-      return leadingSpaceRe.test(string);
+      return leadingSpaceRe.test(string4);
     }
     var STYLE_PLAIN = 1;
     var STYLE_SINGLE = 2;
     var STYLE_LITERAL = 3;
     var STYLE_FOLDED = 4;
     var STYLE_DOUBLE = 5;
-    function chooseScalarStyle(string, singleLineOnly, indentPerLevel, lineWidth, testAmbiguousType) {
+    function chooseScalarStyle(string4, singleLineOnly, indentPerLevel, lineWidth, testAmbiguousType) {
       var i;
       var char, prev_char;
       var hasLineBreak = false;
       var hasFoldableLine = false;
       var shouldTrackWidth = lineWidth !== -1;
       var previousLineBreak = -1;
-      var plain = isPlainSafeFirst(string.charCodeAt(0)) && !isWhitespace(string.charCodeAt(string.length - 1));
+      var plain = isPlainSafeFirst(string4.charCodeAt(0)) && !isWhitespace(string4.charCodeAt(string4.length - 1));
       if (singleLineOnly) {
-        for (i = 0; i < string.length; i++) {
-          char = string.charCodeAt(i);
+        for (i = 0; i < string4.length; i++) {
+          char = string4.charCodeAt(i);
           if (!isPrintable(char)) {
             return STYLE_DOUBLE;
           }
-          prev_char = i > 0 ? string.charCodeAt(i - 1) : null;
+          prev_char = i > 0 ? string4.charCodeAt(i - 1) : null;
           plain = plain && isPlainSafe(char, prev_char);
         }
       } else {
-        for (i = 0; i < string.length; i++) {
-          char = string.charCodeAt(i);
+        for (i = 0; i < string4.length; i++) {
+          char = string4.charCodeAt(i);
           if (char === CHAR_LINE_FEED) {
             hasLineBreak = true;
             if (shouldTrackWidth) {
               hasFoldableLine = hasFoldableLine || // Foldable line = too long, and not more-indented.
-              i - previousLineBreak - 1 > lineWidth && string[previousLineBreak + 1] !== " ";
+              i - previousLineBreak - 1 > lineWidth && string4[previousLineBreak + 1] !== " ";
               previousLineBreak = i;
             }
           } else if (!isPrintable(char)) {
             return STYLE_DOUBLE;
           }
-          prev_char = i > 0 ? string.charCodeAt(i - 1) : null;
+          prev_char = i > 0 ? string4.charCodeAt(i - 1) : null;
           plain = plain && isPlainSafe(char, prev_char);
         }
-        hasFoldableLine = hasFoldableLine || shouldTrackWidth && (i - previousLineBreak - 1 > lineWidth && string[previousLineBreak + 1] !== " ");
+        hasFoldableLine = hasFoldableLine || shouldTrackWidth && (i - previousLineBreak - 1 > lineWidth && string4[previousLineBreak + 1] !== " ");
       }
       if (!hasLineBreak && !hasFoldableLine) {
-        return plain && !testAmbiguousType(string) ? STYLE_PLAIN : STYLE_SINGLE;
+        return plain && !testAmbiguousType(string4) ? STYLE_PLAIN : STYLE_SINGLE;
       }
-      if (indentPerLevel > 9 && needIndentIndicator(string)) {
+      if (indentPerLevel > 9 && needIndentIndicator(string4)) {
         return STYLE_DOUBLE;
       }
       return hasFoldableLine ? STYLE_FOLDED : STYLE_LITERAL;
     }
-    function writeScalar(state, string, level, iskey) {
+    function writeScalar(state, string4, level, iskey) {
       state.dump = (function() {
-        if (string.length === 0) {
+        if (string4.length === 0) {
           return "''";
         }
-        if (!state.noCompatMode && DEPRECATED_BOOLEANS_SYNTAX.indexOf(string) !== -1) {
-          return "'" + string + "'";
+        if (!state.noCompatMode && DEPRECATED_BOOLEANS_SYNTAX.indexOf(string4) !== -1) {
+          return "'" + string4 + "'";
         }
         var indent = state.indent * Math.max(1, level);
         var lineWidth = state.lineWidth === -1 ? -1 : Math.max(Math.min(state.lineWidth, 40), state.lineWidth - indent);
         var singleLineOnly = iskey || state.flowLevel > -1 && level >= state.flowLevel;
-        function testAmbiguity(string2) {
-          return testImplicitResolving(state, string2);
+        function testAmbiguity(string5) {
+          return testImplicitResolving(state, string5);
         }
-        switch (chooseScalarStyle(string, singleLineOnly, state.indent, lineWidth, testAmbiguity)) {
+        switch (chooseScalarStyle(string4, singleLineOnly, state.indent, lineWidth, testAmbiguity)) {
           case STYLE_PLAIN:
-            return string;
+            return string4;
           case STYLE_SINGLE:
-            return "'" + string.replace(/'/g, "''") + "'";
+            return "'" + string4.replace(/'/g, "''") + "'";
           case STYLE_LITERAL:
-            return "|" + blockHeader(string, state.indent) + dropEndingNewline(indentString(string, indent));
+            return "|" + blockHeader(string4, state.indent) + dropEndingNewline(indentString(string4, indent));
           case STYLE_FOLDED:
-            return ">" + blockHeader(string, state.indent) + dropEndingNewline(indentString(foldString(string, lineWidth), indent));
+            return ">" + blockHeader(string4, state.indent) + dropEndingNewline(indentString(foldString(string4, lineWidth), indent));
           case STYLE_DOUBLE:
-            return '"' + escapeString(string, lineWidth) + '"';
+            return '"' + escapeString(string4, lineWidth) + '"';
           default:
             throw new YAMLException("impossible error: invalid scalar style");
         }
       })();
     }
-    function blockHeader(string, indentPerLevel) {
-      var indentIndicator = needIndentIndicator(string) ? String(indentPerLevel) : "";
-      var clip = string[string.length - 1] === "\n";
-      var keep = clip && (string[string.length - 2] === "\n" || string === "\n");
+    function blockHeader(string4, indentPerLevel) {
+      var indentIndicator = needIndentIndicator(string4) ? String(indentPerLevel) : "";
+      var clip = string4[string4.length - 1] === "\n";
+      var keep = clip && (string4[string4.length - 2] === "\n" || string4 === "\n");
       var chomp = keep ? "+" : clip ? "" : "-";
       return indentIndicator + chomp + "\n";
     }
-    function dropEndingNewline(string) {
-      return string[string.length - 1] === "\n" ? string.slice(0, -1) : string;
+    function dropEndingNewline(string4) {
+      return string4[string4.length - 1] === "\n" ? string4.slice(0, -1) : string4;
     }
-    function foldString(string, width) {
+    function foldString(string4, width) {
       var lineRe = /(\n+)([^\n]*)/g;
       var result = (function() {
-        var nextLF = string.indexOf("\n");
-        nextLF = nextLF !== -1 ? nextLF : string.length;
+        var nextLF = string4.indexOf("\n");
+        nextLF = nextLF !== -1 ? nextLF : string4.length;
         lineRe.lastIndex = nextLF;
-        return foldLine(string.slice(0, nextLF), width);
+        return foldLine(string4.slice(0, nextLF), width);
       })();
-      var prevMoreIndented = string[0] === "\n" || string[0] === " ";
+      var prevMoreIndented = string4[0] === "\n" || string4[0] === " ";
       var moreIndented;
       var match;
-      while (match = lineRe.exec(string)) {
+      while (match = lineRe.exec(string4)) {
         var prefix = match[1], line = match[2];
         moreIndented = line[0] === " ";
         result += prefix + (!prevMoreIndented && !moreIndented && line !== "" ? "\n" : "") + foldLine(line, width);
@@ -3021,14 +2842,14 @@ var require_dumper = __commonJS({
       }
       return result.slice(1);
     }
-    function escapeString(string) {
+    function escapeString(string4) {
       var result = "";
       var char, nextChar;
       var escapeSeq;
-      for (var i = 0; i < string.length; i++) {
-        char = string.charCodeAt(i);
+      for (var i = 0; i < string4.length; i++) {
+        char = string4.charCodeAt(i);
         if (char >= 55296 && char <= 56319) {
-          nextChar = string.charCodeAt(i + 1);
+          nextChar = string4.charCodeAt(i + 1);
           if (nextChar >= 56320 && nextChar <= 57343) {
             result += encodeHex((char - 55296) * 1024 + nextChar - 56320 + 65536);
             i++;
@@ -3036,14 +2857,14 @@ var require_dumper = __commonJS({
           }
         }
         escapeSeq = ESCAPE_SEQUENCES[char];
-        result += !escapeSeq && isPrintable(char) ? string[i] : escapeSeq || encodeHex(char);
+        result += !escapeSeq && isPrintable(char) ? string4[i] : escapeSeq || encodeHex(char);
       }
       return result;
     }
-    function writeFlowSequence(state, level, object) {
+    function writeFlowSequence(state, level, object2) {
       var _result = "", _tag = state.tag, index, length;
-      for (index = 0, length = object.length; index < length; index += 1) {
-        if (writeNode(state, level, object[index], false, false)) {
+      for (index = 0, length = object2.length; index < length; index += 1) {
+        if (writeNode(state, level, object2[index], false, false)) {
           if (index !== 0) _result += "," + (!state.condenseFlow ? " " : "");
           _result += state.dump;
         }
@@ -3051,10 +2872,10 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = "[" + _result + "]";
     }
-    function writeBlockSequence(state, level, object, compact) {
+    function writeBlockSequence(state, level, object2, compact) {
       var _result = "", _tag = state.tag, index, length;
-      for (index = 0, length = object.length; index < length; index += 1) {
-        if (writeNode(state, level + 1, object[index], true, true)) {
+      for (index = 0, length = object2.length; index < length; index += 1) {
+        if (writeNode(state, level + 1, object2[index], true, true)) {
           if (!compact || index !== 0) {
             _result += generateNextLine(state, level);
           }
@@ -3069,14 +2890,14 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = _result || "[]";
     }
-    function writeFlowMapping(state, level, object) {
-      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object), index, length, objectKey, objectValue, pairBuffer;
+    function writeFlowMapping(state, level, object2) {
+      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object2), index, length, objectKey, objectValue, pairBuffer;
       for (index = 0, length = objectKeyList.length; index < length; index += 1) {
         pairBuffer = "";
         if (index !== 0) pairBuffer += ", ";
         if (state.condenseFlow) pairBuffer += '"';
         objectKey = objectKeyList[index];
-        objectValue = object[objectKey];
+        objectValue = object2[objectKey];
         if (!writeNode(state, level, objectKey, false, false)) {
           continue;
         }
@@ -3091,8 +2912,8 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = "{" + _result + "}";
     }
-    function writeBlockMapping(state, level, object, compact) {
-      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object), index, length, objectKey, objectValue, explicitPair, pairBuffer;
+    function writeBlockMapping(state, level, object2, compact) {
+      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object2), index, length, objectKey, objectValue, explicitPair, pairBuffer;
       if (state.sortKeys === true) {
         objectKeyList.sort();
       } else if (typeof state.sortKeys === "function") {
@@ -3106,7 +2927,7 @@ var require_dumper = __commonJS({
           pairBuffer += generateNextLine(state, level);
         }
         objectKey = objectKeyList[index];
-        objectValue = object[objectKey];
+        objectValue = object2[objectKey];
         if (!writeNode(state, level + 1, objectKey, true, true, true)) {
           continue;
         }
@@ -3136,19 +2957,19 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = _result || "{}";
     }
-    function detectType(state, object, explicit) {
+    function detectType(state, object2, explicit) {
       var _result, typeList, index, length, type, style;
       typeList = explicit ? state.explicitTypes : state.implicitTypes;
       for (index = 0, length = typeList.length; index < length; index += 1) {
         type = typeList[index];
-        if ((type.instanceOf || type.predicate) && (!type.instanceOf || typeof object === "object" && object instanceof type.instanceOf) && (!type.predicate || type.predicate(object))) {
+        if ((type.instanceOf || type.predicate) && (!type.instanceOf || typeof object2 === "object" && object2 instanceof type.instanceOf) && (!type.predicate || type.predicate(object2))) {
           state.tag = explicit ? type.tag : "?";
           if (type.represent) {
             style = state.styleMap[type.tag] || type.defaultStyle;
             if (_toString.call(type.represent) === "[object Function]") {
-              _result = type.represent(object, style);
+              _result = type.represent(object2, style);
             } else if (_hasOwnProperty.call(type.represent, style)) {
-              _result = type.represent[style](object, style);
+              _result = type.represent[style](object2, style);
             } else {
               throw new YAMLException("!<" + type.tag + '> tag resolver accepts not "' + style + '" style');
             }
@@ -3159,11 +2980,11 @@ var require_dumper = __commonJS({
       }
       return false;
     }
-    function writeNode(state, level, object, block, compact, iskey) {
+    function writeNode(state, level, object2, block, compact, iskey) {
       state.tag = null;
-      state.dump = object;
-      if (!detectType(state, object, false)) {
-        detectType(state, object, true);
+      state.dump = object2;
+      if (!detectType(state, object2, false)) {
+        detectType(state, object2, true);
       }
       var type = _toString.call(state.dump);
       if (block) {
@@ -3171,7 +2992,7 @@ var require_dumper = __commonJS({
       }
       var objectOrArray = type === "[object Object]" || type === "[object Array]", duplicateIndex, duplicate;
       if (objectOrArray) {
-        duplicateIndex = state.duplicates.indexOf(object);
+        duplicateIndex = state.duplicates.indexOf(object2);
         duplicate = duplicateIndex !== -1;
       }
       if (state.tag !== null && state.tag !== "?" || duplicate || state.indent !== 2 && level > 0) {
@@ -3222,32 +3043,32 @@ var require_dumper = __commonJS({
       }
       return true;
     }
-    function getDuplicateReferences(object, state) {
+    function getDuplicateReferences(object2, state) {
       var objects = [], duplicatesIndexes = [], index, length;
-      inspectNode(object, objects, duplicatesIndexes);
+      inspectNode(object2, objects, duplicatesIndexes);
       for (index = 0, length = duplicatesIndexes.length; index < length; index += 1) {
         state.duplicates.push(objects[duplicatesIndexes[index]]);
       }
       state.usedDuplicates = new Array(length);
     }
-    function inspectNode(object, objects, duplicatesIndexes) {
+    function inspectNode(object2, objects, duplicatesIndexes) {
       var objectKeyList, index, length;
-      if (object !== null && typeof object === "object") {
-        index = objects.indexOf(object);
+      if (object2 !== null && typeof object2 === "object") {
+        index = objects.indexOf(object2);
         if (index !== -1) {
           if (duplicatesIndexes.indexOf(index) === -1) {
             duplicatesIndexes.push(index);
           }
         } else {
-          objects.push(object);
-          if (Array.isArray(object)) {
-            for (index = 0, length = object.length; index < length; index += 1) {
-              inspectNode(object[index], objects, duplicatesIndexes);
+          objects.push(object2);
+          if (Array.isArray(object2)) {
+            for (index = 0, length = object2.length; index < length; index += 1) {
+              inspectNode(object2[index], objects, duplicatesIndexes);
             }
           } else {
-            objectKeyList = Object.keys(object);
+            objectKeyList = Object.keys(object2);
             for (index = 0, length = objectKeyList.length; index < length; index += 1) {
-              inspectNode(object[objectKeyList[index]], objects, duplicatesIndexes);
+              inspectNode(object2[objectKeyList[index]], objects, duplicatesIndexes);
             }
           }
         }
@@ -3261,7 +3082,7 @@ var require_dumper = __commonJS({
       return "";
     }
     function safeDump(input, options2) {
-      return dump(input, common.extend({ schema: DEFAULT_SAFE_SCHEMA }, options2));
+      return dump(input, common2.extend({ schema: DEFAULT_SAFE_SCHEMA }, options2));
     }
     module2.exports.dump = dump;
     module2.exports.safeDump = safeDump;
@@ -3463,32 +3284,32 @@ var require_stringify = __commonJS({
     var typeOf = require_kind_of();
     var getEngine = require_engine();
     var defaults = require_defaults();
-    module2.exports = function(file, data, options2) {
+    module2.exports = function(file2, data, options2) {
       if (data == null && options2 == null) {
-        switch (typeOf(file)) {
+        switch (typeOf(file2)) {
           case "object":
-            data = file.data;
+            data = file2.data;
             options2 = {};
             break;
           case "string":
-            return file;
+            return file2;
           default: {
             throw new TypeError("expected file to be a string or object");
           }
         }
       }
-      const str2 = file.content;
+      const str2 = file2.content;
       const opts = defaults(options2);
       if (data == null) {
-        if (!opts.data) return file;
+        if (!opts.data) return file2;
         data = opts.data;
       }
-      const language = file.language || opts.language;
+      const language = file2.language || opts.language;
       const engine = getEngine(language, opts);
       if (typeof engine.stringify !== "function") {
         throw new TypeError('expected "' + language + '.stringify" to be a function');
       }
-      data = Object.assign({}, file.data, data);
+      data = Object.assign({}, file2.data, data);
       const open = opts.delimiters[0];
       const close = opts.delimiters[1];
       const matter3 = engine.stringify(data, options2).trim();
@@ -3496,9 +3317,9 @@ var require_stringify = __commonJS({
       if (matter3 !== "{}") {
         buf = newline(open) + newline(matter3) + newline(close);
       }
-      if (typeof file.excerpt === "string" && file.excerpt !== "") {
-        if (str2.indexOf(file.excerpt.trim()) === -1) {
-          buf += newline(file.excerpt) + newline(close);
+      if (typeof file2.excerpt === "string" && file2.excerpt !== "") {
+        if (str2.indexOf(file2.excerpt.trim()) === -1) {
+          buf += newline(file2.excerpt) + newline(close);
         }
       }
       return buf + newline(str2);
@@ -3514,24 +3335,24 @@ var require_excerpt = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/lib/excerpt.js"(exports2, module2) {
     "use strict";
     var defaults = require_defaults();
-    module2.exports = function(file, options2) {
+    module2.exports = function(file2, options2) {
       const opts = defaults(options2);
-      if (file.data == null) {
-        file.data = {};
+      if (file2.data == null) {
+        file2.data = {};
       }
       if (typeof opts.excerpt === "function") {
-        return opts.excerpt(file, opts);
+        return opts.excerpt(file2, opts);
       }
-      const sep = file.data.excerpt_separator || opts.excerpt_separator;
+      const sep = file2.data.excerpt_separator || opts.excerpt_separator;
       if (sep == null && (opts.excerpt === false || opts.excerpt == null)) {
-        return file;
+        return file2;
       }
       const delimiter = typeof opts.excerpt === "string" ? opts.excerpt : sep || opts.delimiters[0];
-      const idx = file.content.indexOf(delimiter);
+      const idx = file2.content.indexOf(delimiter);
       if (idx !== -1) {
-        file.excerpt = file.content.slice(0, idx);
+        file2.excerpt = file2.content.slice(0, idx);
       }
-      return file;
+      return file2;
     };
   }
 });
@@ -3543,29 +3364,29 @@ var require_to_file = __commonJS({
     var typeOf = require_kind_of();
     var stringify = require_stringify();
     var utils = require_utils();
-    module2.exports = function(file) {
-      if (typeOf(file) !== "object") {
-        file = { content: file };
+    module2.exports = function(file2) {
+      if (typeOf(file2) !== "object") {
+        file2 = { content: file2 };
       }
-      if (typeOf(file.data) !== "object") {
-        file.data = {};
+      if (typeOf(file2.data) !== "object") {
+        file2.data = {};
       }
-      if (file.contents && file.content == null) {
-        file.content = file.contents;
+      if (file2.contents && file2.content == null) {
+        file2.content = file2.contents;
       }
-      utils.define(file, "orig", utils.toBuffer(file.content));
-      utils.define(file, "language", file.language || "");
-      utils.define(file, "matter", file.matter || "");
-      utils.define(file, "stringify", function(data, options2) {
+      utils.define(file2, "orig", utils.toBuffer(file2.content));
+      utils.define(file2, "language", file2.language || "");
+      utils.define(file2, "matter", file2.matter || "");
+      utils.define(file2, "stringify", function(data, options2) {
         if (options2 && options2.language) {
-          file.language = options2.language;
+          file2.language = options2.language;
         }
-        return stringify(file, data, options2);
+        return stringify(file2, data, options2);
       });
-      file.content = utils.toString(file.content);
-      file.isEmpty = false;
-      file.excerpt = "";
-      return file;
+      file2.content = utils.toString(file2.content);
+      file2.isEmpty = false;
+      file2.excerpt = "";
+      return file2;
     };
   }
 });
@@ -3591,94 +3412,94 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs9 = __require("fs");
+    var fs10 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
     var excerpt = require_excerpt();
     var engines2 = require_engines();
     var toFile = require_to_file();
-    var parse2 = require_parse();
+    var parse4 = require_parse();
     var utils = require_utils();
     function matter3(input, options2) {
       if (input === "") {
         return { data: {}, content: input, excerpt: "", orig: input };
       }
-      let file = toFile(input);
-      const cached = matter3.cache[file.content];
+      let file2 = toFile(input);
+      const cached2 = matter3.cache[file2.content];
       if (!options2) {
-        if (cached) {
-          file = Object.assign({}, cached);
-          file.orig = cached.orig;
-          return file;
+        if (cached2) {
+          file2 = Object.assign({}, cached2);
+          file2.orig = cached2.orig;
+          return file2;
         }
-        matter3.cache[file.content] = file;
+        matter3.cache[file2.content] = file2;
       }
-      return parseMatter(file, options2);
+      return parseMatter(file2, options2);
     }
-    function parseMatter(file, options2) {
+    function parseMatter(file2, options2) {
       const opts = defaults(options2);
       const open = opts.delimiters[0];
       const close = "\n" + opts.delimiters[1];
-      let str2 = file.content;
+      let str2 = file2.content;
       if (opts.language) {
-        file.language = opts.language;
+        file2.language = opts.language;
       }
       const openLen = open.length;
       if (!utils.startsWith(str2, open, openLen)) {
-        excerpt(file, opts);
-        return file;
+        excerpt(file2, opts);
+        return file2;
       }
       if (str2.charAt(openLen) === open.slice(-1)) {
-        return file;
+        return file2;
       }
       str2 = str2.slice(openLen);
       const len = str2.length;
       const language = matter3.language(str2, opts);
       if (language.name) {
-        file.language = language.name;
+        file2.language = language.name;
         str2 = str2.slice(language.raw.length);
       }
       let closeIndex = str2.indexOf(close);
       if (closeIndex === -1) {
         closeIndex = len;
       }
-      file.matter = str2.slice(0, closeIndex);
-      const block = file.matter.replace(/^\s*#[^\n]+/gm, "").trim();
+      file2.matter = str2.slice(0, closeIndex);
+      const block = file2.matter.replace(/^\s*#[^\n]+/gm, "").trim();
       if (block === "") {
-        file.isEmpty = true;
-        file.empty = file.content;
-        file.data = {};
+        file2.isEmpty = true;
+        file2.empty = file2.content;
+        file2.data = {};
       } else {
-        file.data = parse2(file.language, file.matter, opts);
+        file2.data = parse4(file2.language, file2.matter, opts);
       }
       if (closeIndex === len) {
-        file.content = "";
+        file2.content = "";
       } else {
-        file.content = str2.slice(closeIndex + close.length);
-        if (file.content[0] === "\r") {
-          file.content = file.content.slice(1);
+        file2.content = str2.slice(closeIndex + close.length);
+        if (file2.content[0] === "\r") {
+          file2.content = file2.content.slice(1);
         }
-        if (file.content[0] === "\n") {
-          file.content = file.content.slice(1);
+        if (file2.content[0] === "\n") {
+          file2.content = file2.content.slice(1);
         }
       }
-      excerpt(file, opts);
+      excerpt(file2, opts);
       if (opts.sections === true || typeof opts.section === "function") {
-        sections(file, opts.section);
+        sections(file2, opts.section);
       }
-      return file;
+      return file2;
     }
     matter3.engines = engines2;
-    matter3.stringify = function(file, data, options2) {
-      if (typeof file === "string") file = matter3(file, options2);
-      return stringify(file, data, options2);
+    matter3.stringify = function(file2, data, options2) {
+      if (typeof file2 === "string") file2 = matter3(file2, options2);
+      return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs9.readFileSync(filepath, "utf8");
-      const file = matter3(str2, options2);
-      file.path = filepath;
-      return file;
+      const str2 = fs10.readFileSync(filepath, "utf8");
+      const file2 = matter3(str2, options2);
+      file2.path = filepath;
+      return file2;
     };
     matter3.test = function(str2, options2) {
       return utils.startsWith(str2, defaults(options2).delimiters[0]);
@@ -3703,38 +3524,17 @@ var require_gray_matter = __commonJS({
   }
 });
 
-// packages/plugin-core/dist/stop-handler.js
-import { execSync as execSync2 } from "node:child_process";
-import { promises as fs8 } from "node:fs";
-
-// packages/plugin-core/dist/client.js
-import { promises as fs4 } from "node:fs";
-import path6 from "node:path";
-import os5 from "node:os";
-import { randomUUID as randomUUID3 } from "node:crypto";
-
-// packages/plugin-core/dist/auth.js
-import { promises as fs2 } from "node:fs";
-import path3 from "node:path";
-import os2 from "node:os";
-import { randomUUID } from "node:crypto";
-
 // packages/plugin-core/dist/atomic-rename.js
 import { promises as fs } from "node:fs";
-import path from "node:path";
-var RETRYABLE_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
-var MAX_ATTEMPTS = 10;
-var BASE_DELAY_MS = 10;
-var MAX_DELAY_MS = 100;
-var renameQueues = /* @__PURE__ */ new Map();
+import path2 from "node:path";
 async function renameWithRetry(from, to, rename) {
   for (let attempt = 1; ; attempt++) {
     try {
       await rename(from, to);
       return;
-    } catch (error) {
-      const code = error.code;
-      if (attempt >= MAX_ATTEMPTS || !code || !RETRYABLE_CODES.has(code)) throw error;
+    } catch (error40) {
+      const code = error40.code;
+      if (attempt >= MAX_ATTEMPTS || !code || !RETRYABLE_CODES.has(code)) throw error40;
       const cap = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
       const delay2 = cap / 2 + Math.random() * (cap / 2);
       await new Promise((resolve) => setTimeout(resolve, delay2));
@@ -3743,7 +3543,7 @@ async function renameWithRetry(from, to, rename) {
 }
 async function atomicRename(from, to, dependencies = {}) {
   const rename = dependencies.rename ?? fs.rename;
-  const queueKey = path.resolve(to);
+  const queueKey = path2.resolve(to);
   const previous = renameQueues.get(queueKey) ?? Promise.resolve();
   const run = previous.catch(() => void 0).then(() => renameWithRetry(from, to, rename));
   renameQueues.set(queueKey, run);
@@ -3753,1149 +3553,391 @@ async function atomicRename(from, to, dependencies = {}) {
     if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
   }
 }
+var RETRYABLE_CODES, MAX_ATTEMPTS, BASE_DELAY_MS, MAX_DELAY_MS, renameQueues;
+var init_atomic_rename = __esm({
+  "packages/plugin-core/dist/atomic-rename.js"() {
+    "use strict";
+    RETRYABLE_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
+    MAX_ATTEMPTS = 10;
+    BASE_DELAY_MS = 10;
+    MAX_DELAY_MS = 100;
+    renameQueues = /* @__PURE__ */ new Map();
+  }
+});
 
-// packages/plugin-core/dist/backend-error.js
-var MemlinApiError = class extends Error {
-  constructor(message, status) {
-    super(message);
-    this.status = status;
-    this.name = "MemlinApiError";
-  }
-  status;
-};
-function looksLikeHtml(text) {
-  const head = text.slice(0, 512).trimStart().toLowerCase();
-  return head.startsWith("<!doctype html") || head.startsWith("<html") || head.includes("<html") || head.startsWith("<") && /<\/(head|body|title|div|p)>/i.test(text);
+// packages/plugin-core/dist/auth-refusal.js
+import crypto from "node:crypto";
+import { promises as fs2 } from "node:fs";
+import os from "node:os";
+import path3 from "node:path";
+function isReason(value) {
+  return value === "not_member" || value === "no_profile";
 }
-function singleLine(text, max = 200) {
-  const collapsed = text.replace(/\s+/g, " ").trim();
-  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1)}\u2026`;
-}
-function describeOpaqueBody(status, text) {
-  const trimmed = text.trim();
-  if (!trimmed) return `HTTP ${status}`;
-  if (looksLikeHtml(trimmed)) {
-    const via = /cloudflare/i.test(trimmed) ? "Cloudflare " : "";
-    return `HTTP ${status} (${via}HTML error page suppressed, ${trimmed.length} chars)`;
+function classifyAuthRefusal(status, body) {
+  if (status !== 403 || typeof body !== "object" || body === null) return null;
+  const record2 = body;
+  if (isReason(record2.code)) return record2.code;
+  let message = record2.error;
+  if (typeof record2.error === "object" && record2.error !== null) {
+    const nested = record2.error;
+    if (isReason(nested.code)) return nested.code;
+    message = nested.message;
   }
-  return `HTTP ${status}: ${singleLine(trimmed)}`;
-}
-function backendUnreachableLine(detail) {
-  return `memlin: backend unreachable (${detail}), no memory available`;
-}
-var ROUTING_PATTERN = /account routing (unavailable|lookup failed)/i;
-var CLOUDFLARE_STATUS = /\b(52[0-7])\b/;
-function statusOf(err) {
-  if (err instanceof MemlinApiError) return err.status;
-  const status = err?.status;
-  if (typeof status === "number" && status >= 100 && status <= 599) return status;
-  const message = err instanceof Error ? err.message : String(err);
-  const arrow = message.match(/→ (\d{3}):/);
-  if (arrow) return Number(arrow[1]);
-  return null;
-}
-function summarizeBackendFailure(err) {
-  const message = err instanceof Error ? err.message : String(err ?? "");
-  const status = statusOf(err);
-  if (ROUTING_PATTERN.test(message)) {
-    const embedded = message.match(CLOUDFLARE_STATUS)?.[1];
-    const code = embedded ?? (status !== null && status >= 500 ? String(status) : null);
-    const detail = code ? `routing ${code}` : "routing unavailable";
-    return { kind: "routing", status: code ? Number(code) : status, detail, line: backendUnreachableLine(detail) };
-  }
-  if (status !== null && status >= 500) {
-    const detail = `HTTP ${status}`;
-    return { kind: "http", status, detail, line: backendUnreachableLine(detail) };
-  }
-  if (/took longer than \d+ seconds/i.test(message)) {
-    return { kind: "network", status: null, detail: "timeout", line: backendUnreachableLine("timeout") };
-  }
-  if (/couldn'?t reach|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|network/i.test(message)) {
-    return {
-      kind: "network",
-      status: null,
-      detail: "network unreachable",
-      line: backendUnreachableLine("network unreachable")
-    };
+  if (typeof message !== "string") return null;
+  for (const reason of Object.keys(AUTH_REFUSAL_MESSAGES)) {
+    if (message === AUTH_REFUSAL_MESSAGES[reason]) return reason;
   }
   return null;
 }
-
-// packages/plugin-core/dist/auth.js
-var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
-var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
-var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
-var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
-var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
-function persistedTokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path3.join(os2.homedir(), ".config", "memlin", "token.json");
+function authRefusalDir() {
+  return process.env.MEMLIN_AUTH_REFUSAL_DIR ?? path3.join(os.homedir(), ".config", "memlin", "auth-refusal");
 }
-var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
-var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
-var AUTH_FILE_LOCK_RETRY_MS = 50;
-function authFileLockPath() {
-  return `${persistedTokenFilePath()}.auth.lock`;
+function sha(value) {
+  return crypto.createHash("sha256").update(value).digest("hex").slice(0, 32);
 }
-async function acquireAuthFileLock() {
-  const file = authFileLockPath();
-  const owner = `${process.pid}:${randomUUID()}`;
-  await fs2.mkdir(path3.dirname(file), { recursive: true });
-  const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
-  while (true) {
-    try {
-      const handle = await fs2.open(file, "wx", 384);
-      try {
-        await handle.writeFile(owner, "utf8");
-        await handle.sync();
-      } catch (error) {
-        await handle.close().catch(() => {
-        });
-        await fs2.rm(file, { force: true }).catch(() => {
-        });
-        throw error;
-      }
-      let released = false;
-      return async () => {
-        if (released) return;
-        released = true;
-        await handle.close().catch(() => {
-        });
-        const currentOwner = await fs2.readFile(file, "utf8").catch(() => null);
-        if (currentOwner === owner) await fs2.rm(file, { force: true }).catch(() => {
-        });
-      };
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      try {
-        const stat = await fs2.stat(file);
-        if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
-          await fs2.rm(file, { force: true });
-          continue;
-        }
-      } catch (statError) {
-        if (statError.code === "ENOENT") continue;
-        throw statError;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error("another Memlin sign-in or token refresh is still being saved");
-      }
-      await new Promise((resolve) => setTimeout(resolve, AUTH_FILE_LOCK_RETRY_MS));
-    }
-  }
+function normalizeBinding(binding) {
+  return binding ? path3.resolve(binding) : null;
 }
-async function withAuthFileLock(operation) {
-  const release = await acquireAuthFileLock();
+function accountDir(accountId) {
+  return path3.join(authRefusalDir(), sha(accountId));
+}
+function entryPath(accountId, binding) {
+  return path3.join(accountDir(accountId), `${sha(binding ?? "(global)")}.json`);
+}
+function isEntry(value) {
+  if (typeof value !== "object" || value === null) return false;
+  const e = value;
+  return typeof e.account_id === "string" && (e.binding === null || typeof e.binding === "string") && isReason(e.reason) && typeof e.expires_at === "number" && Array.isArray(e.notified_sessions);
+}
+async function readRaw(file2) {
   try {
-    return await operation();
-  } finally {
-    await release();
-  }
-}
-async function readPersistedToken() {
-  try {
-    const raw = await fs2.readFile(persistedTokenFilePath(), "utf8");
-    return JSON.parse(raw);
+    const parsed = JSON.parse(await fs2.readFile(file2, "utf8"));
+    return isEntry(parsed) ? parsed : null;
   } catch {
     return null;
   }
 }
-async function writePersistedToken(t) {
-  const file = persistedTokenFilePath();
-  await fs2.mkdir(path3.dirname(file), { recursive: true });
-  const tmp = path3.join(
-    path3.dirname(file),
-    `${path3.basename(file)}.tmp-${process.pid}-${randomUUID()}`
-  );
-  await fs2.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
-  await fs2.chmod(tmp, 384).catch(() => {
-  });
-  await atomicRename(tmp, file);
+async function writeEntry(entry) {
+  const file2 = entryPath(entry.account_id, entry.binding);
+  await fs2.mkdir(path3.dirname(file2), { recursive: true });
+  const tmp = `${file2}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await fs2.writeFile(tmp, JSON.stringify(entry), { mode: 384 });
+  await atomicRename(tmp, file2);
 }
-async function refreshAccessToken(refreshToken, options2 = {}) {
-  requireClientId();
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: refreshToken,
-    client_id: AUTH0_CLIENT_ID
-  });
-  const res = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-    signal: AbortSignal.timeout(Math.max(1, options2.timeoutMs ?? 15e3))
-  });
-  if (!res.ok) {
-    throw new Error(`refresh: ${describeOpaqueBody(res.status, await res.text())}`);
-  }
-  const json = await res.json();
-  return toPersisted(json, refreshToken);
-}
-var refreshInFlight = null;
-var DEFAULT_FRESHNESS_MARGIN_MS = 6e4;
-async function getValidAccessToken() {
-  return ensureFreshToken(DEFAULT_FRESHNESS_MARGIN_MS);
-}
-async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS, options2 = {}) {
-  const persisted = await readPersistedToken();
-  if (!persisted) throw new Error("not signed in \u2014 run `memlin login`");
-  if (Date.now() < persisted.expires_at - marginMs) return persisted.access_token;
-  if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = doRefresh(persisted, marginMs, options2).finally(() => {
-    refreshInFlight = null;
-  });
-  return refreshInFlight;
-}
-async function doRefresh(stale, marginMs, options2) {
-  const latest = await readPersistedToken();
-  if (latest && Date.now() < latest.expires_at - marginMs) return latest.access_token;
-  try {
-    const { companionGetToken: companionGetToken2 } = await Promise.resolve().then(() => (init_companion_client(), companion_client_exports));
-    const fromDaemon = await companionGetToken2();
-    if (fromDaemon && Date.now() < fromDaemon.expires_at - marginMs) {
-      return fromDaemon.access_token;
-    }
-  } catch {
-  }
-  const refreshSource = latest ?? stale;
-  const refreshToken = refreshSource.refresh_token;
-  if (!refreshToken) {
-    throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
-  }
-  try {
-    const fresh = await refreshAccessToken(refreshToken, options2);
-    return await withAuthFileLock(async () => {
-      const beforeWrite = await readPersistedToken();
-      if (!beforeWrite || beforeWrite.access_token !== refreshSource.access_token) {
-        if (beforeWrite && Date.now() < beforeWrite.expires_at - marginMs) {
-          return beforeWrite.access_token;
-        }
-        throw new Error("saved Memlin credentials changed while the token was refreshing");
-      }
-      await writePersistedToken(fresh);
-      return fresh.access_token;
-    });
-  } catch (err) {
-    const after = await readPersistedToken();
-    if (after && after.access_token !== refreshSource.access_token && Date.now() < after.expires_at - 6e4) {
-      return after.access_token;
-    }
-    throw new Error(
-      `access token refresh failed (${err instanceof Error ? err.message : String(err)}) \u2014 run \`memlin login\``
-    );
-  }
-}
-function toPersisted(json, fallbackRefresh) {
-  return {
-    access_token: json.access_token,
-    refresh_token: json.refresh_token ?? fallbackRefresh,
-    expires_at: Date.now() + json.expires_in * 1e3
+async function recordAuthRefusal(input) {
+  const now = input.now ?? Date.now();
+  const binding = normalizeBinding(input.binding);
+  const previous = await readRaw(entryPath(input.accountId, binding));
+  const entry = {
+    account_id: input.accountId,
+    binding,
+    reason: input.reason,
+    account_name: input.accountName ?? previous?.account_name ?? null,
+    refused_at: now,
+    expires_at: now + AUTH_REFUSAL_TTL_MS,
+    notified_sessions: previous?.notified_sessions ?? []
   };
+  await writeEntry(entry);
+  return entry;
 }
-function requireClientId() {
-  if (!AUTH0_CLIENT_ID) {
-    throw new Error(
-      "Auth0 client id not configured. Set MEMLIN_AUTH0_CLIENT_ID env var (and optionally MEMLIN_AUTH0_DOMAIN / MEMLIN_AUTH0_AUDIENCE for self-hosted setups)."
-    );
+async function readAuthRefusal(accountId, binding, now = Date.now()) {
+  const file2 = entryPath(accountId, normalizeBinding(binding));
+  const entry = await readRaw(file2);
+  if (!entry) return null;
+  if (now >= entry.expires_at) {
+    await fs2.rm(file2, { force: true }).catch(() => {
+    });
+    return null;
   }
+  return entry;
 }
-function decodeJwtPayload(jwt) {
-  const parts = jwt.split(".");
-  if (parts.length !== 3) throw new Error("not a JWT");
-  return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+async function clearAuthRefusalsForAccount(accountId) {
+  await fs2.rm(accountDir(accountId), { recursive: true, force: true }).catch(() => {
+  });
 }
+async function clearAllAuthRefusals() {
+  await fs2.rm(authRefusalDir(), { recursive: true, force: true }).catch(() => {
+  });
+}
+function accountIdsChanged(before, after) {
+  const normalize = (value) => Array.isArray(value) ? value.filter((v) => typeof v === "string").sort().join(",") : "";
+  return normalize(before) !== normalize(after);
+}
+var AUTH_REFUSAL_MESSAGES, AUTH_REFUSAL_TTL_MS;
+var init_auth_refusal = __esm({
+  "packages/plugin-core/dist/auth-refusal.js"() {
+    "use strict";
+    init_atomic_rename();
+    AUTH_REFUSAL_MESSAGES = {
+      not_member: "not a member of this account",
+      no_profile: "no Memlin profile for this user \u2014 sign in to the web app first"
+    };
+    AUTH_REFUSAL_TTL_MS = 15 * 60 * 1e3;
+  }
+});
 
-// packages/plugin-core/dist/memlin-api-client.js
-import { readFileSync } from "node:fs";
-import os4 from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-// packages/plugin-core/dist/runtime-shared.js
-var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
-var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
-var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
-var AGENT_CAPABILITIES_HEADER = "Memlin-Agent-Capabilities";
-var AGENT_PLATFORM_HEADER = "Memlin-Agent-Platform";
-var AGENT_ARCHITECTURE_HEADER = "Memlin-Agent-Architecture";
-var AGENT_EXPECTED_CAPABILITIES = {
-  "claude-code": ["cli", "commands", "hooks", "sync", "scribe", "resolve"],
-  cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
-  codex: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
-  windsurf: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
-  // VS Code (apps/vscode-extension): MCP + CLI + copilot-instructions; plain
-  // VS Code has no lifecycle-hook or slash-command surface.
-  vscode: ["mcp", "cli", "rules", "resolve"],
-  gemini: ["mcp", "rules", "resolve"],
-  grok: ["mcp", "rules", "resolve"],
-  hermes: ["mcp", "resolve"],
-  openclaw: ["mcp", "rules", "resolve"],
-  antigravity: ["mcp", "cli", "hooks", "commands", "rules", "sync", "scribe", "resolve"],
-  mcp: ["mcp", "resolve"],
-  "claude-ai": ["mcp", "resolve"],
-  // Companion daemon (apps/companion): background token keeper + realtime
-  // plan sync + local IPC socket other agents delegate to. No hooks/commands
-  // of its own.
-  companion: ["cli", "sync", "realtime", "resolve"]
-};
-var PROVIDER_HOSTS = [
-  "github.com",
-  "gitlab.com",
-  "bitbucket.org",
-  "dev.azure.com",
-  "ssh.dev.azure.com",
-  "codeberg.org",
-  "sr.ht",
-  "git.sr.ht"
-];
-function normalizeGitRemote(raw) {
-  if (!raw) return null;
-  let s = raw.trim();
-  if (!s) return null;
-  if (!s.includes("://")) {
-    s = s.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
-  }
-  s = s.replace(/^(?:ssh|git|https?):\/\//, "");
-  s = s.replace(/^[^/@]+@/, "");
-  s = s.replace(/\.git$/, "");
-  s = s.replace(/\/$/, "");
-  const slash = s.indexOf("/");
-  if (slash > 0) {
-    const host = s.slice(0, slash).toLowerCase();
-    const rest = s.slice(slash);
-    s = host + rest;
-    for (const provider of PROVIDER_HOSTS) {
-      if (host === provider) break;
-      if (host.startsWith(provider + "-")) {
-        s = provider + rest;
-        break;
-      }
-    }
-  }
-  return s || null;
-}
-async function withTimeout(promise, ms, fallback) {
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((resolve) => {
-        timer = setTimeout(() => resolve(fallback), ms);
-        timer.unref?.();
-      })
-    ]);
-  } finally {
-    if (timer !== void 0) clearTimeout(timer);
-  }
-}
-async function closeHttpSockets() {
-  try {
-    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
-    if (dispatcher && typeof dispatcher.close === "function") {
-      let timer;
-      await Promise.race([
-        dispatcher.close(),
-        new Promise((resolve) => {
-          timer = setTimeout(resolve, 250);
-          timer.unref?.();
-        })
-      ]).finally(() => {
-        if (timer !== void 0) clearTimeout(timer);
-      });
-    }
-  } catch {
-  }
-}
-
-// packages/plugin-core/dist/host.js
-import os3 from "node:os";
+// packages/plugin-core/dist/companion-client.js
+var companion_client_exports = {};
+__export(companion_client_exports, {
+  CODEX_ADDITIONAL_CONTEXT_MAX_BYTES: () => CODEX_ADDITIONAL_CONTEXT_MAX_BYTES,
+  CODEX_HOOK_RESOLVE_PROFILE: () => CODEX_HOOK_RESOLVE_PROFILE,
+  COMPANION_PROTOCOL: () => COMPANION_PROTOCOL,
+  COMPANION_SOCKET_ENV: () => COMPANION_SOCKET_ENV,
+  IS_COMPANION_ENV: () => IS_COMPANION_ENV,
+  MAX_COMPANION_PROTOCOL: () => MAX_COMPANION_PROTOCOL,
+  MIN_COMPANION_PROTOCOL: () => MIN_COMPANION_PROTOCOL,
+  NO_COMPANION_ENV: () => NO_COMPANION_ENV,
+  USE_COMPANION_ENV: () => USE_COMPANION_ENV,
+  companionCommitResolveDelivery: () => companionCommitResolveDelivery,
+  companionDelegationEnabled: () => companionDelegationEnabled,
+  companionForDelegation: () => companionForDelegation,
+  companionGetToken: () => companionGetToken,
+  companionReadLocal: () => companionReadLocal,
+  companionReleaseResolveDelivery: () => companionReleaseResolveDelivery,
+  companionReportResolveDelivery: () => companionReportResolveDelivery,
+  companionReportSession: () => companionReportSession,
+  companionRequest: () => companionRequest,
+  companionReserveLateResolveDelivery: () => companionReserveLateResolveDelivery,
+  companionReserveResolveDelivery: () => companionReserveResolveDelivery,
+  companionResolveJoin: () => companionResolveJoin,
+  companionResolveReuse: () => companionResolveReuse,
+  companionResolveStart: () => companionResolveStart,
+  companionResolveTake: () => companionResolveTake,
+  companionResolveWorkspace: () => companionResolveWorkspace,
+  companionRunDir: () => companionRunDir,
+  companionSearchLocal: () => companionSearchLocal,
+  companionSocketPath: () => companionSocketPath,
+  companionStatus: () => companionStatus,
+  companionSyncNow: () => companionSyncNow,
+  deriveResolveId: () => deriveResolveId,
+  isCompanionHealthyForDelegation: () => isCompanionHealthyForDelegation,
+  resetCompanionClientCache: () => resetCompanionClientCache
+});
+import http from "node:http";
+import crypto2 from "node:crypto";
+import os2 from "node:os";
 import path4 from "node:path";
-var BaseHost = class {
-  constructor(kind, home) {
-    this.kind = kind;
-    this.home = home;
+function companionSocketPath(env = process.env) {
+  const override = env[COMPANION_SOCKET_ENV];
+  if (override) return override;
+  if (process.platform === "win32") {
+    return `\\\\.\\pipe\\memlin-companion-${os2.userInfo().username}`;
   }
-  kind;
-  home;
-  homeDir() {
-    return this.home;
-  }
-  plansDir() {
-    return path4.join(this.home, "plans");
-  }
-};
-var ClaudeCodeHost = class extends BaseHost {
-  constructor() {
-    super("claude-code", path4.join(os3.homedir(), ".claude"));
-  }
-};
-var CursorHost = class extends BaseHost {
-  constructor() {
-    super("cursor", path4.join(os3.homedir(), ".config", "memlin"));
-  }
-};
-var CodexHost = class extends BaseHost {
-  constructor() {
-    super("codex", path4.join(os3.homedir(), ".config", "memlin"));
-  }
-};
-var WindsurfHost = class extends BaseHost {
-  constructor() {
-    super("windsurf", path4.join(os3.homedir(), ".config", "memlin"));
-  }
-};
-var AntigravityHost = class extends BaseHost {
-  constructor() {
-    super("antigravity", path4.join(os3.homedir(), ".config", "memlin"));
-  }
-};
-var VSCodeHost = class extends BaseHost {
-  constructor() {
-    super("vscode", path4.join(os3.homedir(), ".config", "memlin"));
-  }
-};
-var CompanionHost = class extends BaseHost {
-  constructor() {
-    super("companion", path4.join(os3.homedir(), ".config", "memlin"));
-  }
-};
-var HOSTS = {
-  "claude-code": () => new ClaudeCodeHost(),
-  cursor: () => new CursorHost(),
-  codex: () => new CodexHost(),
-  windsurf: () => new WindsurfHost(),
-  antigravity: () => new AntigravityHost(),
-  vscode: () => new VSCodeHost(),
-  companion: () => new CompanionHost()
-};
-function resolveHost() {
-  const envHost = process.env.MEMLIN_HOST ?? (process.env.CURSOR_AGENT ? "cursor" : "claude-code");
-  const make = HOSTS[envHost];
-  return (make ?? HOSTS["claude-code"])();
+  return path4.join(os2.homedir(), ".config", "memlin", "run", "companion.sock");
 }
-
-// packages/plugin-core/dist/memlin-api-client.js
-var DEFAULT_API_URL = "https://memlin.ai/api/v1";
-function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os4.hostname() || "unknown";
+function companionRunDir() {
+  return path4.join(os2.homedir(), ".config", "memlin", "run");
 }
-var cachedAgentVersion = null;
-function agentVersion() {
-  if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.40";
-  return cachedAgentVersion;
+function deriveResolveId(input) {
+  const digest = crypto2.createHash("sha256").update("memlin.resolve.v2\0").update(JSON.stringify([input.accountId, input.host, input.sessionId ?? null, input.turnId])).digest().subarray(0, 16);
+  digest[6] = digest[6] & 15 | 80;
+  digest[8] = digest[8] & 63 | 128;
+  const hex = digest.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
-function agentCapabilities() {
-  return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
+function companionDisabled(env = process.env) {
+  const off = env[NO_COMPANION_ENV];
+  if (off === "1" || off === "true" || off === "yes") return true;
+  return env[IS_COMPANION_ENV] === "1";
 }
-var DEFAULT_REQUEST_TIMEOUT_MS = 15e3;
-var DEFAULT_MAX_RETRIES = 2;
-var DEFAULT_RETRY_BASE_DELAY_MS = 250;
-var NATIVE_MEMORY_BATCH_SIZE = 20;
-var NATIVE_MEMORY_BATCH_CONCURRENCY = 3;
-var NATIVE_MEMORY_REQUEST_TIMEOUT_MS = 9e4;
-var NATIVE_MEMORY_BATCH_INDEX = "# Native memory satellite batch\n";
-var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
-var RETRIABLE_NETWORK_CODES = /* @__PURE__ */ new Set([
-  "ECONNRESET",
-  "ECONNREFUSED",
-  "ECONNABORTED",
-  "ETIMEDOUT",
-  "EPIPE",
-  "EHOSTUNREACH",
-  "ENETUNREACH",
-  "EAI_AGAIN",
-  "UND_ERR_CONNECT_TIMEOUT",
-  "UND_ERR_HEADERS_TIMEOUT",
-  "UND_ERR_BODY_TIMEOUT",
-  "UND_ERR_SOCKET"
-]);
-function isRetriableNetworkError(error) {
-  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
-    return true;
-  }
-  let current = error;
-  for (let depth = 0; current instanceof Error && depth < 5; depth++) {
-    const code = current.code;
-    if (code && RETRIABLE_NETWORK_CODES.has(code)) return true;
-    current = current.cause;
-  }
-  return false;
-}
-function unreachableError(url, cause, timeoutMs) {
-  let host = url;
-  try {
-    host = new URL(url).host;
-  } catch {
-  }
-  if (cause instanceof Error && (cause.name === "TimeoutError" || cause.name === "AbortError")) {
-    return new Error(
-      `Memlin at ${host} took longer than ${Math.ceil(timeoutMs / 1e3)} seconds to respond. The request was stopped; try again.`,
-      { cause }
-    );
-  }
-  return new Error(
-    `Couldn't reach Memlin at ${host}. Check your internet connection and try again.`,
-    { cause }
-  );
-}
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-var MemlinApiClient = class {
-  constructor(cfg) {
-    this.cfg = cfg;
-  }
-  cfg;
-  // ---------- low-level ----------
-  async authHeaders(includeAccount = true) {
-    const token = await this.cfg.getAccessToken();
-    const h = {
-      Authorization: `Bearer ${token}`,
-      [AGENT_KIND_HEADER]: resolveHost().kind,
-      [AGENT_DEVICE_HEADER]: agentDevice(),
-      [AGENT_VERSION_HEADER]: agentVersion(),
-      [AGENT_CAPABILITIES_HEADER]: agentCapabilities().join(","),
-      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os4.platform(),
-      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os4.arch()
+async function companionRequest(method, body, opts = {}) {
+  const env = opts.env ?? process.env;
+  if (companionDisabled(env)) return null;
+  if (Date.now() < socketDeadUntil) return null;
+  const timeoutMs = opts.timeoutMs ?? CALL_TIMEOUTS[method] ?? DEFAULT_CALL_TIMEOUT_MS;
+  const payload = JSON.stringify(body ?? {});
+  return new Promise((resolve) => {
+    let settled = false;
+    const fail = (markDead) => {
+      if (settled) return;
+      settled = true;
+      if (markDead) socketDeadUntil = Date.now() + SOCKET_DEAD_TTL_MS;
+      resolve(null);
     };
-    if (includeAccount && this.cfg.accountId) {
-      h["Memlin-Account-Id"] = this.cfg.accountId;
-    }
-    return h;
-  }
-  async request(method, pathAndQuery, body, opts = {}) {
-    const url = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
-    const baseHeaders = await this.authHeaders(opts.includeAccount ?? true);
-    if (opts.accountId) {
-      baseHeaders["Memlin-Account-Id"] = opts.accountId;
-    }
-    const headers = {
-      ...baseHeaders,
-      Accept: "application/json"
-    };
-    if (body !== void 0) headers["Content-Type"] = "application/json";
-    const idempotent = method === "GET";
-    const maxAttempts = idempotent ? Math.max(0, opts.maxRetries ?? this.cfg.maxRetries ?? DEFAULT_MAX_RETRIES) + 1 : 1;
-    const timeoutMs = Math.max(
-      1,
-      opts.requestTimeoutMs ?? this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
-    );
-    for (let attempt = 1; ; attempt++) {
-      let res;
-      let text;
-      try {
-        res = await fetch(url, {
-          method,
-          headers,
-          // A dead socket must abort rather than hang the caller forever.
-          signal: AbortSignal.timeout(timeoutMs),
-          ...body !== void 0 ? { body: JSON.stringify(body) } : {}
-        });
-        text = await res.text();
-      } catch (error) {
-        if (attempt < maxAttempts && isRetriableNetworkError(error)) {
-          await delay(this.backoffMs(attempt));
-          continue;
-        }
-        throw unreachableError(url, error, timeoutMs);
-      }
-      if (idempotent && attempt < maxAttempts && RETRIABLE_STATUS.has(res.status)) {
-        await delay(this.backoffMs(attempt));
-        continue;
-      }
-      let parsed = null;
-      if (text) {
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-        }
-      }
-      if (!res.ok) {
-        const serverError = parsed?.error;
-        const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
-        throw new MemlinApiError(`${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`, res.status);
-      }
-      return parsed;
-    }
-  }
-  backoffMs(attempt) {
-    const base = this.cfg.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
-    return base * 2 ** (attempt - 1);
-  }
-  // ---------- endpoints ----------
-  /** GET /me — identity + account list. No account header sent (this is the discovery call). */
-  async me() {
-    return this.request("GET", "/me", void 0, { includeAccount: false });
-  }
-  /**
-   * GET /report — account-scoped usage aggregates (tokens saved, resolves,
-   * hit rate). The route nests the window (`window: { from, days }` — no
-   * top-level days field) and clamps days to [1, 31] server-side (default 1);
-   * `projectId` maps to the `?project=` query param. Consumed by the
-   * Companion's Memory panel for its tokens-saved counter.
-   */
-  async report(opts = {}) {
-    const q = new URLSearchParams();
-    if (opts.days !== void 0) q.set("days", String(opts.days));
-    if (opts.projectId) q.set("project", opts.projectId);
-    const qs = q.toString();
-    return this.request("GET", `/report${qs ? `?${qs}` : ""}`);
-  }
-  /**
-   * GET /realtime/config — Supabase connection info for the caller's
-   * effective account. The client config file is deliberately
-   * backend-agnostic (no Supabase URL / anon key), so Realtime subscribers
-   * — the Companion daemon (packages/companion-core) — bootstrap the
-   * connection from here. Dedicated-instance (paid org) accounts get THEIR
-   * instance's values, which is why this rides normal account-header auth.
-   */
-  async getRealtimeConfig(opts = {}) {
-    return this.request("GET", "/realtime/config", void 0, { accountId: opts.accountId });
-  }
-  /**
-   * POST /roles/assign — set a member's functional roles (backend, sre,
-   * ...). Defaults to the caller; pass user_id to assign another member
-   * (owner/admin only). Replaces the member's set wholesale.
-   */
-  async assignRoles(input, opts = {}) {
-    return this.request("POST", "/roles/assign", input, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * POST /roles/tag — tag a document into one or more role packs. The
-   * resolver boosts the document for members holding a matching role.
-   * Replaces the document's role tags wholesale.
-   */
-  async tagDocumentRoles(input, opts = {}) {
-    return this.request("POST", "/roles/tag", input, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * POST /documents/pin — force-include ("pin") a document, or unpin it.
-   * A pinned doc is fetched out-of-band by the resolver on every resolve in
-   * scope (no similarity threshold) and reserved budget off the top — a
-   * standing directive, not a similarity hit. Owner/admin-only server-side.
-   */
-  async setDocumentPinned(input, opts = {}) {
-    return this.request("POST", "/documents/pin", input, {
-      accountId: opts.accountId
-    });
-  }
-  /** GET /decisions/enforce — pull the guardrail rules currently
-   *  in effect for the caller's account (and optionally a project).
-   *  Returns kind='decision' docs whose `metadata.enforce` is set —
-   *  the PreToolUse handler in plugin-core's pre-tool-use-handler
-   *  module is the primary caller. */
-  async listEnforceDecisions(opts = {}, requestOpts = {}) {
-    const qs = new URLSearchParams();
-    if (opts.project_id !== void 0) {
-      qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
-    }
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/decisions/enforce${suffix}`, void 0, {
-      accountId: requestOpts.accountId
-    });
-  }
-  /** POST /usage/event — write a usage_events row from the client.
-   *  Server-side enforces an allowlist of event_types (today:
-   *  tool.guardrail, action.invoke, resolve.outcome, edit.activity,
-   *  resolve.delivery) and re-derives account_id and user_id from the auth
-   *  context so callers can't forge rows for other workspaces.
-   *  `opts.accountId` routes the write to a non-default account
-   *  (multi-account workspaces). */
-  async writeUsageEvent(input, opts = {}) {
-    return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
-  }
-  /** Batched, idempotent editor-agent telemetry. This stream is deliberately
-   * separate from usage_events: it powers live sessions, subagent visibility,
-   * model analytics, and operational timelines without affecting metering. */
-  async writeAgentActivityBatch(events, opts = {}) {
-    return this.request("POST", "/agent/activity", { events }, opts);
-  }
-  /** GET /documents — list, filtered. */
-  async listDocuments(opts = {}, callOpts = {}) {
-    const qs = new URLSearchParams();
-    if (opts.kinds) for (const k of opts.kinds) qs.append("kind", k);
-    if (opts.scopes) for (const s of opts.scopes) qs.append("scope", s);
-    if (opts.statuses) for (const s of opts.statuses) qs.append("status", s);
-    if (opts.project_id !== void 0) {
-      qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
-    }
-    if (opts.has_trigger) qs.set("has_trigger", "true");
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
-    return res.documents.map((d) => {
-      const { status, ...rest } = d;
-      return status == null ? rest : { ...rest, status };
-    });
-  }
-  /** POST /documents — create or update a document. */
-  async writeDocument(input, callOpts = {}) {
-    return this.request("POST", "/documents", input, {
-      accountId: callOpts.accountId
-    });
-  }
-  /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
-  async syncWorkspaceContract(input) {
-    return this.request("POST", "/workspace-contract/sync", input);
-  }
-  /** GET /documents/{id} — fetch one doc with body + metadata. */
-  async getDocument(documentId) {
-    return this.request("GET", `/documents/${encodeURIComponent(documentId)}`);
-  }
-  /** POST /documents/{id}/contract-verification — H12. Record a contract
-   *  check. Used by `memlin diff --record`. */
-  async recordContractVerification(documentId, body) {
-    return this.request(
-      "POST",
-      `/documents/${encodeURIComponent(documentId)}/contract-verification`,
-      body
-    );
-  }
-  /** GET /documents/{id}/versions — history. */
-  async listVersions(documentId) {
-    const res = await this.request(
-      "GET",
-      `/documents/${encodeURIComponent(documentId)}/versions`
-    );
-    return res.versions;
-  }
-  /** POST /documents/{id}/revert — non-destructive revert to an older version. */
-  async revertDocument(documentId, targetVersionId, commitMessage) {
-    const res = await this.request(
-      "POST",
-      `/documents/${encodeURIComponent(documentId)}/revert`,
+    const req = http.request(
       {
-        target_version_id: targetVersionId,
-        ...commitMessage ? { commit_message: commitMessage } : {}
+        socketPath: companionSocketPath(env),
+        path: `/v1/${method}`,
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(payload),
+          "memlin-client-protocol": String(COMPANION_PROTOCOL)
+        },
+        // Overall call budget; the connect phase gets its own tighter cap
+        // below via the socket timeout before the connection exists.
+        timeout: timeoutMs
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          if (settled) return;
+          settled = true;
+          if (res.statusCode !== 200) return resolve(null);
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+          } catch {
+            resolve(null);
+          }
+        });
+        res.on("error", () => fail(false));
       }
     );
-    return res.new_version_id;
-  }
-  /** GET /inbox — pending scribe proposals (newest first), plus recently
-   *  auto-activated correction rules (so the user can see what stuck + undo).
-   *  Pass `opts.accountId` to read a different account's inbox than the pinned
-   *  one (e.g. `memlin status` showing the resolver-effective account). */
-  async listInbox(opts = {}) {
-    return this.request("GET", "/inbox", void 0, { accountId: opts.accountId });
-  }
-  /** GET /insights — pending derived insights, including auto-memory proposals. */
-  async listInsights(params = {}, opts = {}) {
-    const search = new URLSearchParams();
-    if (params.kind) search.set("kind", params.kind);
-    if (params.status) search.set("status", params.status);
-    if (params.limit) search.set("limit", String(params.limit));
-    const qs = search.toString();
-    return this.request(
-      "GET",
-      `/insights${qs ? `?${qs}` : ""}`,
-      void 0,
-      { accountId: opts.accountId }
-    );
-  }
-  async resolveInsight(insightId, action) {
-    return this.request("POST", `/insights/${encodeURIComponent(insightId)}/resolve`, { action });
-  }
-  /** POST /inbox/{id} — accept or reject a proposal. */
-  async resolveProposal(proposalId, action) {
-    return this.request("POST", `/inbox/${encodeURIComponent(proposalId)}`, {
-      action
+    const connectTimer = setTimeout(() => {
+      req.destroy();
+      fail(true);
+    }, CONNECT_TIMEOUT_MS);
+    connectTimer.unref?.();
+    req.on("socket", (socket) => {
+      if (!socket.connecting) clearTimeout(connectTimer);
+      else socket.once("connect", () => clearTimeout(connectTimer));
     });
-  }
-  async listHandoffs(opts = {}, callOpts = {}) {
-    const qs = new URLSearchParams();
-    if (opts.project_id) qs.set("project_id", opts.project_id);
-    if (opts.target_agent_kind) qs.set("target_agent_kind", opts.target_agent_kind);
-    if (opts.status) qs.set("status", opts.status);
-    if (opts.limit) qs.set("limit", String(opts.limit));
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/handoffs${suffix}`, void 0, {
-      accountId: callOpts.accountId
+    req.once("close", () => clearTimeout(connectTimer));
+    req.on("timeout", () => {
+      req.destroy();
+      fail(false);
     });
-  }
-  async updateHandoff(handoffId, action, opts = {}) {
-    return this.request(
-      "PATCH",
-      `/handoffs/${encodeURIComponent(handoffId)}`,
-      { action },
-      { accountId: opts.accountId }
-    );
-  }
-  async createHandoff(input) {
-    return this.request("POST", "/handoffs", input);
-  }
-  async listFeatures(opts = {}) {
-    const qs = new URLSearchParams();
-    if (opts.project_id) qs.set("project_id", opts.project_id);
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/features${suffix}`);
-  }
-  async createFeature(input) {
-    return this.request("POST", "/features", input);
-  }
-  async addFeatureMember(featureId, source) {
-    return this.request("POST", `/features/${featureId}/members`, { source });
-  }
-  /** POST /documents/search — semantic + text. */
-  async search(query, opts = {}) {
-    const res = await this.request("POST", "/documents/search", {
-      query,
-      ...opts
-    });
-    return res.hits;
-  }
-  /** GET /documents?q=... — fuzzy title/path lookup. Used by `memlin revert`. */
-  async findDocumentsByName(needle, limit = 10) {
-    const qs = new URLSearchParams({ q: needle, limit: String(limit) });
-    const res = await this.request("GET", `/documents?${qs.toString()}`);
-    return res.documents;
-  }
-  /**
-   * POST /resolve — the marquee context-assembly endpoint.
-   *
-   * `cwd` and `git_remote` let the server infer the caller's active component
-   * (when the project has any defined) and apply a soft +0.15 boost to
-   * docs tagged to that component. Both are optional; omitting them yields
-   * the same project-wide ranking we used pre-component-awareness.
-   */
-  async resolve(args, opts = {}) {
-    return this.request("POST", "/resolve", args, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * GET /account — name/tier/kind for the current account.
-   *
-   * Pass `opts.accountId` to target an account other than the pinned one.
-   * `memlin status` uses this to show the resolver-effective account in a
-   * multi-account workspace, so the returned `id` and `name` always describe
-   * the same account (no global-default/pinned-name mismatch).
-   */
-  async getAccount(opts = {}) {
-    return this.request("GET", "/account", void 0, {
-      accountId: opts.accountId,
-      requestTimeoutMs: opts.requestTimeoutMs,
-      maxRetries: opts.maxRetries
-    });
-  }
-  /**
-   * POST /projects/resolve — server-side project resolution.
-   *
-   * Returns `account_id` when a project matches in any account the user
-   * has access to (via the JWT's memlin_account_ids claim) — not just the
-   * one pinned in config. Callers use the returned account_id to retarget
-   * the actual resolve / write call to the right backend.
-   */
-  async resolveProject(input) {
-    return this.request("POST", "/projects/resolve", input);
-  }
-  /** GET /account/enforce-done-deployed — the workspace done-deployed gate flag. */
-  async getEnforceDoneDeployed(opts = {}) {
-    return this.request("GET", "/account/enforce-done-deployed", void 0, opts);
-  }
-  /** PUT /account/enforce-done-deployed — owner/admin sets the workspace flag. */
-  async setEnforceDoneDeployed(enabled, opts = {}) {
-    return this.request("PUT", "/account/enforce-done-deployed", { enabled }, opts);
-  }
-  /**
-   * POST /deploy-guard — acquire or release the per-project deploy lease.
-   *
-   * The PreToolUse deploy hook calls `acquire` before a deploy command runs;
-   * the PostToolUse hook calls `release` after. `acquired: false` means another
-   * session already holds an active lease (the hook then warns or blocks).
-   * project_id is passed explicitly — the hook resolves it from cwd first.
-   */
-  async deployGuard(input, opts = {}) {
-    return this.request("POST", "/deploy-guard", input, { accountId: opts.accountId });
-  }
-  /**
-   * POST /edit-guard — real-time, pre-edit file-collision check.
-   *
-   * The PreToolUse hook calls this before an Edit/Write/MultiEdit, passing the
-   * repo-relative path(s) about to change. The server reads the same
-   * `edit.activity` feed the resolver's recent_file_edits uses and returns any
-   * LIVE collisions — other sessions that edited the same path within the last
-   * ~10 min — so the hook can warn or block. Read-only; never mutates.
-   * project_id is passed explicitly (the hook resolves it from cwd first).
-   */
-  async editGuard(input, opts = {}) {
-    return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
-  }
-  /** GET /audit/<id>/replay — reconstruct a past resolve's exact bundle. */
-  async replayAudit(auditId, opts = {}) {
-    return this.request(
-      "GET",
-      `/audit/${auditId}/replay`,
-      void 0,
-      { accountId: opts.accountId }
-    );
-  }
-  /** GET /audit/<id>/explain — per-item decomposition of a past resolve's
-   *  ranking arithmetic (similarity, kind weight, component boost, rerank,
-   *  decay) plus human-readable reasons. The "homework, shown" companion
-   *  to /replay. */
-  async explainAudit(auditId) {
-    return this.request("GET", `/audit/${auditId}/explain`);
-  }
-  /** GET /actions — list approved actions in the workspace. Same shape
-   *  the memlin_actions_list MCP tool returns. */
-  async listActions(opts = {}) {
-    const q = [];
-    if (opts.filter) q.push(`filter=${encodeURIComponent(opts.filter)}`);
-    if (opts.limit !== void 0) q.push(`limit=${opts.limit}`);
-    const qs = q.length > 0 ? `?${q.join("&")}` : "";
-    const { actions } = await this.request("GET", `/actions${qs}`);
-    return actions;
-  }
-  /** POST /actions/<id>/execute — invoke a callable action by id with
-   *  validated input. Returns the result + audit_id. */
-  async executeAction(actionId, input) {
-    return this.request("POST", `/actions/${actionId}/execute`, { input });
-  }
-  /** POST /prompt-ci — run Prompt CI regression tests for a skill. */
-  async runPromptCi(skillId, content) {
-    return this.request("POST", "/prompt-ci", { skill_id: skillId, content });
-  }
-  /**
-   * POST /memory/propose — extract memory candidates from a recent agent
-   * turn and queue them for user accept/dismiss. Fire-and-forget from the
-   * Stop hook's perspective; the server runs a cheap Haiku extraction and
-   * silently no-ops if it finds nothing worth remembering.
-   */
-  async proposeMemory(input, opts = {}) {
-    return this.request("POST", "/memory/propose", input, { accountId: opts.accountId });
-  }
-  /**
-   * POST /scribe/diff — Phase 2 auto-capture from a single git commit.
-   *
-   * Called by the PostToolUse hook after the agent runs `git commit`.
-   * The server reads the commit message + diff, asks Haiku to extract
-   * any decision/memory/skill baked into the change, and persists the
-   * results. The server may activate or background captures automatically;
-   * only the post-processing `proposals_pending` subset needs inbox review.
-   */
-  async scribeDiff(input, opts = {}) {
-    return this.request("POST", "/scribe/diff", input, { accountId: opts.accountId });
-  }
-  /**
-   * POST /scribe/session — Phase 1 auto-capture from a Claude Code
-   * session transcript. Server slices the transcript (tail-biased
-   * when too large), runs Haiku extraction, persists proposals, and reports
-   * how many still need review after automatic handling.
-   *
-   * Triggered manually by /memlin-scribe today; an auto-triggered
-   * variant on Stop with a 15-min debounce is a fast follow-up.
-   */
-  async scribeSession(input, opts = {}) {
-    return this.request("POST", "/scribe/session", input, { accountId: opts.accountId });
-  }
-  /**
-   * POST /memory/ingest-native — ingest a host's native auto-memory.
-   *
-   * Sends the raw native MEMORY.md index (+ the satellite filenames the
-   * adapter already pulls) so the server parses it and runs the entries
-   * through the scribe dedup (corroborate, don't duplicate). Makes turning
-   * off native auto-memory lossless.
-   */
-  async ingestNativeMemory(input, opts = {}) {
-    const satellites = input.satellites ?? [];
-    if (satellites.length <= NATIVE_MEMORY_BATCH_SIZE) {
-      return this.request("POST", "/memory/ingest-native", input, {
-        accountId: opts.accountId,
-        requestTimeoutMs: NATIVE_MEMORY_REQUEST_TIMEOUT_MS
-      });
-    }
-    const satelliteFiles = [
-      .../* @__PURE__ */ new Set([
-        ...input.satellite_files ?? [],
-        ...satellites.map((satellite) => satellite.name)
-      ])
-    ];
-    const batches = [];
-    for (let offset = 0; offset < satellites.length; offset += NATIVE_MEMORY_BATCH_SIZE) {
-      batches.push(satellites.slice(offset, offset + NATIVE_MEMORY_BATCH_SIZE));
-    }
-    const results = [];
-    for (let offset = 0; offset < batches.length; offset += NATIVE_MEMORY_BATCH_CONCURRENCY) {
-      const group = batches.slice(offset, offset + NATIVE_MEMORY_BATCH_CONCURRENCY);
-      const settled = await Promise.allSettled(
-        group.map((batch, groupIndex) => {
-          const batchIndex = offset + groupIndex;
-          return this.request(
-            "POST",
-            "/memory/ingest-native",
-            {
-              ...input,
-              memory_index_md: batchIndex === 0 ? input.memory_index_md : NATIVE_MEMORY_BATCH_INDEX,
-              satellites: batch,
-              satellite_files: satelliteFiles
-            },
-            {
-              accountId: opts.accountId,
-              requestTimeoutMs: NATIVE_MEMORY_REQUEST_TIMEOUT_MS
-            }
-          );
-        })
-      );
-      const rejected = settled.find(
-        (result) => result.status === "rejected"
-      );
-      if (rejected) throw rejected.reason;
-      const groupResults = settled.filter(
-        (result) => result.status === "fulfilled"
-      ).map((result) => result.value);
-      results.push(...groupResults);
-      if (groupResults.some((result) => result.skipped)) break;
-    }
-    const sum = (key) => results.reduce((total, result) => {
-      const value = result[key];
-      return total + (typeof value === "number" ? value : 0);
-    }, 0);
-    const refused = results.find((result) => result.skipped);
-    return {
-      entries_parsed: sum("entries_parsed"),
-      satellites_received: sum("satellites_received"),
-      proposals_built: sum("proposals_built"),
-      run_id: results.find((result) => result.run_id)?.run_id ?? null,
-      proposals_persisted: sum("proposals_persisted"),
-      proposal_ids: results.flatMap((result) => result.proposal_ids),
-      proposals_corroborated: sum("proposals_corroborated"),
-      proposals_auto_promoted: sum("proposals_auto_promoted"),
-      proposals_auto_activated: sum("proposals_auto_activated"),
-      proposals_reconciled: sum("proposals_reconciled"),
-      ...refused ? { skipped: true, reason: refused.reason ?? "skipped" } : {}
-    };
-  }
-  /**
-   * POST /memory/remember — save one user-typed durable memory
-   * (/memlin-remember). Routes through the server-side scribe dedup, tagged
-   * as a provenance-verified directive so it activates immediately and can
-   * supersede the stale fact it corrects.
-   */
-  async rememberMemory(input, opts = {}) {
-    return this.request("POST", "/memory/remember", input, { accountId: opts.accountId });
-  }
-  /**
-   * POST /plans — upload a Claude Code plan as a first-class plan document.
-   *
-   * Server resolves project from cwd/git_remote (when not pinned), writes
-   * the document via writeDocument (auto-embedding), and inserts a
-   * companion plans row with status='drafted'. Returns the document_id
-   * + version metadata for downstream URL construction.
-   */
-  async pushPlan(input, opts = {}) {
-    return this.request("POST", "/plans", input, { accountId: opts.accountId });
-  }
-  /**
-   * GET /plans — list plans for the account, optionally filtered by
-   * `updated_after` (epoch ms) for cheap delta polling. Used by the
-   * UserPromptSubmit + SessionStart hooks to keep ~/.claude/plans/ in
-   * sync with the server.
-   */
-  async listPlans(opts = {}, callOpts = {}) {
-    const qs = new URLSearchParams();
-    if (opts.status) qs.set("status", opts.status);
-    if (opts.project_id !== void 0) {
-      qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
-    }
-    if (opts.updated_after) qs.set("updated_after", opts.updated_after);
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    const res = await this.request(
-      "GET",
-      `/plans${suffix}`,
-      void 0,
-      { accountId: callOpts.accountId }
-    );
-    return res.plans;
-  }
-  /** GET /plans/<id> — full plan detail (status + body + bundle ref). */
-  async getPlan(id, opts = {}) {
-    return this.request("GET", `/plans/${encodeURIComponent(id)}`, void 0, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * PATCH /plans/<id> — replace the plan's body (creates a new
-   * document_version, auto-embeds). Used by the PostToolUse hook to push
-   * Claude Code edits back up to Memlin.
-   */
-  async updatePlan(id, input, opts = {}) {
-    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * POST /projects — create a project in the caller's current account.
-   * Used by `memlin init` to register a Claude Code workspace.
-   */
-  async createProject(input, opts = {}) {
-    return this.request("POST", "/projects", input, { accountId: opts.accountId });
-  }
-  /** Atomically create/select a project and register one or more logical
-   * local sources. Device paths are intentionally absent from this wire
-   * contract. */
-  async linkLocalSources(input, opts = {}) {
-    return this.request("POST", "/projects/local-link", input, { accountId: opts.accountId });
-  }
-  /**
-   * PATCH /projects/{id} — attach/detach local paths, set/clear the git
-   * remote, or rename. Owner/admin only; 409 when a path or remote is
-   * already attached to another project in the account. Backs
-   * `memlin attach-path` and add-project's attach-instead-of-fork offer.
-   */
-  async patchProject(projectId, input, opts = {}) {
-    return this.request("PATCH", `/projects/${encodeURIComponent(projectId)}`, input, {
-      accountId: opts.accountId
-    });
-  }
-  /** POST /decisions/{id}/verify — record an outcome on the decision
-   *  ledger. Verdicts surface on every future resolve of the decision. */
-  async verifyDecision(decisionId, input, opts = {}) {
-    return this.request("POST", `/decisions/${encodeURIComponent(decisionId)}/verify`, input, {
-      accountId: opts.accountId
-    });
-  }
-  /** GET /decisions/review-due — decisions whose review date arrived. */
-  async listReviewDueDecisions(opts = {}) {
-    const qs = opts.projectId ? `?project_id=${encodeURIComponent(opts.projectId)}` : "";
-    return this.request("GET", `/decisions/review-due${qs}`, void 0, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * POST /ask — natural-language Q&A over the team's workspace memory.
-   * Server resolves a bundle, sends it to Claude, returns answer +
-   * citations + audit_id. Used by `memlin ask` CLI and the web /ask
-   * panel.
-   */
-  async ask(input, opts = {}) {
-    return this.request("POST", "/ask", input, { accountId: opts.accountId });
-  }
-  /** GET /projects — list every project in the current account. */
-  async listProjects(opts = {}) {
-    const res = await this.request("GET", "/projects", void 0, { accountId: opts.accountId });
-    return res.projects;
-  }
-};
-function resolveApiUrl() {
-  return process.env.MEMLIN_API_URL?.trim() || DEFAULT_API_URL;
+    req.on("error", () => fail(true));
+    req.end(payload);
+  });
 }
+async function companionStatus(opts = {}) {
+  const status = await companionRequest("status.get", {}, opts);
+  if (!status) return null;
+  if (status.protocol < MIN_COMPANION_PROTOCOL || status.protocol > MAX_COMPANION_PROTOCOL) {
+    return null;
+  }
+  return status;
+}
+async function companionGetToken() {
+  const token = await companionRequest("token.get", {});
+  if (!token || token.expires_at <= Date.now() + 6e4) return null;
+  return token;
+}
+async function companionResolveWorkspace(cwd) {
+  return companionRequest("workspace.resolve", { cwd });
+}
+async function companionSyncNow(req) {
+  return companionRequest("sync.now", req);
+}
+async function companionSearchLocal(req) {
+  return companionRequest("memory.search", req);
+}
+async function companionReadLocal(req) {
+  return companionRequest("memory.read", req);
+}
+async function companionResolveStart(req, opts = {}) {
+  return companionRequest("resolve.start", req, opts);
+}
+async function companionResolveTake(req) {
+  return companionRequest("resolve.take", req, {
+    timeoutMs: Math.max(250, req.wait_ms + 250)
+  });
+}
+async function companionResolveJoin(req) {
+  return companionRequest("resolve.join", req, {
+    timeoutMs: Math.max(250, req.wait_ms + 250)
+  });
+}
+async function companionResolveReuse(req) {
+  return companionRequest("resolve.reuse", req, {
+    timeoutMs: Math.max(250, Math.min(4500, req.wait_ms + 500))
+  });
+}
+async function companionReserveResolveDelivery(req, opts = {}) {
+  return companionRequest("resolve.reserve", req, opts);
+}
+async function companionReserveLateResolveDelivery(req, opts = {}) {
+  return companionRequest("resolve.reserve-late", req, opts);
+}
+async function companionCommitResolveDelivery(req, opts = {}) {
+  return (await companionRequest("resolve.commit", req, opts))?.accepted ?? null;
+}
+async function companionReleaseResolveDelivery(req, opts = {}) {
+  return (await companionRequest("resolve.release", req, opts))?.released ?? null;
+}
+async function companionReportResolveDelivery(req, opts = {}) {
+  return (await companionRequest("resolve.report", req, opts))?.accepted ?? null;
+}
+async function companionReportSession(req) {
+  return (await companionRequest("session.report", req))?.registered ?? false;
+}
+function isCompanionHealthyForDelegation(status) {
+  if (!status) return false;
+  if (status.auth.state !== "ok") return false;
+  if (status.sync.mode === "realtime") return true;
+  if (status.sync.mode !== "polling") return false;
+  if (!status.sync.last_delta_at) return false;
+  const age = Date.now() - Date.parse(status.sync.last_delta_at);
+  return Number.isFinite(age) && age < 5 * 6e4;
+}
+function companionDelegationEnabled(env = process.env) {
+  const v = env[USE_COMPANION_ENV];
+  return v === "1" || v === "true" || v === "yes";
+}
+async function companionForDelegation() {
+  if (!companionDelegationEnabled()) return null;
+  const status = await companionStatus();
+  return isCompanionHealthyForDelegation(status) ? status : null;
+}
+function resetCompanionClientCache() {
+  socketDeadUntil = 0;
+}
+var COMPANION_PROTOCOL, MIN_COMPANION_PROTOCOL, MAX_COMPANION_PROTOCOL, NO_COMPANION_ENV, IS_COMPANION_ENV, COMPANION_SOCKET_ENV, CODEX_HOOK_RESOLVE_PROFILE, CODEX_ADDITIONAL_CONTEXT_MAX_BYTES, CONNECT_TIMEOUT_MS, DEFAULT_CALL_TIMEOUT_MS, CALL_TIMEOUTS, socketDeadUntil, SOCKET_DEAD_TTL_MS, USE_COMPANION_ENV;
+var init_companion_client = __esm({
+  "packages/plugin-core/dist/companion-client.js"() {
+    "use strict";
+    COMPANION_PROTOCOL = 1;
+    MIN_COMPANION_PROTOCOL = 1;
+    MAX_COMPANION_PROTOCOL = 1;
+    NO_COMPANION_ENV = "MEMLIN_NO_DAEMON";
+    IS_COMPANION_ENV = "MEMLIN_DAEMON";
+    COMPANION_SOCKET_ENV = "MEMLIN_COMPANION_SOCKET";
+    CODEX_HOOK_RESOLVE_PROFILE = "codex-hook-v1:tokens=2200";
+    CODEX_ADDITIONAL_CONTEXT_MAX_BYTES = 2200;
+    CONNECT_TIMEOUT_MS = 150;
+    DEFAULT_CALL_TIMEOUT_MS = 1e3;
+    CALL_TIMEOUTS = {
+      "workspace.resolve": 2e3,
+      "resolve.start": 750,
+      "resolve.reuse": 4500,
+      "resolve.reserve": 750,
+      "resolve.reserve-late": 750,
+      "resolve.commit": 750,
+      "resolve.release": 500,
+      "resolve.report": 500,
+      "sync.now": 5e3,
+      "login.start": 1e4,
+      // Local-store reads walk the materialized doc tree on disk.
+      "memory.search": 2e3,
+      "memory.read": 2e3
+    };
+    socketDeadUntil = 0;
+    SOCKET_DEAD_TTL_MS = 5e3;
+    USE_COMPANION_ENV = "MEMLIN_USE_DAEMON";
+  }
+});
 
 // packages/plugin-core/dist/workspace-binding.js
+var workspace_binding_exports = {};
+__export(workspace_binding_exports, {
+  WORKSPACE_BINDING_FILE: () => WORKSPACE_BINDING_FILE,
+  WORKSPACE_DIR_NAME: () => WORKSPACE_DIR_NAME,
+  clearWorkspaceBinding: () => clearWorkspaceBinding,
+  findWorkspaceBinding: () => findWorkspaceBinding,
+  resolveGitWorkspaceIdentity: () => resolveGitWorkspaceIdentity,
+  writeWorkspaceBinding: () => writeWorkspaceBinding
+});
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { constants, promises as fs3 } from "node:fs";
-import path5 from "node:path";
-var WORKSPACE_DIR_NAME = ".memlin";
-var WORKSPACE_BINDING_FILE = "config.json";
-var GIT_POINTER_MAX_BYTES = 8 * 1024;
+import { constants, promises as fs4 } from "node:fs";
+import path7 from "node:path";
 async function walkForWorkspaceBinding(startDir) {
-  let dir = path5.resolve(startDir);
+  let dir = path7.resolve(startDir);
   for (let i = 0; i < 64; i++) {
-    const candidate = path5.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
+    const candidate = path7.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
     try {
-      const raw = await fs3.readFile(candidate, "utf8");
+      const raw = await fs4.readFile(candidate, "utf8");
       const parsed = JSON.parse(raw);
       if (typeof parsed.account_id === "string" && parsed.account_id) {
         return {
@@ -4909,32 +3951,32 @@ async function walkForWorkspaceBinding(startDir) {
       }
     } catch {
     }
-    const parent = path5.dirname(dir);
+    const parent = path7.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
   return null;
 }
-async function readSmallRegularFile(file) {
+async function readSmallRegularFile(file2) {
   let before;
   try {
-    before = await fs3.lstat(file);
-  } catch (error) {
-    return isFileNotFound(error) ? { kind: "missing" } : { kind: "invalid" };
+    before = await fs4.lstat(file2);
+  } catch (error40) {
+    return isFileNotFound(error40) ? { kind: "missing" } : { kind: "invalid" };
   }
   try {
     if (before.isSymbolicLink() || !before.isFile() || before.size > GIT_POINTER_MAX_BYTES) {
       return { kind: "invalid" };
     }
     const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-    const handle = await fs3.open(file, constants.O_RDONLY | noFollow);
+    const handle = await fs4.open(file2, constants.O_RDONLY | noFollow);
     try {
       const opened = await handle.stat();
       if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size || opened.size > GIT_POINTER_MAX_BYTES) {
         return { kind: "invalid" };
       }
       const bytes = await handle.readFile();
-      const [after, afterPath] = await Promise.all([handle.stat(), fs3.lstat(file)]);
+      const [after, afterPath] = await Promise.all([handle.stat(), fs4.lstat(file2)]);
       if (afterPath.isSymbolicLink() || !afterPath.isFile() || after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size || bytes.byteLength !== opened.size || bytes.includes(0)) {
         return { kind: "invalid" };
       }
@@ -4947,16 +3989,16 @@ async function readSmallRegularFile(file) {
   }
 }
 function containedBy(parent, child) {
-  const relative = path5.relative(parent, child);
-  return relative === "" || relative !== ".." && !relative.startsWith(`..${path5.sep}`) && !path5.isAbsolute(relative);
+  const relative = path7.relative(parent, child);
+  return relative === "" || relative !== ".." && !relative.startsWith(`..${path7.sep}`) && !path7.isAbsolute(relative);
 }
 async function canonicalSafeDirectory(candidate) {
   try {
-    const before = await fs3.lstat(candidate);
+    const before = await fs4.lstat(candidate);
     if (before.isSymbolicLink() || !before.isDirectory()) return null;
-    await fs3.access(candidate, constants.R_OK | constants.X_OK);
-    const canonical = await fs3.realpath(candidate);
-    const after = await fs3.lstat(candidate);
+    await fs4.access(candidate, constants.R_OK | constants.X_OK);
+    const canonical = await fs4.realpath(candidate);
+    const after = await fs4.lstat(candidate);
     if (after.isSymbolicLink() || !after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) {
       return null;
     }
@@ -4973,24 +4015,24 @@ function gitIdentity(checkoutRoot, state, repositoryRoot = checkoutRoot) {
   };
 }
 async function resolveGitWorkspaceIdentity(startDir) {
-  const requested = path5.resolve(startDir);
+  const requested = path7.resolve(startDir);
   let canonicalStart;
   try {
-    canonicalStart = await fs3.realpath(requested);
-    const startEntry = await fs3.stat(canonicalStart);
+    canonicalStart = await fs4.realpath(requested);
+    const startEntry = await fs4.stat(canonicalStart);
     if (!startEntry.isDirectory()) return gitIdentity(canonicalStart, "unknown");
   } catch {
     return gitIdentity(requested, "unknown");
   }
   let dir = canonicalStart;
   for (let i = 0; i < 64; i++) {
-    const gitEntry = path5.join(dir, ".git");
+    const gitEntry = path7.join(dir, ".git");
     let entry;
     try {
-      entry = await fs3.lstat(gitEntry);
-    } catch (error) {
-      if (!isFileNotFound(error)) return gitIdentity(dir, "unknown");
-      const parent = path5.dirname(dir);
+      entry = await fs4.lstat(gitEntry);
+    } catch (error40) {
+      if (!isFileNotFound(error40)) return gitIdentity(dir, "unknown");
+      const parent = path7.dirname(dir);
       if (parent === dir) return gitIdentity(canonicalStart, "none");
       dir = parent;
       continue;
@@ -5011,16 +4053,16 @@ async function resolveGitWorkspaceIdentity(startDir) {
     if (!pointerValue) return gitIdentity(checkoutRoot, "unknown");
     let gitDirCandidate;
     try {
-      gitDirCandidate = path5.isAbsolute(pointerValue) ? pointerValue : path5.resolve(checkoutRoot, pointerValue);
+      gitDirCandidate = path7.isAbsolute(pointerValue) ? pointerValue : path7.resolve(checkoutRoot, pointerValue);
     } catch {
       return gitIdentity(checkoutRoot, "unknown");
     }
     const gitDir = await canonicalSafeDirectory(gitDirCandidate);
     if (!gitDir) return gitIdentity(checkoutRoot, "unknown");
-    const commonRead = await readSmallRegularFile(path5.join(gitDir, "commondir"));
+    const commonRead = await readSmallRegularFile(path7.join(gitDir, "commondir"));
     if (commonRead.kind === "missing") {
-      const gitDirParent = path5.dirname(gitDir);
-      const looksLikeWorktreeAdmin = path5.basename(gitDirParent) === "worktrees" && path5.basename(path5.dirname(gitDirParent)) === ".git";
+      const gitDirParent = path7.dirname(gitDir);
+      const looksLikeWorktreeAdmin = path7.basename(gitDirParent) === "worktrees" && path7.basename(path7.dirname(gitDirParent)) === ".git";
       if (looksLikeWorktreeAdmin) return gitIdentity(checkoutRoot, "unknown");
       return gitIdentity(checkoutRoot, "main");
     }
@@ -5032,22 +4074,22 @@ async function resolveGitWorkspaceIdentity(startDir) {
     if (!commonValue) return gitIdentity(checkoutRoot, "unknown");
     let commonCandidate;
     try {
-      commonCandidate = path5.isAbsolute(commonValue) ? commonValue : path5.resolve(gitDir, commonValue);
+      commonCandidate = path7.isAbsolute(commonValue) ? commonValue : path7.resolve(gitDir, commonValue);
     } catch {
       return gitIdentity(checkoutRoot, "unknown");
     }
     const commonDir = await canonicalSafeDirectory(commonCandidate);
     if (!commonDir) return gitIdentity(checkoutRoot, "unknown");
-    const worktreesDir = path5.join(commonDir, "worktrees");
-    if (path5.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
+    const worktreesDir = path7.join(commonDir, "worktrees");
+    if (path7.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
       return gitIdentity(checkoutRoot, "unknown");
     }
-    const repositoryRoot = path5.dirname(commonDir);
-    const repositoryGitDir = await canonicalSafeDirectory(path5.join(repositoryRoot, ".git"));
+    const repositoryRoot = path7.dirname(commonDir);
+    const repositoryGitDir = await canonicalSafeDirectory(path7.join(repositoryRoot, ".git"));
     if (!repositoryGitDir || repositoryGitDir !== commonDir) {
       return gitIdentity(checkoutRoot, "unknown");
     }
-    const reverseRead = await readSmallRegularFile(path5.join(gitDir, "gitdir"));
+    const reverseRead = await readSmallRegularFile(path7.join(gitDir, "gitdir"));
     if (reverseRead.kind !== "ok" || reverseRead.value.includes("\0")) {
       return gitIdentity(checkoutRoot, "unknown");
     }
@@ -5055,10 +4097,10 @@ async function resolveGitWorkspaceIdentity(startDir) {
     const reverseValue = reverseMatch?.[1];
     if (!reverseValue) return gitIdentity(checkoutRoot, "unknown");
     try {
-      const reverseCandidate = path5.isAbsolute(reverseValue) ? reverseValue : path5.resolve(gitDir, reverseValue);
+      const reverseCandidate = path7.isAbsolute(reverseValue) ? reverseValue : path7.resolve(gitDir, reverseValue);
       const [reverseTarget, checkoutGitFile] = await Promise.all([
-        fs3.realpath(reverseCandidate),
-        fs3.realpath(gitEntry)
+        fs4.realpath(reverseCandidate),
+        fs4.realpath(gitEntry)
       ]);
       if (reverseTarget !== checkoutGitFile) return gitIdentity(checkoutRoot, "unknown");
     } catch {
@@ -5073,760 +4115,146 @@ async function findWorkspaceBinding(startDir) {
   const gitIdentity2 = await resolveGitWorkspaceIdentity(startDir);
   if (gitIdentity2.state !== "worktree") return direct;
   if (direct) {
-    const bindingRoot = await fs3.realpath(direct.workspaceRoot).catch(() => path5.resolve(direct.workspaceRoot));
+    const bindingRoot = await fs4.realpath(direct.workspaceRoot).catch(() => path7.resolve(direct.workspaceRoot));
     if (containedBy(gitIdentity2.checkout_root, bindingRoot)) return direct;
   }
   return walkForWorkspaceBinding(gitIdentity2.repository_root);
 }
-function isFileNotFound(error) {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
-}
-
-// packages/plugin-core/dist/hook-exit.js
-var HOOK_WATCHDOG_MS = 2e3;
-function releaseStdin() {
-  try {
-    const stdin = process.stdin;
-    stdin.pause();
-    stdin.unref?.();
-  } catch {
+async function writeWorkspaceBinding(workspaceRoot, binding) {
+  if (typeof binding.account_id !== "string" || binding.account_id.length === 0) {
+    throw new Error("Workspace binding account_id is required.");
   }
-}
-function exitHook(code) {
-  process.exitCode = code;
-  releaseStdin();
-  void closeHttpSockets();
-  setTimeout(() => process.exit(), HOOK_WATCHDOG_MS).unref();
-}
-
-// packages/plugin-core/dist/client.js
-function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path6.join(os5.homedir(), ".config", "memlin", "config.json");
-}
-var CONFIG_DIR = path6.join(os5.homedir(), ".config", "memlin");
-var TOKEN_FILE = path6.join(CONFIG_DIR, "token.json");
-async function readConfig() {
+  const root = await fs4.realpath(path7.resolve(workspaceRoot));
+  const rootEntry = await fs4.stat(root);
+  if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
+  const dir = path7.join(root, WORKSPACE_DIR_NAME);
   try {
-    const raw = await fs4.readFile(globalConfigFilePath(), "utf8");
-    const parsed = JSON.parse(raw);
-    if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
-      return null;
+    const entry = await fs4.lstat(dir);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
     }
-    return {
-      api_url: typeof parsed.api_url === "string" && parsed.api_url.trim() ? parsed.api_url : DEFAULT_API_URL,
-      account_id: parsed.account_id,
-      user_id: parsed.user_id,
-      auth0_sub: parsed.auth0_sub,
-      project_id: typeof parsed.project_id === "string" || parsed.project_id === null ? parsed.project_id : null
-    };
-  } catch {
-    return null;
-  }
-}
-function accessTokenSubject(accessToken) {
-  try {
-    const subject = decodeJwtPayload(accessToken).sub;
-    return typeof subject === "string" && subject.length > 0 ? subject : null;
-  } catch {
-    return null;
-  }
-}
-function configMatchesAccessToken(config, accessToken) {
-  const subject = accessTokenSubject(accessToken);
-  return subject !== null && subject === config.auth0_sub;
-}
-async function getIdentityBoundAccessToken(config) {
-  const accessToken = await getValidAccessToken();
-  if (!configMatchesAccessToken(config, accessToken)) {
-    throw new Error("not signed in \u2014 saved Memlin account does not match the saved token");
-  }
-  return accessToken;
-}
-async function getApi(opts = {}) {
-  const config = await readConfig();
-  if (!config) return null;
-  try {
-    await getIdentityBoundAccessToken(config);
-  } catch {
-    return null;
-  }
-  const cwd = opts.cwd ?? process.cwd();
-  const overlay = await findWorkspaceBinding(cwd);
-  const { workspaceBound, workspaceRoot } = applyWorkspaceOverlay(config, overlay);
-  const apiUrl = process.env.MEMLIN_API_URL?.trim() || config.api_url || resolveApiUrl();
-  const api = new MemlinApiClient({
-    baseUrl: apiUrl,
-    getAccessToken: () => getIdentityBoundAccessToken(config),
-    accountId: config.account_id
-  });
-  return { api, config, workspaceBound, workspaceRoot };
-}
-function applyWorkspaceOverlay(config, overlay) {
-  if (!overlay) return { workspaceBound: false, workspaceRoot: null };
-  config.account_id = overlay.binding.account_id;
-  if (overlay.binding.project_id !== void 0) {
-    config.project_id = overlay.binding.project_id;
-  }
-  return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
-}
-function log(msg) {
-  if (process.env.MEMLIN_DEBUG) {
-    process.stderr.write(`[memlin] ${msg}
-`);
-  }
-}
-
-// packages/plugin-core/dist/done-gate.js
-init_companion_client();
-import { execFileSync } from "node:child_process";
-import { promises as fs5 } from "node:fs";
-import path7 from "node:path";
-var CLAIM = /\bit'?s (now )?(live|deployed|done|fixed|shipped)\b|\bnow live\b|\bis live\b|\bis deployed\b|\bdeployed to prod\b|\ball done\b|\bfully (fixed|working|deployed|shipped)\b|\bfix(ed)? (and|&) deployed\b|\bmerged (and|&) deployed\b|(^|\n)\s*[-*•\s]*(done|deployed|shipped|fixed)\b|✅/i;
-var HARD = /(^|\n)\s*[-*✅•\s]*\s*(fixed|deployed|shipped|done)\b[.! ]*\s*$/im;
-var HONEST = /not (yet )?(live|merged|deployed|shipped)|isn'?t (live|merged|deployed|shipped)|remaining step|next step (is|to)|not on main|still on (the |a )?(feature )?branch|needs? (to be )?merg|to be merged|before (this|it) is live|to make (it|this) live|awaiting (merge|deploy)|hold(ing)? the merge/i;
-var OVERRIDE = /\[skip-done-gate\]|done-gate:\s*override/i;
-var DELIVERY_REQUEST = /\b(?:fix|repair|implement|build|create|add|change|update|remove|refactor|deploy(?:ed|ing|ment)?|ship(?:ped|ping)?|publish(?:ed|ing)?|release(?:d|ing)?)\b|\bmake\b[^\n.!?]{0,80}\bwork(?:ing)?\b/i;
-function isOff(v) {
-  const s = (v || "").trim().toLowerCase();
-  return s === "off" || s === "0" || s === "false" || s === "no";
-}
-async function readMarker(cwd) {
-  let dir = path7.resolve(cwd);
-  for (let i = 0; i < 40; i += 1) {
-    const file = path7.join(dir, ".memlin", "enforce-done-deployed.json");
-    try {
-      const raw = await fs5.readFile(file, "utf8");
-      const parsed = JSON.parse(raw);
-      const deploymentEvidence = Array.isArray(parsed.deploymentEvidence) ? parsed.deploymentEvidence.filter(
-        (item) => item && typeof item.name === "string" && typeof item.tag === "string" && Array.isArray(item.paths) && item.paths.every((p) => typeof p === "string" && p.length > 0)
-      ) : [];
-      return {
-        enabled: parsed.enabled !== false,
-        base: parsed.base || "origin/main",
-        strict: parsed.strict === true,
-        deploymentEvidence
-      };
-    } catch {
-    }
-    const parent = path7.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-async function readCompanionPolicy(cwd) {
-  try {
-    const ws = await companionRequest("workspace.resolve", { cwd });
-    const v = ws?.enforce_done_deployed;
-    return typeof v === "boolean" ? v : void 0;
-  } catch {
-    return void 0;
-  }
-}
-async function resolveGate(cwd) {
-  if (isOff(process.env.MEMLIN_DONE_GATE)) return null;
-  const marker = await readMarker(cwd);
-  if (marker && marker.enabled === false) return null;
-  const serverEnabled = await readCompanionPolicy(cwd);
-  const env = process.env.MEMLIN_DONE_MEANS_DEPLOYED;
-  const envOn = env === "1" || env === "true";
-  const enabled = serverEnabled === true || marker?.enabled === true || envOn;
-  if (!enabled) return null;
-  return {
-    enabled: true,
-    base: marker?.base || "origin/main",
-    strict: marker?.strict === true,
-    deploymentEvidence: marker?.deploymentEvidence ?? []
-  };
-}
-function contentText(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.map((block) => {
-    if (!block || typeof block !== "object") return "";
-    const item = block;
-    return item.type === "text" || item.type === "input_text" || item.type === "output_text" ? String(item.text ?? "") : "";
-  }).join(" ");
-}
-async function readTranscript(transcriptPath) {
-  let raw;
-  try {
-    raw = await fs5.readFile(transcriptPath, "utf8");
-  } catch {
-    return null;
-  }
-  let lastAssistantText = "";
-  const userTexts = [];
-  let baselineCommit = null;
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let ev;
-    try {
-      ev = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    const row = ev;
-    if (!baselineCommit && row.type === "session_meta") {
-      const commit = row.payload?.git?.commit_hash;
-      if (typeof commit === "string" && commit) baselineCommit = commit;
-    }
-    const msg = row.message;
-    if (msg?.role === "assistant") {
-      const chunk = contentText(msg.content);
-      if (chunk.trim()) lastAssistantText = chunk;
-    } else if (msg?.role === "user") {
-      const chunk = contentText(msg.content);
-      if (chunk.trim()) userTexts.push(chunk);
-    }
-    const payload = row.payload;
-    if (row.type === "response_item" && payload?.type === "message") {
-      const chunk = contentText(payload.content);
-      if (payload.role === "assistant" && chunk.trim()) lastAssistantText = chunk;
-      if (payload.role === "user" && chunk.trim()) userTexts.push(chunk);
-    } else if (row.type === "event_msg" && payload?.type === "user_message") {
-      const chunk = typeof payload.message === "string" ? payload.message : "";
-      if (chunk.trim()) userTexts.push(chunk);
+  } catch (error40) {
+    if (!isFileNotFound(error40)) throw error40;
+    await fs4.mkdir(dir, { mode: 448, recursive: true });
+    const entry = await fs4.lstat(dir);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
     }
   }
-  return { lastAssistantText, userTexts, baselineCommit };
-}
-function git(args, cwd) {
+  const file2 = path7.join(dir, WORKSPACE_BINDING_FILE);
   try {
-    return execFileSync("git", args, {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5e3
-    }).trim();
-  } catch {
-    return null;
+    const existing = await fs4.lstat(file2);
+    if (!existing.isFile() || existing.isSymbolicLink()) {
+      throw new Error(`Refusing to replace an unsafe workspace binding at ${file2}`);
+    }
+  } catch (error40) {
+    if (!isFileNotFound(error40)) throw error40;
+  }
+  const body = JSON.stringify(
+    {
+      account_id: binding.account_id,
+      project_id: binding.project_id ?? null,
+      account_name: binding.account_name
+    },
+    null,
+    2
+  );
+  const temporary = path7.join(dir, `.config.${randomUUID2()}.tmp`);
+  let handle;
+  try {
+    handle = await fs4.open(temporary, "wx", 384);
+    await handle.writeFile(body + "\n", "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = void 0;
+    await atomicRename(temporary, file2);
+    const installed = await fs4.lstat(file2);
+    if (!installed.isFile() || installed.isSymbolicLink()) {
+      throw new Error(`Workspace binding verification failed at ${file2}`);
+    }
+    await clearAllAuthRefusals();
+    return file2;
+  } finally {
+    await handle?.close().catch(() => void 0);
+    await fs4.unlink(temporary).catch(() => void 0);
   }
 }
-function gitOk(args, cwd) {
+async function clearWorkspaceBinding(workspaceRoot) {
+  const root = await fs4.realpath(path7.resolve(workspaceRoot));
+  const rootEntry = await fs4.stat(root);
+  if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
+  const dir = path7.join(root, WORKSPACE_DIR_NAME);
   try {
-    execFileSync("git", args, {
-      cwd,
-      stdio: ["ignore", "ignore", "ignore"],
-      timeout: 5e3
-    });
+    const entry = await fs4.lstat(dir);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
+    }
+  } catch (error40) {
+    if (isFileNotFound(error40)) return false;
+    throw error40;
+  }
+  const file2 = path7.join(dir, WORKSPACE_BINDING_FILE);
+  try {
+    const entry = await fs4.lstat(file2);
+    if (!entry.isFile() || entry.isSymbolicLink()) {
+      throw new Error(`Refusing to remove an unsafe workspace binding at ${file2}`);
+    }
+    await fs4.unlink(file2);
+    await clearAllAuthRefusals();
     return true;
-  } catch {
-    return false;
+  } catch (error40) {
+    if (isFileNotFound(error40)) return false;
+    throw error40;
   }
 }
-function changedPathsSince(baseline, cwd) {
-  if (!baseline || !gitOk(["rev-parse", "--verify", `${baseline}^{commit}`], cwd)) return null;
-  const output = git(["diff", "--name-only", `${baseline}..HEAD`], cwd);
-  return output === null ? null : output.split("\n").map((p) => p.trim()).filter(Boolean);
+function isFileNotFound(error40) {
+  return typeof error40 === "object" && error40 !== null && "code" in error40 && error40.code === "ENOENT";
 }
-function changedEvidencePaths(evidence, cwd) {
-  const paths = /* @__PURE__ */ new Set();
-  for (const item of evidence) {
-    if (!gitOk(["rev-parse", "--verify", `${item.tag}^{commit}`], cwd)) {
-      for (const prefix of item.paths) paths.add(prefix);
+var WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE, GIT_POINTER_MAX_BYTES;
+var init_workspace_binding = __esm({
+  "packages/plugin-core/dist/workspace-binding.js"() {
+    "use strict";
+    init_atomic_rename();
+    init_auth_refusal();
+    WORKSPACE_DIR_NAME = ".memlin";
+    WORKSPACE_BINDING_FILE = "config.json";
+    GIT_POINTER_MAX_BYTES = 8 * 1024;
+  }
+});
+
+// packages/plugin-core/dist/light-transcript.js
+function flattenLightTranscript(raw) {
+  const turns = [];
+  let parsedLines = 0;
+  for (const line of raw.split("\n")) {
+    let value;
+    try {
+      value = JSON.parse(line);
+      parsedLines++;
+    } catch {
       continue;
     }
-    const output = git(["diff", "--name-only", `${item.tag}..HEAD`, "--", ...item.paths], cwd);
-    for (const file of output?.split("\n") ?? []) {
-      if (file.trim()) paths.add(file.trim());
+    if (!value || typeof value !== "object") continue;
+    const message = value.type === "response_item" ? value.payload : value.message ?? value;
+    let role = message?.role;
+    let content = message?.content;
+    if (!role && typeof value.userMessage === "string") {
+      role = "user";
+      content = value.userMessage;
     }
-  }
-  return [...paths];
-}
-function pathMatchesPrefix(file, prefix) {
-  const normalized = prefix.replace(/^\.\//, "").replace(/\/$/, "");
-  return file === normalized || file.startsWith(`${normalized}/`);
-}
-function pendingDeploymentEvidence(evidence, changedPaths, cwd) {
-  const pending = [];
-  for (const item of evidence) {
-    const applies = changedPaths.some(
-      (file) => item.paths.some((prefix) => pathMatchesPrefix(file, prefix))
-    );
-    if (!applies) continue;
-    const tagRef = `${item.tag}^{commit}`;
-    if (!gitOk(["rev-parse", "--verify", tagRef], cwd)) {
-      pending.push(`${item.name}: deployment tag ${item.tag} is missing`);
-      continue;
+    if (!role && typeof value.assistantMessage === "string") {
+      role = "assistant";
+      content = value.assistantMessage;
     }
-    if (!gitOk(["diff", "--quiet", `${item.tag}..HEAD`, "--", ...item.paths], cwd)) {
-      pending.push(`${item.name}: ${item.tag} does not contain the task's current code`);
-    }
+    if (role !== "user" && role !== "assistant") continue;
+    const text = typeof content === "string" ? content : Array.isArray(content) ? content.filter(
+      (b) => b && ["text", "input_text", "output_text"].includes(b.type) && typeof b.text === "string"
+    ).map((b) => b.text).join("\n") : "";
+    if (text.trim()) turns.push(`### ${role}
+${text.trim()}`);
   }
-  return pending;
-}
-function strictBlock(reasons, base) {
-  return {
-    decision: "block",
-    reason: "HOLD \u2014 this session has an unfinished delivery obligation: " + reasons.join("; ") + `. Keep working until the change is committed, merged into ${base}, deployed, and verified by the configured production evidence. An honest \u201Cnot deployed\u201D status does not complete the task. Only the user may cancel the requirement or disable the gate.`
-  };
-}
-async function enforceDoneMeansDeployed(payload) {
-  let strictConfig = null;
-  try {
-    const cwd = payload.cwd || process.cwd();
-    const cfg = await resolveGate(cwd);
-    if (!cfg) return null;
-    strictConfig = cfg.strict ? cfg : null;
-    const transcript = payload.transcript_path;
-    if (!transcript) {
-      return cfg.strict ? strictBlock(["the host supplied no transcript, so completion cannot be verified"], cfg.base) : null;
-    }
-    const snapshot = await readTranscript(transcript);
-    if (!snapshot) {
-      return cfg.strict ? strictBlock(["the transcript could not be read, so completion cannot be verified"], cfg.base) : null;
-    }
-    const text = snapshot.lastAssistantText;
-    const deliveryRequested = snapshot.userTexts.some((userText) => DELIVERY_REQUEST.test(userText));
-    if (cfg.strict && deliveryRequested) {
-      const why2 = [];
-      if (!gitOk(["rev-parse", "--verify", cfg.base], cwd)) {
-        why2.push(`the configured base ref ${cfg.base} is unavailable`);
-        return strictBlock(why2, cfg.base);
-      }
-      const branchOutput = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
-      const branch2 = branchOutput || "HEAD";
-      const status = git(["status", "--porcelain"], cwd);
-      const dirty2 = Boolean(status);
-      const merged2 = gitOk(["merge-base", "--is-ancestor", "HEAD", cfg.base], cwd);
-      const onMain2 = branch2 === "main" || branch2 === "master";
-      const unpushed2 = onMain2 ? Boolean(git(["rev-list", `${cfg.base}..HEAD`], cwd)) : false;
-      if (!merged2) why2.push(`HEAD (${branch2}) is not merged into ${cfg.base}`);
-      if (branchOutput === null) why2.push("the current Git branch could not be inspected");
-      if (status === null) why2.push("the working tree could not be inspected");
-      if (dirty2) why2.push("the working tree has uncommitted changes");
-      if (unpushed2) why2.push(`there are unpushed commits (${cfg.base}..HEAD)`);
-      const changedPaths = changedPathsSince(snapshot.baselineCommit, cwd);
-      const scopedPaths = changedPaths ?? changedEvidencePaths(cfg.deploymentEvidence, cwd);
-      why2.push(...pendingDeploymentEvidence(cfg.deploymentEvidence, scopedPaths, cwd));
-      if (why2.length > 0) return strictBlock(why2, cfg.base);
-      return null;
-    }
-    if (payload.stop_hook_active) return null;
-    if (!text) return null;
-    if (HONEST.test(text)) return null;
-    if (OVERRIDE.test(text)) return null;
-    if (!CLAIM.test(text) && !HARD.test(text)) return null;
-    if (!gitOk(["rev-parse", "--verify", cfg.base], cwd)) return null;
-    const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd) || "HEAD";
-    const dirty = Boolean(git(["status", "--porcelain"], cwd));
-    const merged = gitOk(["merge-base", "--is-ancestor", "HEAD", cfg.base], cwd);
-    const onMain = branch === "main" || branch === "master";
-    const unpushed = onMain ? Boolean(git(["rev-list", `${cfg.base}..HEAD`], cwd)) : false;
-    const live = merged && !dirty && !unpushed;
-    if (live) return null;
-    const why = [];
-    if (!merged) why.push(`HEAD (${branch}) is not merged into ${cfg.base}`);
-    if (dirty) why.push("the working tree has uncommitted changes");
-    if (unpushed) why.push(`there are unpushed commits (${cfg.base}..HEAD)`);
-    const reason = "HOLD \u2014 the last message claims the work is done/fixed/deployed, but it is NOT live: " + why.join("; ") + `. On this project "done" means merged into ${cfg.base} and deployed. Do ONE of:
-  (1) Ship it: commit \u2192 merge \u2192 confirm the deploy succeeded \u2192 verify the change live, THEN report done; or
-  (2) If you cannot merge right now (a concurrent deploy is in flight, you need sign-off, CI is red), say so plainly and state the exact remaining step \u2014 but do NOT call it done, fixed, or deployed.
-Override (deliberate): include [skip-done-gate] in your message to ship-anyway this once, or disable the gate entirely with MEMLIN_DONE_GATE=off (or set "enabled": false in .memlin/enforce-done-deployed.json). The gate is opt-in and read-only \u2014 it never edits your files.`;
-    return { decision: "block", reason };
-  } catch (error) {
-    if (strictConfig) {
-      return strictBlock(
-        [`verification failed: ${error instanceof Error ? error.message : String(error)}`],
-        strictConfig.base
-      );
-    }
-    return null;
-  }
-}
-
-// packages/plugin-core/dist/heartbeat.js
-import crypto from "node:crypto";
-import { promises as fs6 } from "node:fs";
-import os6 from "node:os";
-import path9 from "node:path";
-
-// packages/plugin-core/dist/project-resolver.js
-import { execSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
-import path8 from "node:path";
-var ALLOW_ACCOUNT_MISMATCH_ENV = "MEMLIN_ALLOW_ACCOUNT_MISMATCH";
-function allowAccountMismatch(env = process.env) {
-  const v = env[ALLOW_ACCOUNT_MISMATCH_ENV];
-  return v === "1" || v === "true" || v === "yes";
-}
-function accountBindingHazard(r, opts = {}) {
-  if (!r.hasGitRemote || !r.project_id) return "none";
-  if (r.reason === "local-path") return opts.allowMismatch ? "warn" : "block";
-  if (r.reason === "config") return "warn";
-  return "none";
-}
-async function resolveProject(api, cwd, configProjectId) {
-  const absCwd = path8.resolve(cwd);
-  const remotes = detectGitRemotes(cwd);
-  const hasGitRemote = remotes.length > 0;
-  let serverFailure;
-  try {
-    const result = await api.resolveProject({
-      // Primary remote (back-compat with the single-remote server path).
-      git_remote: remotes[0] ?? null,
-      // All detected remotes — for the workspace-root-of-repos case, this is
-      // every sibling repo so the server resolves to the owning project.
-      git_remotes: remotes,
-      cwd: absCwd
-    });
-    if (result.project_id) {
-      return {
-        project_id: result.project_id,
-        project_name: result.name,
-        account_id: result.account_id,
-        reason: result.reason === "none" ? "config" : result.reason,
-        hasGitRemote,
-        enforce_done_deployed: result.enforce_done_deployed
-      };
-    }
-  } catch (e) {
-    serverFailure = summarizeBackendFailure(e) ?? void 0;
-  }
-  if (configProjectId) {
-    const localBinding = await findWorkspaceBinding(absCwd).catch(() => null);
-    if (localBinding?.binding.project_id === configProjectId) {
-      return {
-        project_id: configProjectId,
-        project_name: null,
-        account_id: null,
-        reason: "config",
-        hasGitRemote,
-        server_failure: serverFailure
-      };
-    }
-  }
-  return {
-    project_id: null,
-    project_name: null,
-    account_id: null,
-    reason: "none",
-    hasGitRemote,
-    server_failure: serverFailure
-  };
-}
-function readGitRemote(cwd) {
-  try {
-    const url = execSync("git remote get-url origin", {
-      windowsHide: true,
-      cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8"
-    }).trim();
-    return normalizeGitRemote(url);
-  } catch {
-    return null;
-  }
-}
-var MAX_WORKSPACE_SCAN = 64;
-function detectGitRemotes(cwd) {
-  const enclosing = readGitRemote(cwd);
-  if (enclosing) return [enclosing];
-  const out = [];
-  try {
-    let scanned = 0;
-    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
-      if (scanned >= MAX_WORKSPACE_SCAN) break;
-      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
-        continue;
-      }
-      scanned++;
-      const child = path8.join(cwd, entry.name);
-      if (!existsSync(path8.join(child, ".git"))) continue;
-      const remote = readGitRemote(child);
-      if (remote && !out.includes(remote)) out.push(remote);
-    }
-  } catch {
-  }
-  return out;
-}
-function isWorkspaceActive(input) {
-  return Boolean(input.resolvedProjectId) || input.workspaceBound;
-}
-function effectiveAccountId(input) {
-  return input.resolvedAccountId ?? input.configAccountId;
-}
-
-// packages/plugin-core/dist/heartbeat.js
-var DEFAULT_THROTTLE_MS = 6e4;
-var HEARTBEAT_REQUEST_TIMEOUT_MS = 750;
-function statePath(cwd, host) {
-  const key = crypto.createHash("sha256").update(cwd).digest("hex").slice(0, 16);
-  return path9.join(os6.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
-}
-async function recentlySent(file, throttleMs) {
-  try {
-    const raw = await fs6.readFile(file, "utf8");
-    const parsed = JSON.parse(raw);
-    return typeof parsed.sent_at === "number" && Date.now() - parsed.sent_at < throttleMs;
-  } catch {
-    return false;
-  }
-}
-async function recordInstallHeartbeat(cwd, reason, opts = {}) {
-  const host = opts.host ?? resolveHost().kind;
-  const throttleMs = opts.throttleMs ?? DEFAULT_THROTTLE_MS;
-  const file = statePath(cwd, host);
-  if (await recentlySent(file, throttleMs)) return;
-  try {
-    const ctx = await getApi({ cwd });
-    if (!ctx) return;
-    const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
-    if (!isWorkspaceActive({
-      resolvedProjectId: resolved.project_id,
-      workspaceBound: ctx.workspaceBound
-    })) {
-      return;
-    }
-    await ctx.api.getAccount({
-      accountId: effectiveAccountId({
-        configAccountId: ctx.config.account_id,
-        resolvedAccountId: resolved.account_id
-      }),
-      requestTimeoutMs: HEARTBEAT_REQUEST_TIMEOUT_MS,
-      maxRetries: 0
-    });
-    await fs6.writeFile(file, JSON.stringify({ sent_at: Date.now(), reason, host }), "utf8");
-    log(`${host} activity recorded: ${reason}`);
-  } catch (err) {
-    log(`${host} activity failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-// packages/plugin-core/dist/outcome-attribution.js
-function normalizeReference(value) {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
-}
-function replayAttributionCandidates(replay) {
-  const rawDelivered = replay.delivered_items;
-  const delivered = Array.isArray(rawDelivered) ? rawDelivered.map((item) => {
-    if (!item || typeof item !== "object") return null;
-    const row = item;
-    if (typeof row.document_id !== "string" || typeof row.title !== "string" || typeof row.version_number !== "number") {
-      return null;
-    }
-    return {
-      id: row.document_id,
-      title: row.title,
-      path: typeof row.path === "string" ? row.path : null,
-      version_number: row.version_number,
-      kind: typeof row.kind === "string" ? row.kind : null
-    };
-  }).filter((item) => item !== null) : [];
-  const candidates = Array.isArray(rawDelivered) && (rawDelivered.length === 0 || delivered.length > 0) ? delivered : [...replay.pinned ?? [], ...replay.items ?? []].map((item) => ({
-    id: item.id,
-    title: item.title,
-    path: item.path,
-    version_number: item.version_number,
-    kind: item.kind
-  }));
-  return [...new Map(candidates.map((candidate) => [candidate.id, candidate])).values()];
-}
-function addReferenceKey(index, key, documentId) {
-  if (!key) return;
-  const ids = index.get(key) ?? /* @__PURE__ */ new Set();
-  ids.add(documentId);
-  index.set(key, ids);
-}
-var NEGATED_REFERENCE = /(?:\b(?:did not|didn't|never|without)\b|\b(?:not used|not applied|not followed|ignored|skipped)\b)[^.!?;]{0,64}$/i;
-function unnegatedReferencePositions(message, reference) {
-  if (!reference) return [];
-  const positions = [];
-  let offset = 0;
-  while (offset < message.length) {
-    const index = message.indexOf(reference, offset);
-    if (index < 0) break;
-    const before = index > 0 ? message[index - 1] : "";
-    const afterIndex = index + reference.length;
-    const after = afterIndex < message.length ? message[afterIndex] : "";
-    const bounded = !/[\p{L}\p{N}]/u.test(before ?? "") && !/[\p{L}\p{N}]/u.test(after ?? "");
-    const prefix = message.slice(Math.max(0, index - 80), index);
-    const suffix = message.slice(afterIndex, Math.min(message.length, afterIndex + 32));
-    const negatedAfter = /^\s*(?:was|were)?\s*(?:not used|not applied|not followed|ignored|skipped)\b/i.test(suffix);
-    if (bounded && !NEGATED_REFERENCE.test(prefix) && !negatedAfter) positions.push(index);
-    offset = index + Math.max(1, reference.length);
-  }
-  return positions;
-}
-function versionMentionNear(message, referencePosition, referenceLength, versionNumber) {
-  const window2 = message.slice(
-    Math.max(0, referencePosition - 40),
-    Math.min(message.length, referencePosition + referenceLength + 40)
-  );
-  return new RegExp(`(?:\\bv\\s*${versionNumber}\\b|\\bversion\\s*${versionNumber}\\b)`, "i").test(
-    window2
-  );
-}
-function titleReferenceIsExplicit(message, position, length) {
-  const before = message.slice(Math.max(0, position - 64), position);
-  const after = message.slice(position + length, Math.min(message.length, position + length + 40));
-  const opening = message[position - 1] ?? "";
-  const closing = message[position + length] ?? "";
-  const delimited = opening === "`" && closing === "`" || opening === '"' && closing === '"' || opening === "'" && closing === "'" || opening === "[" && closing === "]" || before.endsWith("**") && after.startsWith("**");
-  const appliedPrefix = /\b(?:used?|applied|followed|per|according to|based on|cited|referenced|consulted|from)\b[^.!?;]{0,48}$/i.test(
-    before
-  );
-  const referentialSuffix = /^\s*(?:skill|memory|rule|decision|schema)?\s*(?:says|requires|recommends|guided|informed)\b/i.test(
-    after
-  );
-  return delimited || appliedPrefix || referentialSuffix;
-}
-var APPLICATION_RECEIPT_RE = /<!--\s*memlin-applied\s*:\s*([\s\S]*?)-->/gi;
-function applicationReceiptIds(agentMessage, candidates) {
-  const deliveredSkills = new Set(
-    candidates.filter((candidate) => candidate.kind === "skill").map((candidate) => candidate.id)
-  );
-  const applied = [];
-  let match;
-  while ((match = APPLICATION_RECEIPT_RE.exec(agentMessage)) !== null) {
-    for (const rawId of (match[1] ?? "").split(",")) {
-      const id = rawId.trim();
-      if (deliveredSkills.has(id) && !applied.includes(id)) applied.push(id);
-    }
-  }
-  return applied;
-}
-function attributeAppliedItems(agentMessage, replay) {
-  const candidates = replayAttributionCandidates(replay);
-  const applied = applicationReceiptIds(agentMessage, candidates);
-  const message = normalizeReference(agentMessage);
-  const pathIds = /* @__PURE__ */ new Map();
-  const pathVersionIds = /* @__PURE__ */ new Map();
-  const titleIds = /* @__PURE__ */ new Map();
-  const titleVersionIds = /* @__PURE__ */ new Map();
-  for (const candidate of candidates) {
-    const path11 = candidate.path ? normalizeReference(candidate.path.replace(/^\.\//, "")) : "";
-    const title = normalizeReference(candidate.title);
-    addReferenceKey(pathIds, path11, candidate.id);
-    if (path11) {
-      addReferenceKey(pathVersionIds, `${path11}\0${candidate.version_number}`, candidate.id);
-    }
-    addReferenceKey(titleIds, title, candidate.id);
-    if (title) {
-      addReferenceKey(titleVersionIds, `${title}\0${candidate.version_number}`, candidate.id);
-    }
-  }
-  const referenced = [];
-  for (const candidate of candidates) {
-    const path11 = candidate.path ? normalizeReference(candidate.path.replace(/^\.\//, "")) : "";
-    const title = normalizeReference(candidate.title);
-    const pathPositions = unnegatedReferencePositions(message, path11);
-    const pathVersionKey = `${path11}\0${candidate.version_number}`;
-    const pathIsUnique = pathIds.get(path11)?.size === 1;
-    const pathVersionIsUnique = pathVersionIds.get(pathVersionKey)?.size === 1;
-    const pathMatch = pathPositions.length > 0 && (pathIsUnique || pathVersionIsUnique && pathPositions.some(
-      (position) => versionMentionNear(message, position, path11.length, candidate.version_number)
-    ));
-    const titlePositions = unnegatedReferencePositions(message, title);
-    const titleVersionKey = `${title}\0${candidate.version_number}`;
-    const titleIsUnique = titleIds.get(title)?.size === 1;
-    const titleVersionIsUnique = titleVersionIds.get(titleVersionKey)?.size === 1;
-    const titleMatch = titlePositions.some((position) => {
-      const versioned = versionMentionNear(
-        message,
-        position,
-        title.length,
-        candidate.version_number
-      );
-      if (versioned && titleVersionIsUnique) return true;
-      return titleIsUnique && titleReferenceIsExplicit(message, position, title.length);
-    });
-    if (pathMatch || titleMatch) referenced.push(candidate.id);
-  }
-  return {
-    applied_item_ids: applied,
-    referenced_item_ids: referenced,
-    attribution_mode: applied.length > 0 ? "structured_application_receipt" : referenced.length > 0 ? "explicit_reference" : "no_application_receipt"
-  };
-}
-
-// packages/plugin-core/dist/state.js
-import { promises as fs7 } from "node:fs";
-import path10 from "node:path";
-import os7 from "node:os";
-import crypto2 from "node:crypto";
-var STATE_FILE = path10.join(os7.homedir(), ".config", "memlin", "state.json");
-var EMPTY = { documents: {} };
-async function readState() {
-  try {
-    const raw = await fs7.readFile(STATE_FILE, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return { ...EMPTY };
-  }
-}
-async function writeState(state) {
-  await fs7.mkdir(path10.dirname(STATE_FILE), { recursive: true });
-  const tmp = `${STATE_FILE}.${process.pid}.tmp`;
-  await fs7.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
-  await atomicRename(tmp, STATE_FILE);
-}
-var LOCK_DIR = `${STATE_FILE}.lock`;
-function getLastResolveForSession(state, sessionId) {
-  if (sessionId) {
-    return state.last_resolves?.[sessionId] ?? (state.last_resolve?.session_id === sessionId ? state.last_resolve : void 0);
-  }
-  return state.last_resolve?.session_id ? void 0 : state.last_resolve;
-}
-
-// packages/plugin-core/dist/scribe-notice.js
-function count(value) {
-  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
-}
-function accumulateScribeNotice(existing, input) {
-  const captured = count(input.captured);
-  if (captured === 0) return existing;
-  const pending = input.pending == null ? captured : Math.min(captured, count(input.pending));
-  const sameSession = existing?.session_id === input.sessionId;
-  const carriedCaptured = sameSession ? count(existing.unsurfaced) : 0;
-  const carriedPending = sameSession ? existing.pending == null ? count(existing.unsurfaced) : Math.min(count(existing.unsurfaced), count(existing.pending)) : 0;
-  return {
-    unsurfaced: carriedCaptured + captured,
-    pending: carriedPending + pending,
-    session_id: input.sessionId,
-    at: input.at
-  };
-}
-
-// packages/plugin-core/dist/transcript.js
-function sessionIdFromTranscriptPath(p) {
-  const stem = p?.split(/[\\/]/).pop()?.replace(/\.jsonl$/, "");
-  return stem || null;
-}
-function summarizeToolUse(b) {
-  const n = b.name || "tool";
-  const i = b.input ?? {};
-  if (n === "TodoWrite") return null;
-  const filePath = typeof i.file_path === "string" ? i.file_path : null;
-  if (filePath && ["Edit", "Write", "Read", "NotebookEdit"].includes(n)) {
-    return `[${n} ${filePath}]`;
-  }
-  if (n === "Bash" && typeof i.command === "string") {
-    return `[Bash] ${i.command.replace(/\s+/g, " ").slice(0, 160)}`;
-  }
-  const pattern = typeof i.pattern === "string" ? i.pattern : typeof i.query === "string" ? i.query : null;
-  if (pattern && (n === "Grep" || n === "Glob")) return `[${n} ${pattern}]`;
-  if ((n === "Agent" || n === "Task") && typeof i.description === "string") {
-    return `[Agent: ${i.description}]`;
-  }
-  return `[${n}]`;
-}
-function flattenForScribe(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  const parts = [];
-  for (const b of content) {
-    if (!b || !b.type) continue;
-    if (b.type === "text") {
-      if (b.text) parts.push(b.text);
-    } else if (b.type === "tool_use") {
-      const s = summarizeToolUse(b);
-      if (s) parts.push(s);
-    }
-  }
-  return parts.join("\n");
+  if (!parsedLines && /^(?:user|assistant):\s*$/im.test(raw)) return raw;
+  return turns.join("\n\n");
 }
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
@@ -5946,13 +4374,13 @@ var util;
 (function(util2) {
   util2.assertEqual = (_) => {
   };
-  function assertIs(_arg) {
+  function assertIs2(_arg) {
   }
-  util2.assertIs = assertIs;
-  function assertNever(_x) {
+  util2.assertIs = assertIs2;
+  function assertNever2(_x) {
     throw new Error();
   }
-  util2.assertNever = assertNever;
+  util2.assertNever = assertNever2;
   util2.arrayToEnum = (items) => {
     const obj = {};
     for (const item of items) {
@@ -5973,10 +4401,10 @@ var util;
       return obj[e];
     });
   };
-  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object2) => {
     const keys = [];
-    for (const key in object) {
-      if (Object.prototype.hasOwnProperty.call(object, key)) {
+    for (const key in object2) {
+      if (Object.prototype.hasOwnProperty.call(object2, key)) {
         keys.push(key);
       }
     }
@@ -5990,10 +4418,10 @@ var util;
     return void 0;
   };
   util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
-  function joinValues(array, separator = " | ") {
-    return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
+  function joinValues2(array2, separator = " | ") {
+    return array2.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
-  util2.joinValues = joinValues;
+  util2.joinValues = joinValues2;
   util2.jsonStringifyReplacer = (_, value) => {
     if (typeof value === "bigint") {
       return value.toString();
@@ -6095,8 +4523,8 @@ var ZodIssueCode = util.arrayToEnum([
   "not_finite"
 ]);
 var quotelessJson = (obj) => {
-  const json = JSON.stringify(obj, null, 2);
-  return json.replace(/"([^"]+)":/g, "$1:");
+  const json2 = JSON.stringify(obj, null, 2);
+  return json2.replace(/"([^"]+)":/g, "$1:");
 };
 var ZodError = class _ZodError extends Error {
   get errors() {
@@ -6121,31 +4549,31 @@ var ZodError = class _ZodError extends Error {
     this.issues = issues;
   }
   format(_mapper) {
-    const mapper = _mapper || function(issue) {
-      return issue.message;
+    const mapper = _mapper || function(issue2) {
+      return issue2.message;
     };
     const fieldErrors = { _errors: [] };
-    const processError = (error) => {
-      for (const issue of error.issues) {
-        if (issue.code === "invalid_union") {
-          issue.unionErrors.map(processError);
-        } else if (issue.code === "invalid_return_type") {
-          processError(issue.returnTypeError);
-        } else if (issue.code === "invalid_arguments") {
-          processError(issue.argumentsError);
-        } else if (issue.path.length === 0) {
-          fieldErrors._errors.push(mapper(issue));
+    const processError = (error40) => {
+      for (const issue2 of error40.issues) {
+        if (issue2.code === "invalid_union") {
+          issue2.unionErrors.map(processError);
+        } else if (issue2.code === "invalid_return_type") {
+          processError(issue2.returnTypeError);
+        } else if (issue2.code === "invalid_arguments") {
+          processError(issue2.argumentsError);
+        } else if (issue2.path.length === 0) {
+          fieldErrors._errors.push(mapper(issue2));
         } else {
           let curr = fieldErrors;
           let i = 0;
-          while (i < issue.path.length) {
-            const el = issue.path[i];
-            const terminal = i === issue.path.length - 1;
+          while (i < issue2.path.length) {
+            const el = issue2.path[i];
+            const terminal = i === issue2.path.length - 1;
             if (!terminal) {
               curr[el] = curr[el] || { _errors: [] };
             } else {
               curr[el] = curr[el] || { _errors: [] };
-              curr[el]._errors.push(mapper(issue));
+              curr[el]._errors.push(mapper(issue2));
             }
             curr = curr[el];
             i++;
@@ -6170,7 +4598,7 @@ var ZodError = class _ZodError extends Error {
   get isEmpty() {
     return this.issues.length === 0;
   }
-  flatten(mapper = (issue) => issue.message) {
+  flatten(mapper = (issue2) => issue2.message) {
     const fieldErrors = {};
     const formErrors = [];
     for (const sub of this.issues) {
@@ -6189,35 +4617,35 @@ var ZodError = class _ZodError extends Error {
   }
 };
 ZodError.create = (issues) => {
-  const error = new ZodError(issues);
-  return error;
+  const error40 = new ZodError(issues);
+  return error40;
 };
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/locales/en.js
-var errorMap = (issue, _ctx) => {
+var errorMap = (issue2, _ctx) => {
   let message;
-  switch (issue.code) {
+  switch (issue2.code) {
     case ZodIssueCode.invalid_type:
-      if (issue.received === ZodParsedType.undefined) {
+      if (issue2.received === ZodParsedType.undefined) {
         message = "Required";
       } else {
-        message = `Expected ${issue.expected}, received ${issue.received}`;
+        message = `Expected ${issue2.expected}, received ${issue2.received}`;
       }
       break;
     case ZodIssueCode.invalid_literal:
-      message = `Invalid literal value, expected ${JSON.stringify(issue.expected, util.jsonStringifyReplacer)}`;
+      message = `Invalid literal value, expected ${JSON.stringify(issue2.expected, util.jsonStringifyReplacer)}`;
       break;
     case ZodIssueCode.unrecognized_keys:
-      message = `Unrecognized key(s) in object: ${util.joinValues(issue.keys, ", ")}`;
+      message = `Unrecognized key(s) in object: ${util.joinValues(issue2.keys, ", ")}`;
       break;
     case ZodIssueCode.invalid_union:
       message = `Invalid input`;
       break;
     case ZodIssueCode.invalid_union_discriminator:
-      message = `Invalid discriminator value. Expected ${util.joinValues(issue.options)}`;
+      message = `Invalid discriminator value. Expected ${util.joinValues(issue2.options)}`;
       break;
     case ZodIssueCode.invalid_enum_value:
-      message = `Invalid enum value. Expected ${util.joinValues(issue.options)}, received '${issue.received}'`;
+      message = `Invalid enum value. Expected ${util.joinValues(issue2.options)}, received '${issue2.received}'`;
       break;
     case ZodIssueCode.invalid_arguments:
       message = `Invalid function arguments`;
@@ -6229,50 +4657,50 @@ var errorMap = (issue, _ctx) => {
       message = `Invalid date`;
       break;
     case ZodIssueCode.invalid_string:
-      if (typeof issue.validation === "object") {
-        if ("includes" in issue.validation) {
-          message = `Invalid input: must include "${issue.validation.includes}"`;
-          if (typeof issue.validation.position === "number") {
-            message = `${message} at one or more positions greater than or equal to ${issue.validation.position}`;
+      if (typeof issue2.validation === "object") {
+        if ("includes" in issue2.validation) {
+          message = `Invalid input: must include "${issue2.validation.includes}"`;
+          if (typeof issue2.validation.position === "number") {
+            message = `${message} at one or more positions greater than or equal to ${issue2.validation.position}`;
           }
-        } else if ("startsWith" in issue.validation) {
-          message = `Invalid input: must start with "${issue.validation.startsWith}"`;
-        } else if ("endsWith" in issue.validation) {
-          message = `Invalid input: must end with "${issue.validation.endsWith}"`;
+        } else if ("startsWith" in issue2.validation) {
+          message = `Invalid input: must start with "${issue2.validation.startsWith}"`;
+        } else if ("endsWith" in issue2.validation) {
+          message = `Invalid input: must end with "${issue2.validation.endsWith}"`;
         } else {
-          util.assertNever(issue.validation);
+          util.assertNever(issue2.validation);
         }
-      } else if (issue.validation !== "regex") {
-        message = `Invalid ${issue.validation}`;
+      } else if (issue2.validation !== "regex") {
+        message = `Invalid ${issue2.validation}`;
       } else {
         message = "Invalid";
       }
       break;
     case ZodIssueCode.too_small:
-      if (issue.type === "array")
-        message = `Array must contain ${issue.exact ? "exactly" : issue.inclusive ? `at least` : `more than`} ${issue.minimum} element(s)`;
-      else if (issue.type === "string")
-        message = `String must contain ${issue.exact ? "exactly" : issue.inclusive ? `at least` : `over`} ${issue.minimum} character(s)`;
-      else if (issue.type === "number")
-        message = `Number must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${issue.minimum}`;
-      else if (issue.type === "bigint")
-        message = `Number must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${issue.minimum}`;
-      else if (issue.type === "date")
-        message = `Date must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${new Date(Number(issue.minimum))}`;
+      if (issue2.type === "array")
+        message = `Array must contain ${issue2.exact ? "exactly" : issue2.inclusive ? `at least` : `more than`} ${issue2.minimum} element(s)`;
+      else if (issue2.type === "string")
+        message = `String must contain ${issue2.exact ? "exactly" : issue2.inclusive ? `at least` : `over`} ${issue2.minimum} character(s)`;
+      else if (issue2.type === "number")
+        message = `Number must be ${issue2.exact ? `exactly equal to ` : issue2.inclusive ? `greater than or equal to ` : `greater than `}${issue2.minimum}`;
+      else if (issue2.type === "bigint")
+        message = `Number must be ${issue2.exact ? `exactly equal to ` : issue2.inclusive ? `greater than or equal to ` : `greater than `}${issue2.minimum}`;
+      else if (issue2.type === "date")
+        message = `Date must be ${issue2.exact ? `exactly equal to ` : issue2.inclusive ? `greater than or equal to ` : `greater than `}${new Date(Number(issue2.minimum))}`;
       else
         message = "Invalid input";
       break;
     case ZodIssueCode.too_big:
-      if (issue.type === "array")
-        message = `Array must contain ${issue.exact ? `exactly` : issue.inclusive ? `at most` : `less than`} ${issue.maximum} element(s)`;
-      else if (issue.type === "string")
-        message = `String must contain ${issue.exact ? `exactly` : issue.inclusive ? `at most` : `under`} ${issue.maximum} character(s)`;
-      else if (issue.type === "number")
-        message = `Number must be ${issue.exact ? `exactly` : issue.inclusive ? `less than or equal to` : `less than`} ${issue.maximum}`;
-      else if (issue.type === "bigint")
-        message = `BigInt must be ${issue.exact ? `exactly` : issue.inclusive ? `less than or equal to` : `less than`} ${issue.maximum}`;
-      else if (issue.type === "date")
-        message = `Date must be ${issue.exact ? `exactly` : issue.inclusive ? `smaller than or equal to` : `smaller than`} ${new Date(Number(issue.maximum))}`;
+      if (issue2.type === "array")
+        message = `Array must contain ${issue2.exact ? `exactly` : issue2.inclusive ? `at most` : `less than`} ${issue2.maximum} element(s)`;
+      else if (issue2.type === "string")
+        message = `String must contain ${issue2.exact ? `exactly` : issue2.inclusive ? `at most` : `under`} ${issue2.maximum} character(s)`;
+      else if (issue2.type === "number")
+        message = `Number must be ${issue2.exact ? `exactly` : issue2.inclusive ? `less than or equal to` : `less than`} ${issue2.maximum}`;
+      else if (issue2.type === "bigint")
+        message = `BigInt must be ${issue2.exact ? `exactly` : issue2.inclusive ? `less than or equal to` : `less than`} ${issue2.maximum}`;
+      else if (issue2.type === "date")
+        message = `Date must be ${issue2.exact ? `exactly` : issue2.inclusive ? `smaller than or equal to` : `smaller than`} ${new Date(Number(issue2.maximum))}`;
       else
         message = "Invalid input";
       break;
@@ -6283,14 +4711,14 @@ var errorMap = (issue, _ctx) => {
       message = `Intersection results could not be merged`;
       break;
     case ZodIssueCode.not_multiple_of:
-      message = `Number must be a multiple of ${issue.multipleOf}`;
+      message = `Number must be a multiple of ${issue2.multipleOf}`;
       break;
     case ZodIssueCode.not_finite:
       message = "Number must be finite";
       break;
     default:
       message = _ctx.defaultError;
-      util.assertNever(issue);
+      util.assertNever(issue2);
   }
   return { message };
 };
@@ -6298,8 +4726,8 @@ var en_default = errorMap;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
-function setErrorMap(map) {
-  overrideErrorMap = map;
+function setErrorMap(map2) {
+  overrideErrorMap = map2;
 }
 function getErrorMap() {
   return overrideErrorMap;
@@ -6307,8 +4735,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path11, errorMaps, issueData } = params;
-  const fullPath = [...path11, ...issueData.path || []];
+  const { data, path: path13, errorMaps, issueData } = params;
+  const fullPath = [...path13, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -6322,8 +4750,8 @@ var makeIssue = (params) => {
   }
   let errorMessage = "";
   const maps = errorMaps.filter((m) => !!m).slice().reverse();
-  for (const map of maps) {
-    errorMessage = map(fullIssue, { data, defaultError: errorMessage }).message;
+  for (const map2 of maps) {
+    errorMessage = map2(fullIssue, { data, defaultError: errorMessage }).message;
   }
   return {
     ...issueData,
@@ -6334,7 +4762,7 @@ var makeIssue = (params) => {
 var EMPTY_PATH = [];
 function addIssueToContext(ctx, issueData) {
   const overrideMap = getErrorMap();
-  const issue = makeIssue({
+  const issue2 = makeIssue({
     issueData,
     data: ctx.data,
     path: ctx.path,
@@ -6349,7 +4777,7 @@ function addIssueToContext(ctx, issueData) {
       // then global default map
     ].filter((x) => !!x)
   });
-  ctx.common.issues.push(issue);
+  ctx.common.issues.push(issue2);
 }
 var ParseStatus = class _ParseStatus {
   constructor() {
@@ -6424,11 +4852,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path11, key) {
+  constructor(parent, value, path13, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path11;
+    this._path = path13;
     this._key = key;
   }
   get path() {
@@ -6454,8 +4882,8 @@ var handleResult = (ctx, result) => {
       get error() {
         if (this._error)
           return this._error;
-        const error = new ZodError(ctx.common.issues);
-        this._error = error;
+        const error40 = new ZodError(ctx.common.issues);
+        this._error = error40;
         return this._error;
       }
     };
@@ -6606,7 +5034,7 @@ var ZodType = class {
     const result = await (isAsync(maybeAsyncResult) ? maybeAsyncResult : Promise.resolve(maybeAsyncResult));
     return handleResult(ctx, result);
   }
-  refine(check, message) {
+  refine(check2, message) {
     const getIssueProperties = (val) => {
       if (typeof message === "string" || typeof message === "undefined") {
         return { message };
@@ -6617,7 +5045,7 @@ var ZodType = class {
       }
     };
     return this._refinement((val, ctx) => {
-      const result = check(val);
+      const result = check2(val);
       const setError = () => ctx.addIssue({
         code: ZodIssueCode.custom,
         ...getIssueProperties(val)
@@ -6640,9 +5068,9 @@ var ZodType = class {
       }
     });
   }
-  refinement(check, refinementData) {
+  refinement(check2, refinementData) {
     return this._refinement((val, ctx) => {
-      if (!check(val)) {
+      if (!check2(val)) {
         ctx.addIssue(typeof refinementData === "function" ? refinementData(val, ctx) : refinementData);
         return false;
       } else {
@@ -6714,12 +5142,12 @@ var ZodType = class {
   and(incoming) {
     return ZodIntersection.create(this, incoming, this._def);
   }
-  transform(transform) {
+  transform(transform2) {
     return new ZodEffects({
       ...processCreateParams(this._def),
       schema: this,
       typeName: ZodFirstPartyTypeKind.ZodEffects,
-      effect: { type: "transform", transform }
+      effect: { type: "transform", transform: transform2 }
     });
   }
   default(def) {
@@ -6807,24 +5235,24 @@ function datetimeRegex(args) {
   regex = `${regex}(${opts.join("|")})`;
   return new RegExp(`^${regex}$`);
 }
-function isValidIP(ip, version) {
-  if ((version === "v4" || !version) && ipv4Regex.test(ip)) {
+function isValidIP(ip, version2) {
+  if ((version2 === "v4" || !version2) && ipv4Regex.test(ip)) {
     return true;
   }
-  if ((version === "v6" || !version) && ipv6Regex.test(ip)) {
+  if ((version2 === "v6" || !version2) && ipv6Regex.test(ip)) {
     return true;
   }
   return false;
 }
-function isValidJWT(jwt, alg) {
-  if (!jwtRegex.test(jwt))
+function isValidJWT(jwt2, alg) {
+  if (!jwtRegex.test(jwt2))
     return false;
   try {
-    const [header] = jwt.split(".");
+    const [header] = jwt2.split(".");
     if (!header)
       return false;
-    const base64 = header.replace(/-/g, "+").replace(/_/g, "/").padEnd(header.length + (4 - header.length % 4) % 4, "=");
-    const decoded = JSON.parse(atob(base64));
+    const base643 = header.replace(/-/g, "+").replace(/_/g, "/").padEnd(header.length + (4 - header.length % 4) % 4, "=");
+    const decoded = JSON.parse(atob(base643));
     if (typeof decoded !== "object" || decoded === null)
       return false;
     if ("typ" in decoded && decoded?.typ !== "JWT")
@@ -6838,22 +5266,22 @@ function isValidJWT(jwt, alg) {
     return false;
   }
 }
-function isValidCidr(ip, version) {
-  if ((version === "v4" || !version) && ipv4CidrRegex.test(ip)) {
+function isValidCidr(ip, version2) {
+  if ((version2 === "v4" || !version2) && ipv4CidrRegex.test(ip)) {
     return true;
   }
-  if ((version === "v6" || !version) && ipv6CidrRegex.test(ip)) {
+  if ((version2 === "v6" || !version2) && ipv6CidrRegex.test(ip)) {
     return true;
   }
   return false;
 }
-var ZodString = class _ZodString extends ZodType {
+var ZodString = class _ZodString2 extends ZodType {
   _parse(input) {
     if (this._def.coerce) {
       input.data = String(input.data);
     }
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.string) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.string) {
       const ctx2 = this._getOrReturnCtx(input);
       addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
@@ -6864,70 +5292,70 @@ var ZodString = class _ZodString extends ZodType {
     }
     const status = new ParseStatus();
     let ctx = void 0;
-    for (const check of this._def.checks) {
-      if (check.kind === "min") {
-        if (input.data.length < check.value) {
+    for (const check2 of this._def.checks) {
+      if (check2.kind === "min") {
+        if (input.data.length < check2.value) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
-            minimum: check.value,
+            minimum: check2.value,
             type: "string",
             inclusive: true,
             exact: false,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "max") {
-        if (input.data.length > check.value) {
+      } else if (check2.kind === "max") {
+        if (input.data.length > check2.value) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
-            maximum: check.value,
+            maximum: check2.value,
             type: "string",
             inclusive: true,
             exact: false,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "length") {
-        const tooBig = input.data.length > check.value;
-        const tooSmall = input.data.length < check.value;
+      } else if (check2.kind === "length") {
+        const tooBig = input.data.length > check2.value;
+        const tooSmall = input.data.length < check2.value;
         if (tooBig || tooSmall) {
           ctx = this._getOrReturnCtx(input, ctx);
           if (tooBig) {
             addIssueToContext(ctx, {
               code: ZodIssueCode.too_big,
-              maximum: check.value,
+              maximum: check2.value,
               type: "string",
               inclusive: true,
               exact: true,
-              message: check.message
+              message: check2.message
             });
           } else if (tooSmall) {
             addIssueToContext(ctx, {
               code: ZodIssueCode.too_small,
-              minimum: check.value,
+              minimum: check2.value,
               type: "string",
               inclusive: true,
               exact: true,
-              message: check.message
+              message: check2.message
             });
           }
           status.dirty();
         }
-      } else if (check.kind === "email") {
+      } else if (check2.kind === "email") {
         if (!emailRegex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "email",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "emoji") {
+      } else if (check2.kind === "emoji") {
         if (!emojiRegex) {
           emojiRegex = new RegExp(_emojiRegex, "u");
         }
@@ -6936,61 +5364,61 @@ var ZodString = class _ZodString extends ZodType {
           addIssueToContext(ctx, {
             validation: "emoji",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "uuid") {
+      } else if (check2.kind === "uuid") {
         if (!uuidRegex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "uuid",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "nanoid") {
+      } else if (check2.kind === "nanoid") {
         if (!nanoidRegex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "nanoid",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "cuid") {
+      } else if (check2.kind === "cuid") {
         if (!cuidRegex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "cuid",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "cuid2") {
+      } else if (check2.kind === "cuid2") {
         if (!cuid2Regex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "cuid2",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "ulid") {
+      } else if (check2.kind === "ulid") {
         if (!ulidRegex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "ulid",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "url") {
+      } else if (check2.kind === "url") {
         try {
           new URL(input.data);
         } catch {
@@ -6998,153 +5426,153 @@ var ZodString = class _ZodString extends ZodType {
           addIssueToContext(ctx, {
             validation: "url",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "regex") {
-        check.regex.lastIndex = 0;
-        const testResult = check.regex.test(input.data);
+      } else if (check2.kind === "regex") {
+        check2.regex.lastIndex = 0;
+        const testResult = check2.regex.test(input.data);
         if (!testResult) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "regex",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "trim") {
+      } else if (check2.kind === "trim") {
         input.data = input.data.trim();
-      } else if (check.kind === "includes") {
-        if (!input.data.includes(check.value, check.position)) {
+      } else if (check2.kind === "includes") {
+        if (!input.data.includes(check2.value, check2.position)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
-            validation: { includes: check.value, position: check.position },
-            message: check.message
+            validation: { includes: check2.value, position: check2.position },
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "toLowerCase") {
+      } else if (check2.kind === "toLowerCase") {
         input.data = input.data.toLowerCase();
-      } else if (check.kind === "toUpperCase") {
+      } else if (check2.kind === "toUpperCase") {
         input.data = input.data.toUpperCase();
-      } else if (check.kind === "startsWith") {
-        if (!input.data.startsWith(check.value)) {
+      } else if (check2.kind === "startsWith") {
+        if (!input.data.startsWith(check2.value)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
-            validation: { startsWith: check.value },
-            message: check.message
+            validation: { startsWith: check2.value },
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "endsWith") {
-        if (!input.data.endsWith(check.value)) {
+      } else if (check2.kind === "endsWith") {
+        if (!input.data.endsWith(check2.value)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
-            validation: { endsWith: check.value },
-            message: check.message
+            validation: { endsWith: check2.value },
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "datetime") {
-        const regex = datetimeRegex(check);
+      } else if (check2.kind === "datetime") {
+        const regex = datetimeRegex(check2);
         if (!regex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: "datetime",
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "date") {
+      } else if (check2.kind === "date") {
         const regex = dateRegex;
         if (!regex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: "date",
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "time") {
-        const regex = timeRegex(check);
+      } else if (check2.kind === "time") {
+        const regex = timeRegex(check2);
         if (!regex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: "time",
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "duration") {
+      } else if (check2.kind === "duration") {
         if (!durationRegex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "duration",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "ip") {
-        if (!isValidIP(input.data, check.version)) {
+      } else if (check2.kind === "ip") {
+        if (!isValidIP(input.data, check2.version)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "ip",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "jwt") {
-        if (!isValidJWT(input.data, check.alg)) {
+      } else if (check2.kind === "jwt") {
+        if (!isValidJWT(input.data, check2.alg)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "jwt",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "cidr") {
-        if (!isValidCidr(input.data, check.version)) {
+      } else if (check2.kind === "cidr") {
+        if (!isValidCidr(input.data, check2.version)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "cidr",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "base64") {
+      } else if (check2.kind === "base64") {
         if (!base64Regex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "base64",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "base64url") {
+      } else if (check2.kind === "base64url") {
         if (!base64urlRegex.test(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             validation: "base64url",
             code: ZodIssueCode.invalid_string,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
       } else {
-        util.assertNever(check);
+        util.assertNever(check2);
       }
     }
     return { status: status.value, value: input.data };
@@ -7156,10 +5584,10 @@ var ZodString = class _ZodString extends ZodType {
       ...errorUtil.errToObj(message)
     });
   }
-  _addCheck(check) {
-    return new _ZodString({
+  _addCheck(check2) {
+    return new _ZodString2({
       ...this._def,
-      checks: [...this._def.checks, check]
+      checks: [...this._def.checks, check2]
     });
   }
   email(message) {
@@ -7299,19 +5727,19 @@ var ZodString = class _ZodString extends ZodType {
     return this.min(1, errorUtil.errToObj(message));
   }
   trim() {
-    return new _ZodString({
+    return new _ZodString2({
       ...this._def,
       checks: [...this._def.checks, { kind: "trim" }]
     });
   }
   toLowerCase() {
-    return new _ZodString({
+    return new _ZodString2({
       ...this._def,
       checks: [...this._def.checks, { kind: "toLowerCase" }]
     });
   }
   toUpperCase() {
-    return new _ZodString({
+    return new _ZodString2({
       ...this._def,
       checks: [...this._def.checks, { kind: "toUpperCase" }]
     });
@@ -7412,8 +5840,8 @@ var ZodNumber = class _ZodNumber extends ZodType {
     if (this._def.coerce) {
       input.data = Number(input.data);
     }
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.number) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.number) {
       const ctx2 = this._getOrReturnCtx(input);
       addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
@@ -7424,67 +5852,67 @@ var ZodNumber = class _ZodNumber extends ZodType {
     }
     let ctx = void 0;
     const status = new ParseStatus();
-    for (const check of this._def.checks) {
-      if (check.kind === "int") {
+    for (const check2 of this._def.checks) {
+      if (check2.kind === "int") {
         if (!util.isInteger(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_type,
             expected: "integer",
             received: "float",
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "min") {
-        const tooSmall = check.inclusive ? input.data < check.value : input.data <= check.value;
+      } else if (check2.kind === "min") {
+        const tooSmall = check2.inclusive ? input.data < check2.value : input.data <= check2.value;
         if (tooSmall) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
-            minimum: check.value,
+            minimum: check2.value,
             type: "number",
-            inclusive: check.inclusive,
+            inclusive: check2.inclusive,
             exact: false,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "max") {
-        const tooBig = check.inclusive ? input.data > check.value : input.data >= check.value;
+      } else if (check2.kind === "max") {
+        const tooBig = check2.inclusive ? input.data > check2.value : input.data >= check2.value;
         if (tooBig) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
-            maximum: check.value,
+            maximum: check2.value,
             type: "number",
-            inclusive: check.inclusive,
+            inclusive: check2.inclusive,
             exact: false,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "multipleOf") {
-        if (floatSafeRemainder(input.data, check.value) !== 0) {
+      } else if (check2.kind === "multipleOf") {
+        if (floatSafeRemainder(input.data, check2.value) !== 0) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.not_multiple_of,
-            multipleOf: check.value,
-            message: check.message
+            multipleOf: check2.value,
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "finite") {
+      } else if (check2.kind === "finite") {
         if (!Number.isFinite(input.data)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.not_finite,
-            message: check.message
+            message: check2.message
           });
           status.dirty();
         }
       } else {
-        util.assertNever(check);
+        util.assertNever(check2);
       }
     }
     return { status: status.value, value: input.data };
@@ -7515,10 +5943,10 @@ var ZodNumber = class _ZodNumber extends ZodType {
       ]
     });
   }
-  _addCheck(check) {
+  _addCheck(check2) {
     return new _ZodNumber({
       ...this._def,
-      checks: [...this._def.checks, check]
+      checks: [...this._def.checks, check2]
     });
   }
   int(message) {
@@ -7647,51 +6075,51 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
         return this._getInvalidInput(input);
       }
     }
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.bigint) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.bigint) {
       return this._getInvalidInput(input);
     }
     let ctx = void 0;
     const status = new ParseStatus();
-    for (const check of this._def.checks) {
-      if (check.kind === "min") {
-        const tooSmall = check.inclusive ? input.data < check.value : input.data <= check.value;
+    for (const check2 of this._def.checks) {
+      if (check2.kind === "min") {
+        const tooSmall = check2.inclusive ? input.data < check2.value : input.data <= check2.value;
         if (tooSmall) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
             type: "bigint",
-            minimum: check.value,
-            inclusive: check.inclusive,
-            message: check.message
+            minimum: check2.value,
+            inclusive: check2.inclusive,
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "max") {
-        const tooBig = check.inclusive ? input.data > check.value : input.data >= check.value;
+      } else if (check2.kind === "max") {
+        const tooBig = check2.inclusive ? input.data > check2.value : input.data >= check2.value;
         if (tooBig) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
             type: "bigint",
-            maximum: check.value,
-            inclusive: check.inclusive,
-            message: check.message
+            maximum: check2.value,
+            inclusive: check2.inclusive,
+            message: check2.message
           });
           status.dirty();
         }
-      } else if (check.kind === "multipleOf") {
-        if (input.data % check.value !== BigInt(0)) {
+      } else if (check2.kind === "multipleOf") {
+        if (input.data % check2.value !== BigInt(0)) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.not_multiple_of,
-            multipleOf: check.value,
-            message: check.message
+            multipleOf: check2.value,
+            message: check2.message
           });
           status.dirty();
         }
       } else {
-        util.assertNever(check);
+        util.assertNever(check2);
       }
     }
     return { status: status.value, value: input.data };
@@ -7731,10 +6159,10 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
       ]
     });
   }
-  _addCheck(check) {
+  _addCheck(check2) {
     return new _ZodBigInt({
       ...this._def,
-      checks: [...this._def.checks, check]
+      checks: [...this._def.checks, check2]
     });
   }
   positive(message) {
@@ -7810,8 +6238,8 @@ var ZodBoolean = class extends ZodType {
     if (this._def.coerce) {
       input.data = Boolean(input.data);
     }
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.boolean) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.boolean) {
       const ctx = this._getOrReturnCtx(input);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -7835,8 +6263,8 @@ var ZodDate = class _ZodDate extends ZodType {
     if (this._def.coerce) {
       input.data = new Date(input.data);
     }
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.date) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.date) {
       const ctx2 = this._getOrReturnCtx(input);
       addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
@@ -7854,35 +6282,35 @@ var ZodDate = class _ZodDate extends ZodType {
     }
     const status = new ParseStatus();
     let ctx = void 0;
-    for (const check of this._def.checks) {
-      if (check.kind === "min") {
-        if (input.data.getTime() < check.value) {
+    for (const check2 of this._def.checks) {
+      if (check2.kind === "min") {
+        if (input.data.getTime() < check2.value) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
-            message: check.message,
+            message: check2.message,
             inclusive: true,
             exact: false,
-            minimum: check.value,
+            minimum: check2.value,
             type: "date"
           });
           status.dirty();
         }
-      } else if (check.kind === "max") {
-        if (input.data.getTime() > check.value) {
+      } else if (check2.kind === "max") {
+        if (input.data.getTime() > check2.value) {
           ctx = this._getOrReturnCtx(input, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
-            message: check.message,
+            message: check2.message,
             inclusive: true,
             exact: false,
-            maximum: check.value,
+            maximum: check2.value,
             type: "date"
           });
           status.dirty();
         }
       } else {
-        util.assertNever(check);
+        util.assertNever(check2);
       }
     }
     return {
@@ -7890,10 +6318,10 @@ var ZodDate = class _ZodDate extends ZodType {
       value: new Date(input.data.getTime())
     };
   }
-  _addCheck(check) {
+  _addCheck(check2) {
     return new _ZodDate({
       ...this._def,
-      checks: [...this._def.checks, check]
+      checks: [...this._def.checks, check2]
     });
   }
   min(minDate, message) {
@@ -7941,8 +6369,8 @@ ZodDate.create = (params) => {
 };
 var ZodSymbol = class extends ZodType {
   _parse(input) {
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.symbol) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.symbol) {
       const ctx = this._getOrReturnCtx(input);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -7962,8 +6390,8 @@ ZodSymbol.create = (params) => {
 };
 var ZodUndefined = class extends ZodType {
   _parse(input) {
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.undefined) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.undefined) {
       const ctx = this._getOrReturnCtx(input);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -7983,8 +6411,8 @@ ZodUndefined.create = (params) => {
 };
 var ZodNull = class extends ZodType {
   _parse(input) {
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.null) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.null) {
       const ctx = this._getOrReturnCtx(input);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -8051,8 +6479,8 @@ ZodNever.create = (params) => {
 };
 var ZodVoid = class extends ZodType {
   _parse(input) {
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.undefined) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.undefined) {
       const ctx = this._getOrReturnCtx(input);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -8213,8 +6641,8 @@ var ZodObject = class _ZodObject extends ZodType {
     return this._cached;
   }
   _parse(input) {
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.object) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.object) {
       const ctx2 = this._getOrReturnCtx(input);
       addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
@@ -8307,9 +6735,9 @@ var ZodObject = class _ZodObject extends ZodType {
       ...this._def,
       unknownKeys: "strict",
       ...message !== void 0 ? {
-        errorMap: (issue, ctx) => {
-          const defaultError = this._def.errorMap?.(issue, ctx).message ?? ctx.defaultError;
-          if (issue.code === "unrecognized_keys")
+        errorMap: (issue2, ctx) => {
+          const defaultError = this._def.errorMap?.(issue2, ctx).message ?? ctx.defaultError;
+          if (issue2.code === "unrecognized_keys")
             return {
               message: errorUtil.errToObj(message).message ?? defaultError
             };
@@ -9110,25 +7538,25 @@ var ZodFunction = class _ZodFunction extends ZodType {
       });
       return INVALID;
     }
-    function makeArgsIssue(args, error) {
+    function makeArgsIssue(args, error40) {
       return makeIssue({
         data: args,
         path: ctx.path,
         errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, getErrorMap(), en_default].filter((x) => !!x),
         issueData: {
           code: ZodIssueCode.invalid_arguments,
-          argumentsError: error
+          argumentsError: error40
         }
       });
     }
-    function makeReturnsIssue(returns, error) {
+    function makeReturnsIssue(returns, error40) {
       return makeIssue({
         data: returns,
         path: ctx.path,
         errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, getErrorMap(), en_default].filter((x) => !!x),
         issueData: {
           code: ZodIssueCode.invalid_return_type,
-          returnTypeError: error
+          returnTypeError: error40
         }
       });
     }
@@ -9137,15 +7565,15 @@ var ZodFunction = class _ZodFunction extends ZodType {
     if (this._def.returns instanceof ZodPromise) {
       const me = this;
       return OK(async function(...args) {
-        const error = new ZodError([]);
+        const error40 = new ZodError([]);
         const parsedArgs = await me._def.args.parseAsync(args, params).catch((e) => {
-          error.addIssue(makeArgsIssue(args, e));
-          throw error;
+          error40.addIssue(makeArgsIssue(args, e));
+          throw error40;
         });
         const result = await Reflect.apply(fn, this, parsedArgs);
         const parsedReturns = await me._def.returns._def.type.parseAsync(result, params).catch((e) => {
-          error.addIssue(makeReturnsIssue(result, e));
-          throw error;
+          error40.addIssue(makeReturnsIssue(result, e));
+          throw error40;
         });
         return parsedReturns;
       });
@@ -9512,18 +7940,18 @@ ZodEffects.create = (schema, effect, params) => {
     ...processCreateParams(params)
   });
 };
-ZodEffects.createWithPreprocess = (preprocess, schema, params) => {
+ZodEffects.createWithPreprocess = (preprocess2, schema, params) => {
   return new ZodEffects({
     schema,
-    effect: { type: "preprocess", transform: preprocess },
+    effect: { type: "preprocess", transform: preprocess2 },
     typeName: ZodFirstPartyTypeKind.ZodEffects,
     ...processCreateParams(params)
   });
 };
 var ZodOptional = class extends ZodType {
   _parse(input) {
-    const parsedType = this._getType(input);
-    if (parsedType === ZodParsedType.undefined) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 === ZodParsedType.undefined) {
       return OK(void 0);
     }
     return this._def.innerType._parse(input);
@@ -9541,8 +7969,8 @@ ZodOptional.create = (type, params) => {
 };
 var ZodNullable = class extends ZodType {
   _parse(input) {
-    const parsedType = this._getType(input);
-    if (parsedType === ZodParsedType.null) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 === ZodParsedType.null) {
       return OK(null);
     }
     return this._def.innerType._parse(input);
@@ -9638,8 +8066,8 @@ ZodCatch.create = (type, params) => {
 };
 var ZodNaN = class extends ZodType {
   _parse(input) {
-    const parsedType = this._getType(input);
-    if (parsedType !== ZodParsedType.nan) {
+    const parsedType4 = this._getType(input);
+    if (parsedType4 !== ZodParsedType.nan) {
       const ctx = this._getOrReturnCtx(input);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -9754,10 +8182,10 @@ function cleanParams(params, data) {
   const p2 = typeof p === "string" ? { message: p } : p;
   return p2;
 }
-function custom(check, _params = {}, fatal) {
-  if (check)
+function custom(check2, _params = {}, fatal) {
+  if (check2)
     return ZodAny.create().superRefine((data, ctx) => {
-      const r = check(data);
+      const r = check2(data);
       if (r instanceof Promise) {
         return r.then((r2) => {
           if (!r2) {
@@ -10018,6 +8446,7 @@ var WriteDocumentInputSchema = external_exports.object({
   title: external_exports.string().min(1).max(256),
   path: external_exports.string().max(512).nullable(),
   content: external_exports.string(),
+  expected_version: external_exports.number().int().nonnegative().optional(),
   metadata: external_exports.record(external_exports.unknown()).default({}),
   commit_message: external_exports.string().max(512).nullable(),
   // Optional CRDT state from collaborative editors — base64-encoded Y.Doc
@@ -10099,7 +8528,7 @@ var BrandGuidelinesFrontmatterSchema = external_exports.object({
   imagery: external_exports.array(BrandImageryNoteSchema).optional()
 });
 
-// packages/shared/dist/brand-guidelines-frontmatter.js
+// packages/shared/dist/safe-frontmatter.js
 var import_gray_matter = __toESM(require_gray_matter(), 1);
 
 // packages/shared/dist/redact.js
@@ -10123,7 +8552,12 @@ function luhnValid(digits) {
 function isValidCardNumber(match) {
   const digits = match.replace(/\D/g, "");
   if (digits.length < 13 || digits.length > 19) return false;
-  if (!/^[2-6]/.test(digits)) return false;
+  const first = digits.charCodeAt(0) - 48;
+  if (first < 2 || first > 6) return false;
+  if (first === 2) {
+    const bin = Number(digits.slice(0, 4));
+    if (bin < 2221 || bin > 2720) return false;
+  }
   return luhnValid(digits);
 }
 function isValidUsSsn(match) {
@@ -10181,18 +8615,18 @@ var REDACTION_PATTERNS = [
     description: "OpenAI legacy key (sk-...)",
     // Must come after sk-ant- and sk-proj- patterns since they share the prefix.
     // The negative lookahead keeps this from double-matching them.
-    regex: /sk-(?!ant-|proj-)[A-Za-z0-9]{20,}/g
+    regex: /(?<![A-Za-z0-9_])sk-(?!ant-|proj-)[A-Za-z0-9]{20,}/g
   },
   // ---------- Stripe ----------
   {
     name: "stripe-secret-key",
     description: "Stripe secret key (sk_live_ or sk_test_)",
-    regex: /sk_(?:live|test)_[A-Za-z0-9]{20,}/g
+    regex: /(?<![A-Za-z0-9_])sk_(?:live|test)_[A-Za-z0-9]{20,}/g
   },
   {
     name: "stripe-restricted-key",
     description: "Stripe restricted key (rk_live_ or rk_test_)",
-    regex: /rk_(?:live|test)_[A-Za-z0-9]{20,}/g
+    regex: /(?<![A-Za-z0-9_])rk_(?:live|test)_[A-Za-z0-9]{20,}/g
   },
   {
     name: "stripe-webhook-secret",
@@ -10208,7 +8642,11 @@ var REDACTION_PATTERNS = [
   {
     name: "github-pat-fine-grained",
     description: "GitHub fine-grained PAT (github_pat_)",
-    regex: /github_pat_[A-Za-z0-9_]{22,}/g
+    // The real token is github_pat_ + 82 characters. The old `{22,}` floor
+    // matched ordinary identifiers such as github_pat_token_expiry_warning.
+    // No right boundary: the length is fixed, and a boundary made PATs glued
+    // end to end wait for each other, one redaction pass per token.
+    regex: /github_pat_[A-Za-z0-9_]{82}/g
   },
   {
     name: "github-oauth-token",
@@ -10222,7 +8660,7 @@ var REDACTION_PATTERNS = [
     // AWS access keys are 20 chars, prefix AKIA. The IAM key prefix variants
     // (ASIA for STS, AGPA for groups, etc.) aren't redacted yet — add as
     // needed. AKIA is the common-leak case.
-    regex: /\bAKIA[0-9A-Z]{16}\b/g
+    regex: /(?<![A-Za-z0-9_])AKIA[0-9A-Z]{16}(?![A-Za-z0-9_])/g
   },
   // ---------- Google ----------
   {
@@ -10243,12 +8681,12 @@ var REDACTION_PATTERNS = [
     // The CLI / Management-API token shape — sbp_ + a long body. This is the
     // exact shape that leaked into a transcript and went undetected before this
     // rule existed. The project anon/service keys are JWTs (caught below).
-    regex: /\bsbp_[A-Za-z0-9]{20,}\b/g
+    regex: /(?<![A-Za-z0-9_])sbp_[A-Za-z0-9]{20,}(?![A-Za-z0-9_])/g
   },
   {
     name: "supabase-secret-key",
     description: "Supabase secret API key (sb_secret_\u2026)",
-    regex: /\bsb_secret_[A-Za-z0-9_-]{20,}\b/g
+    regex: /(?<![A-Za-z0-9_])sb_secret_[A-Za-z0-9_-]{20,}/g
   },
   // ---------- JWTs (catch-all for bearer-token leaks) ----------
   {
@@ -10257,7 +8695,7 @@ var REDACTION_PATTERNS = [
     // JWTs have a deterministic three-segment shape that's extremely
     // unlikely to appear in legitimate prose. Conservative length floors
     // on each segment keep this from matching short fragments.
-    regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g
+    regex: /(?<![A-Za-z0-9_])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g
   },
   // ---------- PII (checksum / range-validated) ----------
   // Unlike the key patterns above, a digit run is not self-identifying — the
@@ -10304,6 +8742,36 @@ for (const p of REDACTION_PATTERNS) {
     throw new Error(`redact: pattern '${p.name}' must use the 'g' flag`);
   }
 }
+var SECRET_REDACTION_PATTERNS = REDACTION_PATTERNS.filter(
+  (p) => !p.validate
+);
+var SECRET_REDACTION_MAX_PASSES = 64;
+function applyRedaction(input, builtIns, extraPatterns) {
+  if (!input) {
+    return { redacted: input, hits: [], changed: false };
+  }
+  const counts = /* @__PURE__ */ new Map();
+  const apply = (text, p) => {
+    p.regex.lastIndex = 0;
+    return text.replaceAll(p.regex, (match) => {
+      if (p.validate && !p.validate(match)) return match;
+      counts.set(p, (counts.get(p) ?? 0) + 1);
+      return `[REDACTED-${p.name}]`;
+    });
+  };
+  let out = input;
+  for (let pass = 0; pass < SECRET_REDACTION_MAX_PASSES; pass++) {
+    const before = out;
+    for (const p of builtIns) out = apply(out, p);
+    if (out === before) break;
+  }
+  for (const p of extraPatterns) out = apply(out, p);
+  const hits = [...builtIns, ...extraPatterns].filter((p) => counts.has(p)).map((p) => ({ name: p.name, count: counts.get(p) }));
+  return { redacted: out, hits, changed: hits.length > 0 };
+}
+function redactSecretShapes(input, extraPatterns = []) {
+  return applyRedaction(input, SECRET_REDACTION_PATTERNS, extraPatterns);
+}
 
 // packages/shared/dist/action-metadata.js
 var ActionNameSchema = external_exports.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9._-]*$/, {
@@ -10329,9 +8797,9 @@ var HttpAuthSchema = external_exports.discriminatedUnion("type", [
   external_exports.object({ type: external_exports.literal("none") }),
   external_exports.object({
     type: external_exports.literal("bearer"),
-    /** Name of the env var the server reads to get the bearer token.
-     *  e.g. 'TAVILY_API_KEY'. The token is sent as
-     *  `Authorization: Bearer ${process.env[token_env]}`. */
+    /** Historical env-var selector. Parsed only to explain/migrate the
+     * legacy document; executors must never resolve this value. */
+    /** Historical selector; never resolved by an executor. */
     token_env: external_exports.string().min(1).max(128).regex(/^[A-Z_][A-Z0-9_]*$/, {
       message: "token_env must be a SCREAMING_SNAKE_CASE env-var name"
     })
@@ -10375,7 +8843,16 @@ var ConnectorImplSchema = external_exports.object({
    *  schema at dispatch time. Kept as `record(unknown)` here so each
    *  connector defines its own shape without shadowing it in
    *  @memlin/shared. */
-  config: external_exports.record(external_exports.unknown()).optional()
+  config: external_exports.record(external_exports.unknown()).optional(),
+  /** Named operation in the connector's statically registered manifest. */
+  operation: external_exports.string().min(1).max(128).regex(/^[a-z][a-z0-9._:-]*$/, {
+    message: "operation must be a lowercase namespaced identifier"
+  }).optional(),
+  /**
+   * Opaque binding id. It identifies a provider-scoped server-side binding;
+   * it is never an environment-variable name and never contains a secret.
+   */
+  credential_binding_id: external_exports.string().uuid().optional()
 });
 var ActionImplementationSchema = external_exports.discriminatedUnion("type", [
   ProviderCallImplSchema,
@@ -10812,9 +9289,6 @@ function isNegativeFeedback(text) {
   return classifyNegativeFeedback(text).isNegative;
 }
 
-// packages/shared/dist/skill-frontmatter.js
-var import_gray_matter2 = __toESM(require_gray_matter(), 1);
-
 // packages/shared/dist/model-prices.js
 var MODEL_PRICES = {
   // Anthropic. Opus was absent until 2026-07-23, which meant every Opus turn —
@@ -10823,32 +9297,53 @@ var MODEL_PRICES = {
   "claude-haiku-4-5": { inputUsdPerMTok: 1, outputUsdPerMTok: 5 },
   "claude-sonnet-4-6": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
   "claude-sonnet-4-5": { inputUsdPerMTok: 3, outputUsdPerMTok: 15 },
-  // ⚠️ INTRODUCTORY pricing, in effect only through 2026-08-31. On 2026-09-01
-  // Sonnet 5 reverts to $3 / $15 — the tripwire test in model-prices.test.ts
-  // goes red on that date until this is bumped. Do NOT set it to $3/$15 early:
-  // that over-bills every Sonnet 5 turn by 50% until the window actually ends.
+  // $2/$10 launched as introductory pricing through 2026-08-31, and the
+  // scheduled 2026-09-01 revert to $3/$15 was CANCELLED — Anthropic made the
+  // introductory rate standard. Verified 2026-09-02 against
+  // https://platform.claude.com/docs/en/about-claude/pricing, which states the
+  // increase "will not occur". This is the standard price now; do not "restore"
+  // $3/$15 on the strength of the old launch announcement — that over-bills
+  // every Sonnet 5 turn by 50%.
   "claude-sonnet-5": { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
+  // Opus 5 was absent until 2026-09-02. The app never requests it, but
+  // aggregateTurnTiming prices provider-reported models from ingested Claude
+  // Code telemetry, where it is a current default — so every Opus 5 turn was
+  // bucketed 'unknown_model' and dropped out of cost totals. Unpriced is the
+  // safe fallback, but it is still a silent hole in the numbers.
+  "claude-opus-5": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
   "claude-opus-4-5": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
   "claude-opus-4-6": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
   "claude-opus-4-7": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
   "claude-opus-4-8": { inputUsdPerMTok: 5, outputUsdPerMTok: 25 },
-  // Deprecated (retires 2026-08-05) but still billable until then, so priced
-  // rather than left to report $0. 3x Opus 4.8's rate — a stray call costed at
-  // $0 would be a material miss. Drop this entry after the retirement date.
+  // Retired on the Claude API (2026-08-05) but STILL SERVED — and still
+  // billable — on Amazon Bedrock and Google Cloud (verified 2026-09-02 against
+  // the pricing docs), so it stays priced. Do not drop this entry: a partner
+  // call costed at $0 is a material miss, and 3x Opus 4.8's rate makes it an
+  // expensive one.
   "claude-opus-4-1": { inputUsdPerMTok: 15, outputUsdPerMTok: 75 },
   // Anthropic's most capable tier. Mythos 5 (Project Glasswing) shares the sheet.
+  // The 5.1 pair prices the same per base token as the 5 pair but reads cache at
+  // 0.025x rather than the standard 0.1x, so they cannot be plain table rows —
+  // without the override a cache-heavy Fable 5.1 turn costs 4x what it should,
+  // and cache reads dominate an agentic turn.
+  "claude-fable-5-1": { inputUsdPerMTok: 10, outputUsdPerMTok: 50, cacheReadMultiplier: 0.025 },
+  "claude-mythos-5-1": { inputUsdPerMTok: 10, outputUsdPerMTok: 50, cacheReadMultiplier: 0.025 },
   "claude-fable-5": { inputUsdPerMTok: 10, outputUsdPerMTok: 50 },
   "claude-mythos-5": { inputUsdPerMTok: 10, outputUsdPerMTok: 50 },
   // OpenAI
   "text-embedding-3-small": { inputUsdPerMTok: 0.02, outputUsdPerMTok: 0 },
   "gpt-4.1-mini": { inputUsdPerMTok: 0.4, outputUsdPerMTok: 1.6 }
 };
+var SAVINGS_BASELINE_MODEL_ID = "claude-sonnet-4-6";
 
 // packages/shared/dist/usage-stats.js
-var SONNET_INPUT_USD_PER_MTOK = MODEL_PRICES["claude-sonnet-4-6"].inputUsdPerMTok;
-var SONNET_OUTPUT_USD_PER_MTOK = MODEL_PRICES["claude-sonnet-4-6"].outputUsdPerMTok;
+var SONNET_INPUT_USD_PER_MTOK = MODEL_PRICES[SAVINGS_BASELINE_MODEL_ID].inputUsdPerMTok;
+var SONNET_OUTPUT_USD_PER_MTOK = MODEL_PRICES[SAVINGS_BASELINE_MODEL_ID].outputUsdPerMTok;
 var OUTPUT_MULTIPLIER = 0.3;
-function estCostUsd(inputTokens) {
+function estCostUsd(inputTokens, usdPerMTok) {
+  if (usdPerMTok !== void 0 && Number.isFinite(usdPerMTok) && usdPerMTok >= 0) {
+    return (Number(inputTokens) || 0) / 1e6 * usdPerMTok;
+  }
   const inputCostUsd = inputTokens / 1e6 * SONNET_INPUT_USD_PER_MTOK;
   const outputCostUsd = inputTokens * OUTPUT_MULTIPLIER / 1e6 * SONNET_OUTPUT_USD_PER_MTOK;
   return inputCostUsd + outputCostUsd;
@@ -10877,6 +9372,187 @@ var FEATURE_DISCOVERY_SYSTEM = [
   '{ "features": [ { "name": string, "summary": string, "members": string[] } ] }',
   "where each members entry is an id from the inventory. No prose outside the JSON."
 ].join("\n");
+
+// packages/shared/dist/light-native.js
+var LIGHT_READER_LIMITS = Object.freeze({
+  maxDepth: 3,
+  filesPerHost: 200,
+  memoryFileBytes: 128 * 1024,
+  planFileBytes: 64 * 1024,
+  skillFileBytes: 64 * 1024,
+  hostBytes: 2 * 1024 * 1024,
+  skillFoldersPerHost: 200,
+  resourcesPerSkill: 200,
+  /** Resource files larger than this are listed without a hash. */
+  resourceHashBytes: 16 * 1024 * 1024
+});
+
+// packages/shared/dist/native-memory-parse.js
+var import_gray_matter2 = __toESM(require_gray_matter(), 1);
+var yamlEngine = import_gray_matter2.default.engines.yaml;
+
+// packages/shared/dist/light.js
+var LIGHT_LIMITS = Object.freeze({
+  users: 1,
+  projects: 1,
+  files: 50,
+  fileBytes: 16 * 1024,
+  /** Active (non-archived) native plans synced as kind='plan'. */
+  plans: 20,
+  planBytes: 64 * 1024,
+  /** Inventoried skills: a read-only SKILL.md backup, kind='skill', always draft. */
+  skills: 50,
+  skillBytes: 64 * 1024,
+  historyVersions: 10,
+  writes: 1e3,
+  captures: 50,
+  accountCostMicros: 1e6,
+  globalCostMicros: 1e8,
+  enrollment: 100,
+  // Recall is budgeted in UTF-8 bytes, which is what it actually bounds; a
+  // byte is never less conservative than a token.
+  recallBytes: 2400,
+  recallExcerptBytes: 360,
+  recallNotes: 3,
+  captureInputTokens: 8e3,
+  captureOutputTokens: 1e3,
+  captureReservationMicros: 2e4,
+  // Memlin-funded QUERY embeddings (search + recall). Past either ceiling the
+  // same search runs without an embedder: title text, still project-scoped.
+  // Enforced by light_reserve_query_embedding (web routes and hosted MCP).
+  queryEmbeddingsPerDay: 2e3,
+  queryEmbeddingsPerMinute: 30,
+  /** Suggestions the Companion may keep open at once (light_upsert_suggestions). */
+  openSuggestions: 500,
+  suggestionsPerRequest: 100
+});
+var LIGHT_HOSTS = [
+  "claude",
+  "codex",
+  "cursor",
+  "antigravity",
+  "windsurf",
+  "devin"
+];
+function boundLightText(text, byteLimit) {
+  const encoder2 = new TextEncoder();
+  const bytes = encoder2.encode(text);
+  return bytes.length <= byteLimit ? text : new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, byteLimit)).replace(/\uFFFD$/, "");
+}
+function redactLightTranscript(text) {
+  return text.replace(
+    /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
+    "[private key removed]"
+  ).replace(
+    /\b(?:sk-[\w-]{12,}|gh[pousr]_[\w]{16,}|github_pat_[\w]{16,}|AKIA[A-Z0-9]{16})\b/g,
+    "[credential removed]"
+  ).replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[token removed]").replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]+=*/gi, "$1[removed]").replace(
+    /((?:password|secret|api[_-]?key|access[_-]?token)["']?\s*[=:]\s*)[^\s,;]+/gi,
+    "$1[removed]"
+  );
+}
+function lightCaptureExcluded(text, paths = []) {
+  return /(?:^|[\s/\\"'`])(?:\.env(?:\.[\w-]+)?|id_rsa|id_ed25519|credentials\.json)(?=$|[\s/\\"'`:])/m.test(
+    text
+  ) || paths.some((p) => p.length > 0 && text.includes(p));
+}
+
+// packages/shared/dist/skill-inventory.js
+var AGENTS_HOSTS = ["codex", "cursor", "windsurf", "copilot", "gemini_cli"];
+var CLAUDE_HOSTS = ["claude", "cursor", "windsurf", "copilot"];
+var SKILL_LOCATIONS = [
+  {
+    id: "agents-project",
+    scope: "project",
+    path: ".agents/skills",
+    hosts: [...AGENTS_HOSTS, "antigravity"],
+    owner: "agents",
+    nested: false
+  },
+  {
+    id: "agents-user",
+    scope: "user",
+    path: "~/.agents/skills",
+    hosts: AGENTS_HOSTS,
+    owner: "agents",
+    nested: false
+  },
+  {
+    id: "claude-project",
+    scope: "project",
+    path: ".claude/skills",
+    hosts: CLAUDE_HOSTS,
+    owner: "claude",
+    nested: true
+  },
+  {
+    id: "claude-user",
+    scope: "user",
+    path: "~/.claude/skills",
+    hosts: CLAUDE_HOSTS,
+    owner: "claude",
+    nested: true
+  },
+  {
+    id: "cursor-project",
+    scope: "project",
+    path: ".cursor/skills",
+    hosts: ["cursor"],
+    owner: "cursor",
+    nested: false
+  },
+  {
+    id: "cursor-user",
+    scope: "user",
+    path: "~/.cursor/skills",
+    hosts: ["cursor"],
+    owner: "cursor",
+    nested: false
+  },
+  {
+    id: "windsurf-project",
+    scope: "project",
+    path: ".windsurf/skills",
+    hosts: ["windsurf"],
+    owner: "windsurf",
+    nested: false
+  },
+  {
+    id: "windsurf-user",
+    scope: "user",
+    path: "~/.codeium/windsurf/skills",
+    hosts: ["windsurf"],
+    owner: "windsurf",
+    nested: false
+  },
+  {
+    id: "antigravity-user",
+    scope: "user",
+    path: "~/.gemini/antigravity/skills",
+    hosts: ["antigravity"],
+    owner: "antigravity",
+    nested: false,
+    unverified: true
+  },
+  {
+    id: "antigravity-config-user",
+    scope: "user",
+    path: "~/.gemini/config/skills",
+    hosts: ["antigravity"],
+    owner: "antigravity",
+    nested: false,
+    unverified: true
+  },
+  {
+    id: "codex-legacy-user",
+    scope: "user",
+    path: "~/.codex/skills",
+    hosts: ["codex"],
+    owner: "codex",
+    nested: false,
+    unverified: true
+  }
+];
 
 // packages/shared/dist/memory-taxonomy.js
 var MEMORY_TAXONOMY = [
@@ -10997,6 +9673,17829 @@ var FACET_BY_TERM = new Map(
   MEMORY_TAXONOMY.map((e) => [e.term, e.facet])
 );
 
+// packages/shared/dist/context-engine.js
+var CONTEXT_CONTRACT_VERSION = 1;
+var ContractIdSchema = external_exports.string().min(1).max(256);
+var ContractKeySchema = external_exports.string().min(1).max(128).regex(/^[a-z][a-z0-9._:-]*$/, "must be a lowercase namespaced identifier");
+var Sha256Schema = external_exports.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase SHA-256 digest");
+var IsoDateSchema = external_exports.string().datetime({ offset: true });
+var ContractJsonValueSchema = external_exports.lazy(
+  () => external_exports.union([
+    external_exports.null(),
+    external_exports.boolean(),
+    external_exports.number().finite(),
+    external_exports.string(),
+    external_exports.array(ContractJsonValueSchema),
+    external_exports.record(ContractJsonValueSchema)
+  ])
+);
+var ContextReferenceV1Schema = external_exports.object({
+  type: ContractKeySchema,
+  id: ContractIdSchema,
+  /** Provider namespace for identifiers that are not native Memlin IDs. */
+  provider_id: ContractKeySchema.optional(),
+  /** Source-side revision used to invalidate stale manifests and bundles. */
+  revision: external_exports.string().min(1).max(256).optional()
+}).strict();
+var ContextFocusV1Schema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({
+    kind: external_exports.literal("thought"),
+    thought_id: ContractIdSchema,
+    revision: external_exports.string().min(1).max(256).optional()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("card"),
+    thought_id: ContractIdSchema,
+    card_id: ContractIdSchema,
+    map_id: ContractIdSchema.optional(),
+    revision: external_exports.string().min(1).max(256).optional()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("resource"),
+    resource_id: ContractIdSchema,
+    version: external_exports.string().min(1).max(512).optional(),
+    locator: external_exports.string().min(1).max(4096).optional()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("jira_issue"),
+    provider_binding_id: ContractIdSchema,
+    issue_key: ContractIdSchema,
+    source_revision: external_exports.string().min(1).max(512).optional()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("conversation"),
+    conversation_id: ContractIdSchema,
+    message_id: ContractIdSchema.optional()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("action"),
+    action_id: ContractIdSchema,
+    execution_id: ContractIdSchema.optional()
+  }).strict()
+]);
+var CONTEXT_CAPABILITIES = [
+  "explore",
+  "explain",
+  "research",
+  "decide",
+  "plan",
+  "act",
+  "review"
+];
+var ContextCapabilityV1Schema = external_exports.enum(CONTEXT_CAPABILITIES);
+var ContextAudienceV1Schema = external_exports.object({
+  kind: external_exports.enum(["private", "team", "room", "external", "public"]),
+  /** Memlin or mapped external principals allowed to receive this bundle. */
+  participant_ids: external_exports.array(ContractIdSchema).max(500).default([]),
+  /** Exact room or external tenant/channel boundary for scoped audiences. */
+  context_id: ContractIdSchema.optional()
+}).strict().superRefine((audience, ctx) => {
+  if (audience.kind === "public" && audience.participant_ids.length > 0) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["participant_ids"],
+      message: "public audiences cannot name private participants"
+    });
+  }
+  if (audience.kind === "private" && audience.participant_ids.length !== 1) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["participant_ids"],
+      message: "private audiences must name exactly one recipient"
+    });
+  }
+  if ((audience.kind === "room" || audience.kind === "external") && audience.participant_ids.length === 0) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["participant_ids"],
+      message: `${audience.kind} audiences must name every recipient`
+    });
+  }
+  if ((audience.kind === "room" || audience.kind === "external") && !audience.context_id) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["context_id"],
+      message: `${audience.kind} audiences require an exact context boundary`
+    });
+  }
+});
+var ContextManifestV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  account_id: external_exports.string().uuid(),
+  /** The only location that receives saves and navigation by default. */
+  home: ContextReferenceV1Schema,
+  /** The only location whose governance and funding policy controls the run. */
+  policy_anchor: ContextReferenceV1Schema,
+  /** Additional read-only retrieval contexts. */
+  linked_contexts: external_exports.array(ContextReferenceV1Schema).max(64).default([]),
+  /** Current object within the authorized contexts; null means no narrower focus. */
+  focus: ContextFocusV1Schema.nullable(),
+  /** Declared purpose used by providers, policy, safety, and audit layers. */
+  capability: ContextCapabilityV1Schema,
+  audience: ContextAudienceV1Schema,
+  /** ACL/policy snapshot identifier supplied by the authoritative server. */
+  acl_revision: external_exports.string().min(1).max(256)
+}).strict().superRefine((manifest, ctx) => {
+  const seen = /* @__PURE__ */ new Map();
+  const references = [
+    { ref: manifest.home, path: ["home"], location: "home" },
+    {
+      ref: manifest.policy_anchor,
+      path: ["policy_anchor"],
+      location: "policy_anchor"
+    },
+    ...manifest.linked_contexts.map((ref, index) => ({
+      ref,
+      path: ["linked_contexts", index],
+      location: `linked_contexts.${index}`
+    }))
+  ];
+  references.forEach(({ ref, path: path13, location }) => {
+    const identity = contextReferenceIdentityKey(ref);
+    const prior = seen.get(identity);
+    if (prior && prior.revision !== ref.revision) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: path13,
+        message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
+      });
+    } else if (prior && location.startsWith("linked_contexts.")) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: path13,
+        message: `duplicate linked context ${identity}`
+      });
+    }
+    if (!prior) seen.set(identity, { revision: ref.revision, location });
+  });
+});
+var ExecutionActorV1Schema = external_exports.object({
+  type: external_exports.enum(["human", "service", "agent", "end_user", "connector"]),
+  id: ContractIdSchema
+}).strict();
+var ExecutionPrincipalV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  account_id: external_exports.string().uuid(),
+  actor: ExecutionActorV1Schema,
+  /** Explicit delegation chain; never collapse this into actor.id. */
+  on_behalf_of: ExecutionActorV1Schema.optional(),
+  credential: external_exports.object({
+    id: ContractIdSchema,
+    scopes: external_exports.array(ContractKeySchema).max(256),
+    expires_at: IsoDateSchema.optional()
+  }).strict(),
+  installation: external_exports.object({
+    id: ContractIdSchema,
+    trust: external_exports.enum(["verified", "reported"])
+  }).strict().optional(),
+  external: external_exports.object({
+    provider: ContractKeySchema,
+    tenant_id: ContractIdSchema,
+    subject_id: ContractIdSchema,
+    mapped_user_id: external_exports.string().uuid().optional()
+  }).strict().optional(),
+  session_id: ContractIdSchema.optional()
+}).strict();
+var EvidenceScoreV1Schema = external_exports.object({
+  semantic: external_exports.number().finite().optional(),
+  lexical: external_exports.number().finite().optional(),
+  provider: external_exports.number().finite().optional(),
+  freshness: external_exports.number().finite().optional(),
+  /** Populated only by the resolver, never trusted from an external source. */
+  final: external_exports.number().finite().optional()
+}).strict();
+var EvidenceProvenanceV1Schema = external_exports.object({
+  canonical_uri: external_exports.string().url().max(4096).optional(),
+  source_version: external_exports.string().min(1).max(512).optional(),
+  author: external_exports.string().min(1).max(512).optional(),
+  occurred_at: IsoDateSchema.optional(),
+  retrieved_at: IsoDateSchema,
+  locator: external_exports.string().min(1).max(4096).optional(),
+  content_hash: Sha256Schema,
+  rights: external_exports.string().min(1).max(512).optional()
+}).strict();
+var EvidenceSecurityV1Schema = external_exports.object({
+  audience: external_exports.enum(["private", "team", "room", "external", "public"]),
+  classification: external_exports.enum(["public", "internal", "confidential", "restricted"]),
+  policy_tags: external_exports.array(ContractKeySchema).max(64).default([]),
+  /** Principals authorized by the provider for this exact evidence revision. */
+  authorized_principal_ids: external_exports.array(ContractIdSchema).max(500).default([]),
+  /** Exact room or external boundary when evidence is scoped below a team. */
+  audience_context_id: ContractIdSchema.optional(),
+  /** Server-observed ACL revision used to reject stale recipient decisions. */
+  acl_revision: external_exports.string().min(1).max(256).optional()
+}).strict().superRefine((security, ctx) => {
+  if (security.audience === "private" && security.authorized_principal_ids.length !== 1) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["authorized_principal_ids"],
+      message: "private evidence must bind exactly one authorized recipient"
+    });
+  }
+  if ((security.audience === "room" || security.audience === "external") && security.authorized_principal_ids.length === 0) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["authorized_principal_ids"],
+      message: `${security.audience} evidence must bind its authorized recipients`
+    });
+  }
+  if ((security.audience === "room" || security.audience === "external") && !security.audience_context_id) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["audience_context_id"],
+      message: `${security.audience} evidence must bind its exact context`
+    });
+  }
+  if (security.audience !== "public" && !security.acl_revision) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["acl_revision"],
+      message: "non-public evidence must bind an exact ACL revision"
+    });
+  }
+});
+var EvidenceCandidateV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  id: ContractIdSchema,
+  provider_id: ContractKeySchema,
+  /** Governing context used for authorization, not merely a display parent. */
+  context_ref: ContextReferenceV1Schema,
+  kind: ContractKeySchema,
+  title: external_exports.string().min(1).max(1024),
+  content: external_exports.string().max(2e6),
+  score: EvidenceScoreV1Schema.default({}),
+  provenance: EvidenceProvenanceV1Schema,
+  security: EvidenceSecurityV1Schema,
+  embedding_profile_id: ContractIdSchema.optional(),
+  estimated_tokens: external_exports.number().int().nonnegative().optional(),
+  metadata: external_exports.record(ContractJsonValueSchema).default({})
+}).strict();
+var OmittedContextV1Schema = external_exports.object({
+  context_ref: ContextReferenceV1Schema,
+  reason_code: ContractKeySchema,
+  reason: external_exports.string().min(1).max(1024).optional()
+}).strict();
+var ProviderCoverageV1Schema = external_exports.object({
+  provider_id: ContractKeySchema,
+  provider_version: external_exports.string().min(1).max(128),
+  status: external_exports.enum(["complete", "partial", "unavailable"]),
+  attempted_contexts: external_exports.array(ContextReferenceV1Schema).max(128),
+  covered_contexts: external_exports.array(ContextReferenceV1Schema).max(128),
+  omitted_contexts: external_exports.array(OmittedContextV1Schema).max(128).default([]),
+  reason_code: ContractKeySchema.optional(),
+  reason: external_exports.string().min(1).max(2048).optional(),
+  truncated: external_exports.boolean().default(false),
+  started_at: IsoDateSchema,
+  completed_at: IsoDateSchema
+}).strict();
+var ProviderReceiptV1Schema = external_exports.object({
+  provider_id: ContractKeySchema,
+  provider_version: external_exports.string().min(1).max(128),
+  request_hash: Sha256Schema,
+  /** Exact policy snapshot returned by provider authorization. */
+  policy_revision: external_exports.string().min(1).max(256),
+  latency_ms: external_exports.number().int().nonnegative(),
+  retrieved_at: IsoDateSchema,
+  source_revision: external_exports.string().min(1).max(512).optional(),
+  credential_binding_id: ContractIdSchema.optional(),
+  cost_microunits: external_exports.number().int().nonnegative().optional()
+}).strict();
+var RequiredCoreLaneStatusV1Schema = external_exports.object({
+  status: external_exports.enum(["not_evaluated", "complete", "partial", "unavailable", "not_applicable"]),
+  expected_ids: external_exports.array(ContractIdSchema).max(1e4).default([]),
+  delivered_ids: external_exports.array(ContractIdSchema).max(1e4).default([]),
+  missing_ids: external_exports.array(ContractIdSchema).max(1e4).default([]),
+  errors: external_exports.array(external_exports.string().min(1).max(2048)).max(256).default([])
+}).strict().superRefine((lane, ctx) => {
+  const delivered = new Set(lane.delivered_ids);
+  const overlap = lane.missing_ids.find((id) => delivered.has(id));
+  if (overlap) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["missing_ids"],
+      message: `required core item ${overlap} cannot be both delivered and missing`
+    });
+  }
+  if (lane.status === "complete" && (lane.missing_ids.length > 0 || lane.errors.length > 0)) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["status"],
+      message: "complete required core status cannot contain missing items or errors"
+    });
+  }
+});
+var RequiredCoreStatusV1Schema = external_exports.object({
+  /** Required documents selected through the policy/governance chain. */
+  governance: RequiredCoreLaneStatusV1Schema,
+  /** The Project Brain overview, when the policy anchor is a Project. */
+  project_overview: RequiredCoreLaneStatusV1Schema
+}).strict();
+var EvidenceReferenceV1Schema = external_exports.object({
+  provider_id: ContractKeySchema,
+  evidence_id: ContractIdSchema,
+  source_version: external_exports.string().min(1).max(512).optional()
+}).strict();
+var ContextConflictV1Schema = external_exports.object({
+  id: ContractIdSchema,
+  kind: ContractKeySchema,
+  summary: external_exports.string().min(1).max(4096),
+  evidence_refs: external_exports.array(EvidenceReferenceV1Schema).min(2).max(64),
+  status: external_exports.enum(["unresolved", "resolved"]),
+  resolution_evidence_ref: EvidenceReferenceV1Schema.optional()
+}).strict();
+var BundleOmissionSubjectV1Schema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("context"), context_ref: ContextReferenceV1Schema }).strict(),
+  external_exports.object({ kind: external_exports.literal("provider"), provider_id: ContractKeySchema }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("evidence"),
+    evidence_ref: EvidenceReferenceV1Schema
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("required_core"),
+    lane: external_exports.enum(["governance", "project_overview"]),
+    item_id: ContractIdSchema.optional()
+  }).strict()
+]);
+var BundleOmissionV1Schema = external_exports.object({
+  subject: BundleOmissionSubjectV1Schema,
+  reason_code: ContractKeySchema,
+  reason: external_exports.string().min(1).max(2048).optional(),
+  estimated_tokens: external_exports.number().int().nonnegative().optional()
+}).strict();
+var EvidenceRetractionV1Schema = external_exports.object({
+  evidence_ref: EvidenceReferenceV1Schema,
+  reason_code: ContractKeySchema,
+  reason: external_exports.string().min(1).max(2048).optional(),
+  retracted_at: IsoDateSchema,
+  replacement_evidence_ref: EvidenceReferenceV1Schema.optional()
+}).strict();
+var ContextSafetyFindingV1Schema = external_exports.object({
+  code: ContractKeySchema,
+  severity: external_exports.enum(["info", "warning", "error"]),
+  message: external_exports.string().min(1).max(2048).optional(),
+  evidence_refs: external_exports.array(EvidenceReferenceV1Schema).max(64).default([])
+}).strict();
+var ContextSafetyStateV1Schema = external_exports.object({
+  status: external_exports.enum(["not_evaluated", "clear", "review_required", "blocked"]),
+  policy_tags: external_exports.array(ContractKeySchema).max(128).default([]),
+  findings: external_exports.array(ContextSafetyFindingV1Schema).max(256).default([]),
+  evaluated_at: IsoDateSchema.optional(),
+  evaluator_id: ContractIdSchema.optional()
+}).strict();
+var ContextTokenAccountingV1Schema = external_exports.object({
+  /** Null means this stage was not given a token limit. */
+  limit: external_exports.number().int().nonnegative().nullable().default(null),
+  used: external_exports.number().int().nonnegative().default(0),
+  reserved: external_exports.number().int().nonnegative().default(0),
+  omitted: external_exports.number().int().nonnegative().default(0),
+  truncated: external_exports.boolean().default(false)
+}).strict();
+var ContextBundleV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  /** Content-addressed ID of this exact retrieval result. */
+  bundle_id: Sha256Schema,
+  stage: external_exports.enum(["retrieved", "resolved"]),
+  manifest: ContextManifestV1Schema,
+  manifest_hash: Sha256Schema,
+  query: external_exports.string().min(1).max(4e3),
+  requested_kinds: external_exports.array(ContractKeySchema).max(128),
+  created_at: IsoDateSchema,
+  evidence: external_exports.array(EvidenceCandidateV1Schema).max(1e4),
+  coverage: external_exports.array(ProviderCoverageV1Schema).max(256),
+  receipts: external_exports.array(ProviderReceiptV1Schema).max(256),
+  required_core_status: RequiredCoreStatusV1Schema.default({
+    governance: {
+      status: "not_evaluated",
+      expected_ids: [],
+      delivered_ids: [],
+      missing_ids: [],
+      errors: []
+    },
+    project_overview: {
+      status: "not_evaluated",
+      expected_ids: [],
+      delivered_ids: [],
+      missing_ids: [],
+      errors: []
+    }
+  }),
+  conflicts: external_exports.array(ContextConflictV1Schema).max(1e3).default([]),
+  omissions: external_exports.array(BundleOmissionV1Schema).max(1e4).default([]),
+  retractions: external_exports.array(EvidenceRetractionV1Schema).max(1e4).default([]),
+  safety: ContextSafetyStateV1Schema.default({
+    status: "not_evaluated",
+    policy_tags: [],
+    findings: []
+  }),
+  token_accounting: ContextTokenAccountingV1Schema.default({
+    limit: null,
+    used: 0,
+    reserved: 0,
+    omitted: 0,
+    truncated: false
+  }),
+  warnings: external_exports.array(external_exports.string().min(1).max(2048)).max(256).default([]),
+  resolver_audit_id: ContractIdSchema.optional()
+}).strict().superRefine((bundle, ctx) => {
+  const contextKeys = new Set(
+    contextReferencesFromManifestV1(bundle.manifest).map(contextReferenceKey)
+  );
+  bundle.evidence.forEach((candidate, index) => {
+    if (!contextKeys.has(contextReferenceKey(candidate.context_ref))) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["evidence", index, "context_ref"],
+        message: "bundle evidence is outside the exact manifest contexts"
+      });
+      return;
+    }
+    if (!evidenceCanReachContextAudienceV1(
+      candidate.security,
+      bundle.manifest,
+      candidate.context_ref
+    )) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["evidence", index, "security"],
+        message: `bundle evidence is not permitted for the ${bundle.manifest.audience.kind} audience`
+      });
+    }
+  });
+  bundle.coverage.forEach((coverage, coverageIndex) => {
+    const references = [
+      ...coverage.attempted_contexts.map((ref, index) => ({
+        ref,
+        path: ["coverage", coverageIndex, "attempted_contexts", index]
+      })),
+      ...coverage.covered_contexts.map((ref, index) => ({
+        ref,
+        path: ["coverage", coverageIndex, "covered_contexts", index]
+      })),
+      ...coverage.omitted_contexts.map((entry, index) => ({
+        ref: entry.context_ref,
+        path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
+      }))
+    ];
+    for (const { ref, path: path13 } of references) {
+      if (!contextKeys.has(contextReferenceKey(ref))) {
+        ctx.addIssue({
+          code: external_exports.ZodIssueCode.custom,
+          path: path13,
+          message: "provider coverage is outside the exact manifest contexts"
+        });
+      }
+    }
+  });
+  bundle.receipts.forEach((receipt, index) => {
+    if (receipt.policy_revision !== bundle.manifest.acl_revision) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["receipts", index, "policy_revision"],
+        message: "provider receipt policy revision must match the bundle ACL revision"
+      });
+    }
+  });
+});
+function contextReferenceKey(ref) {
+  return `${ref.provider_id ?? "memlin"}\0${ref.type}\0${ref.id}\0${ref.revision ?? ""}`;
+}
+function contextReferenceIdentityKey(ref) {
+  return `${ref.provider_id ?? "memlin"}\0${ref.type}\0${ref.id}`;
+}
+function contextReferencesFromManifestV1(manifest) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const ref of [manifest.home, manifest.policy_anchor, ...manifest.linked_contexts]) {
+    byKey.set(contextReferenceKey(ref), ref);
+  }
+  return [...byKey.values()];
+}
+function evidenceCanReachContextAudienceV1(security, manifest, sourceContext) {
+  const sourceAudience = security.audience;
+  const audience = manifest.audience;
+  if (sourceAudience === "public") return security.classification === "public";
+  if (security.acl_revision !== manifest.acl_revision || audience.kind === "public") return false;
+  const authorizedPrincipals = new Set(security.authorized_principal_ids);
+  const recipientsAreBound = audience.participant_ids.length > 0 && audience.participant_ids.every((participantId) => authorizedPrincipals.has(participantId));
+  const exactAudienceContext = security.audience_context_id === audience.context_id;
+  const exactPrivateSourceContext = Boolean(security.audience_context_id) && sourceContext.id === security.audience_context_id && (sourceAudience === "room" && sourceContext.type === "room" || sourceAudience === "external" && sourceContext.type === "external_collection");
+  const audienceAllowed = audience.kind === "external" ? sourceAudience === "external" && exactAudienceContext && recipientsAreBound : audience.kind === "team" ? sourceAudience === "team" : audience.kind === "room" ? sourceAudience === "room" && exactAudienceContext && recipientsAreBound || sourceAudience === "team" && recipientsAreBound : sourceAudience === "team" || sourceAudience === "private" && recipientsAreBound || (sourceAudience === "room" || sourceAudience === "external") && exactPrivateSourceContext && recipientsAreBound;
+  if (!audienceAllowed) return false;
+  if (security.classification === "restricted") {
+    return (audience.kind === "private" || audience.kind === "room") && recipientsAreBound;
+  }
+  return true;
+}
+
+// packages/shared/dist/context-provider.js
+var ContextProviderManifestV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  id: ContractKeySchema,
+  implementation_version: external_exports.string().min(1).max(128),
+  display_name: external_exports.string().min(1).max(128),
+  supported_context_types: external_exports.array(ContractKeySchema).min(1).max(64),
+  supported_kinds: external_exports.array(ContractKeySchema).min(1).max(128),
+  latency_class: external_exports.enum(["indexed", "local", "live"]),
+  required_scopes: external_exports.array(ContractKeySchema).max(128).default([]),
+  default_timeout_ms: external_exports.number().int().min(10).max(6e4).default(5e3),
+  max_candidates: external_exports.number().int().min(1).max(1e3).default(100)
+}).strict().superRefine((manifest, ctx) => {
+  for (const field of [
+    "supported_context_types",
+    "supported_kinds",
+    "required_scopes"
+  ]) {
+    const values = manifest[field];
+    if (new Set(values).size !== values.length) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: [field],
+        message: `${field} must not contain duplicates`
+      });
+    }
+  }
+});
+var ContextProviderAuthorizationRequestV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  request_id: ContractIdSchema,
+  principal: ExecutionPrincipalV1Schema,
+  manifest: ContextManifestV1Schema,
+  requested_contexts: external_exports.array(ContextReferenceV1Schema).min(1).max(128)
+}).strict();
+var ContextProviderAuthorizationV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  decision: external_exports.enum(["allow", "partial", "deny"]),
+  authorized_contexts: external_exports.array(ContextReferenceV1Schema).max(128),
+  denied_contexts: external_exports.array(
+    external_exports.object({
+      context_ref: ContextReferenceV1Schema,
+      reason_code: ContractKeySchema,
+      reason: external_exports.string().min(1).max(1024).optional()
+    }).strict()
+  ).max(128).default([]),
+  /** Exact manifest ACL/policy revision used for this authorization decision. */
+  policy_revision: external_exports.string().min(1).max(256)
+}).strict().superRefine((authorization, ctx) => {
+  if (authorization.decision === "deny" && authorization.authorized_contexts.length > 0) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["authorized_contexts"],
+      message: "deny decisions cannot authorize contexts"
+    });
+  }
+  if (authorization.decision === "allow" && authorization.authorized_contexts.length === 0) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["authorized_contexts"],
+      message: "allow decisions require at least one authorized context"
+    });
+  }
+  if (authorization.decision === "allow" && authorization.denied_contexts.length > 0) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["denied_contexts"],
+      message: "allow decisions cannot deny contexts"
+    });
+  }
+  if (authorization.decision === "partial" && (authorization.authorized_contexts.length === 0 || authorization.denied_contexts.length === 0)) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["decision"],
+      message: "partial decisions require both authorized and denied contexts"
+    });
+  }
+  if (authorization.decision === "deny" && authorization.denied_contexts.length === 0) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["denied_contexts"],
+      message: "deny decisions must identify every denied context"
+    });
+  }
+});
+var ContextProviderRequestV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  request_id: ContractIdSchema,
+  principal: ExecutionPrincipalV1Schema,
+  manifest: ContextManifestV1Schema,
+  authorized_contexts: external_exports.array(ContextReferenceV1Schema).min(1).max(128),
+  query: external_exports.string().min(1).max(4e3),
+  query_embedding: external_exports.array(external_exports.number().finite()).min(1).max(8192).optional(),
+  requested_kinds: external_exports.array(ContractKeySchema).max(128),
+  max_candidates: external_exports.number().int().min(1).max(1e3),
+  token_budget: external_exports.number().int().min(1).max(1e6).optional(),
+  deadline_at: IsoDateSchema
+}).strict();
+var ContextProviderCoverageClaimV1Schema = external_exports.object({
+  status: external_exports.enum(["complete", "partial", "unavailable"]),
+  covered_contexts: external_exports.array(ContextReferenceV1Schema).max(128),
+  omitted_contexts: external_exports.array(
+    external_exports.object({
+      context_ref: ContextReferenceV1Schema,
+      reason_code: ContractKeySchema,
+      reason: external_exports.string().min(1).max(1024).optional()
+    }).strict()
+  ).max(128).default([]),
+  reason_code: ContractKeySchema.optional(),
+  reason: external_exports.string().min(1).max(2048).optional(),
+  truncated: external_exports.boolean().default(false)
+}).strict().superRefine((coverage, ctx) => {
+  if (coverage.status !== "complete" && !coverage.reason_code) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["reason_code"],
+      message: "partial and unavailable coverage require a reason_code"
+    });
+  }
+  if (coverage.status === "unavailable" && coverage.covered_contexts.length > 0) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["covered_contexts"],
+      message: "unavailable coverage cannot claim covered contexts"
+    });
+  }
+});
+var ContextProviderResultV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  candidates: external_exports.array(EvidenceCandidateV1Schema).max(1e3),
+  coverage: ContextProviderCoverageClaimV1Schema,
+  receipt: external_exports.object({
+    source_revision: external_exports.string().min(1).max(512).optional(),
+    credential_binding_id: ContractIdSchema.optional(),
+    cost_microunits: external_exports.number().int().nonnegative().optional()
+  }).strict().default({})
+}).strict();
+var CredentialBrokerInvocationV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  binding_id: ContractIdSchema,
+  operation_id: ContractKeySchema,
+  input: external_exports.record(ContractJsonValueSchema).default({})
+}).strict();
+var CredentialBrokerResultV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  status: external_exports.number().int().min(100).max(599),
+  content_type: external_exports.string().min(1).max(256).optional(),
+  body: external_exports.string(),
+  truncated: external_exports.boolean().default(false),
+  receipt_id: ContractIdSchema,
+  source_revision: external_exports.string().min(1).max(512).optional()
+}).strict();
+
+// packages/shared/dist/context-harness.js
+var HARNESS_ARTIFACT_KINDS = [
+  "markdown",
+  "document",
+  "skill",
+  "memory",
+  "schema",
+  "prompt",
+  "source",
+  "action",
+  "agent"
+];
+var HarnessArtifactRefV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  kind: external_exports.enum(HARNESS_ARTIFACT_KINDS),
+  id: ContractIdSchema,
+  context_ref: ContextReferenceV1Schema,
+  revision: external_exports.string().min(1).max(512),
+  title: external_exports.string().min(1).max(1024).optional(),
+  provider_id: ContractKeySchema.optional(),
+  canonical_uri: external_exports.string().url().max(4096).optional(),
+  content_hash: Sha256Schema.optional(),
+  media_type: external_exports.string().min(1).max(256).optional()
+}).strict();
+var HarnessGraphNodeV1Schema = external_exports.object({
+  id: ContractIdSchema,
+  artifact: HarnessArtifactRefV1Schema,
+  position: external_exports.object({ x: external_exports.number().finite(), y: external_exports.number().finite() }).strict().optional(),
+  collapsed: external_exports.boolean().default(false),
+  configuration: external_exports.record(ContractJsonValueSchema).default({})
+}).strict();
+var HARNESS_EDGE_TYPES = [
+  "contains",
+  "references",
+  "grounds",
+  "produces",
+  "consumes",
+  "invokes",
+  "delegates_to",
+  "depends_on",
+  "supersedes",
+  "answers",
+  "decides"
+];
+var HarnessGraphEdgeV1Schema = external_exports.object({
+  id: ContractIdSchema,
+  type: external_exports.enum(HARNESS_EDGE_TYPES),
+  from_node_id: ContractIdSchema,
+  to_node_id: ContractIdSchema,
+  label: external_exports.string().min(1).max(256).optional(),
+  configuration: external_exports.record(ContractJsonValueSchema).default({})
+}).strict();
+var HarnessGraphV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  id: ContractIdSchema,
+  revision: external_exports.string().min(1).max(512),
+  manifest: ContextManifestV1Schema,
+  nodes: external_exports.array(HarnessGraphNodeV1Schema).max(1e4),
+  edges: external_exports.array(HarnessGraphEdgeV1Schema).max(5e4),
+  metadata: external_exports.record(ContractJsonValueSchema).default({})
+}).strict().superRefine((graph, ctx) => {
+  const nodeIds = /* @__PURE__ */ new Set();
+  graph.nodes.forEach((node, index) => {
+    if (nodeIds.has(node.id)) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["nodes", index, "id"],
+        message: `duplicate graph node id ${node.id}`
+      });
+    }
+    nodeIds.add(node.id);
+  });
+  const edgeIds = /* @__PURE__ */ new Set();
+  graph.edges.forEach((edge, index) => {
+    if (edgeIds.has(edge.id)) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["edges", index, "id"],
+        message: `duplicate graph edge id ${edge.id}`
+      });
+    }
+    edgeIds.add(edge.id);
+    if (!nodeIds.has(edge.from_node_id)) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["edges", index, "from_node_id"],
+        message: `unknown graph node ${edge.from_node_id}`
+      });
+    }
+    if (!nodeIds.has(edge.to_node_id)) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["edges", index, "to_node_id"],
+        message: `unknown graph node ${edge.to_node_id}`
+      });
+    }
+  });
+});
+var HarnessCompileRequestV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  request_id: ContractIdSchema,
+  principal: ExecutionPrincipalV1Schema,
+  graph: HarnessGraphV1Schema,
+  requested_kinds: external_exports.array(ContractKeySchema).max(128).default([]),
+  provider_ids: external_exports.array(ContractKeySchema).max(64).default([]),
+  max_tokens: external_exports.number().int().min(256).max(1e6).optional()
+}).strict();
+var HarnessCompileResultV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  compile_id: Sha256Schema,
+  graph_id: ContractIdSchema,
+  graph_revision: external_exports.string().min(1).max(512),
+  graph_hash: Sha256Schema,
+  manifest_hash: Sha256Schema,
+  compiled_at: IsoDateSchema,
+  artifacts: external_exports.array(
+    external_exports.object({
+      node_id: ContractIdSchema,
+      artifact: HarnessArtifactRefV1Schema,
+      status: external_exports.enum(["ready", "stale", "unavailable", "unauthorized"]),
+      reason: external_exports.string().min(1).max(2048).optional()
+    }).strict()
+  ),
+  warnings: external_exports.array(external_exports.string().min(1).max(2048)).max(256).default([]),
+  bundle: ContextBundleV1Schema.optional()
+}).strict().superRefine((result, ctx) => {
+  if (result.bundle && result.bundle.manifest_hash !== result.manifest_hash) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["bundle", "manifest_hash"],
+      message: "compiled bundle manifest_hash must match compile result"
+    });
+  }
+});
+var HandoffLiveReferenceV1Schema = external_exports.object({
+  context_ref: ContextReferenceV1Schema,
+  permissions: external_exports.array(external_exports.enum(["read", "comment", "write", "execute", "delegate"])).min(1).max(5),
+  refresh_policy: external_exports.enum(["never", "on_open", "on_demand"])
+}).strict();
+var AgentHandoffEnvelopeV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  handoff_id: ContractIdSchema,
+  created_at: IsoDateSchema,
+  expires_at: IsoDateSchema.optional(),
+  from: ExecutionActorV1Schema,
+  to: external_exports.object({
+    agent_id: ContractIdSchema.optional(),
+    agent_kind: ContractKeySchema
+  }).strict(),
+  task: external_exports.string().min(1).max(16e3),
+  /** Immutable evidence delivered to the receiving agent. */
+  frozen_bundle: ContextBundleV1Schema,
+  resolver_audit_id: ContractIdSchema,
+  manifest_hash: Sha256Schema,
+  /** Explicitly refreshable objects; never implied by the frozen bundle. */
+  live_refs: external_exports.array(HandoffLiveReferenceV1Schema).max(128).default([]),
+  permissions: external_exports.object({
+    scopes: external_exports.array(ContractKeySchema).max(256),
+    provider_ids: external_exports.array(ContractKeySchema).max(128).default([]),
+    action_ids: external_exports.array(ContractKeySchema).max(128).default([]),
+    may_refresh_bundle: external_exports.boolean().default(false),
+    may_delegate: external_exports.boolean().default(false)
+  }).strict()
+}).strict().superRefine((handoff, ctx) => {
+  if (handoff.frozen_bundle.manifest_hash !== handoff.manifest_hash) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["manifest_hash"],
+      message: "handoff manifest_hash must match the frozen bundle"
+    });
+  }
+  if (handoff.frozen_bundle.resolver_audit_id && handoff.frozen_bundle.resolver_audit_id !== handoff.resolver_audit_id) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["resolver_audit_id"],
+      message: "handoff audit must match the frozen bundle audit"
+    });
+  }
+  const seen = /* @__PURE__ */ new Set();
+  handoff.live_refs.forEach((entry, index) => {
+    const key = contextReferenceKey(entry.context_ref);
+    if (seen.has(key)) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["live_refs", index, "context_ref"],
+        message: `duplicate live reference ${key}`
+      });
+    }
+    seen.add(key);
+  });
+});
+
+// packages/shared/dist/context-ingest.js
+var IngestEnvelopeV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  event_id: ContractIdSchema,
+  idempotency_key: external_exports.string().min(1).max(1024),
+  operation: external_exports.enum(["upsert", "delete"]),
+  source: external_exports.object({
+    provider_id: ContractKeySchema,
+    tenant_id: ContractIdSchema,
+    collection_id: ContractIdSchema,
+    external_id: ContractIdSchema,
+    canonical_uri: external_exports.string().url().max(4096).optional(),
+    source_revision: external_exports.string().min(1).max(512).optional(),
+    occurred_at: IsoDateSchema.optional(),
+    observed_at: IsoDateSchema
+  }).strict(),
+  content: external_exports.object({
+    title: external_exports.string().min(1).max(1024),
+    media_type: external_exports.string().min(1).max(256),
+    body: external_exports.string().max(2e6).optional(),
+    content_hash: Sha256Schema.optional(),
+    language: external_exports.string().min(2).max(64).optional()
+  }).strict(),
+  provenance: external_exports.object({
+    author_external_id: ContractIdSchema.optional(),
+    author_display_name: external_exports.string().min(1).max(512).optional(),
+    locator: external_exports.string().min(1).max(4096).optional(),
+    rights: external_exports.string().min(1).max(512).optional()
+  }).strict().default({}),
+  security: EvidenceSecurityV1Schema,
+  context_refs: external_exports.array(ContextReferenceV1Schema).max(128).default([]),
+  cursor: external_exports.object({
+    stream: ContractIdSchema,
+    value: external_exports.string().min(1).max(4096)
+  }).strict().optional(),
+  attempt: external_exports.number().int().positive().default(1),
+  metadata: external_exports.record(ContractJsonValueSchema).default({})
+}).strict().superRefine((envelope, ctx) => {
+  if (envelope.operation === "upsert") {
+    if (envelope.content.body === void 0) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["content", "body"],
+        message: "upsert events require content.body"
+      });
+    }
+    if (!envelope.content.content_hash) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["content", "content_hash"],
+        message: "upsert events require content.content_hash"
+      });
+    }
+  }
+});
+var IngestReceiptV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  event_id: ContractIdSchema,
+  idempotency_key: external_exports.string().min(1).max(1024),
+  status: external_exports.enum(["accepted", "duplicate", "indexed", "deleted", "rejected", "retry"]),
+  evidence_ids: external_exports.array(ContractIdSchema).max(1e4).default([]),
+  index_job_id: ContractIdSchema.optional(),
+  next_cursor: external_exports.string().min(1).max(4096).optional(),
+  error_code: ContractKeySchema.optional(),
+  error: external_exports.string().min(1).max(4096).optional(),
+  recorded_at: IsoDateSchema
+}).strict().superRefine((receipt, ctx) => {
+  if (["rejected", "retry"].includes(receipt.status) && !receipt.error_code) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["error_code"],
+      message: `${receipt.status} receipts require error_code`
+    });
+  }
+});
+
+// packages/shared/dist/context-action.js
+var ActionOperationV1Schema = external_exports.object({
+  description: external_exports.string().min(1).max(1024),
+  input_schema: external_exports.record(ContractJsonValueSchema),
+  output_schema: external_exports.record(ContractJsonValueSchema),
+  effect: external_exports.enum(["read", "internal_write", "external_write"]),
+  risk: external_exports.enum(["low", "medium", "high"]),
+  required_scopes: external_exports.array(ContractKeySchema).max(128).default([]),
+  approval: external_exports.enum(["none", "user", "admin"]),
+  idempotency: external_exports.enum(["required", "supported", "none"]),
+  allowed_context_types: external_exports.array(ContractKeySchema).min(1).max(64),
+  timeout_ms: external_exports.number().int().min(10).max(3e5).default(3e4),
+  max_cost_microunits: external_exports.number().int().nonnegative().optional()
+}).strict().superRefine((operation, ctx) => {
+  if (operation.effect !== "read" && operation.idempotency === "none") {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["idempotency"],
+      message: "write operations must support idempotency"
+    });
+  }
+});
+var ActionAdapterManifestV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  id: ContractKeySchema,
+  implementation_version: external_exports.string().min(1).max(128),
+  display_name: external_exports.string().min(1).max(128),
+  credential_binding_types: external_exports.array(ContractKeySchema).max(64).default([]),
+  operations: external_exports.record(ContractKeySchema, ActionOperationV1Schema)
+}).strict().refine((manifest) => Object.keys(manifest.operations).length > 0, {
+  path: ["operations"],
+  message: "an action adapter must declare at least one operation"
+});
+var ActionPrepareRequestV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  request_id: ContractIdSchema,
+  principal: ExecutionPrincipalV1Schema,
+  context_manifest: ContextManifestV1Schema,
+  context_manifest_hash: Sha256Schema,
+  action_id: ContractIdSchema,
+  /** Immutable document/version identifier selected during preparation. */
+  action_revision: ContractIdSchema,
+  /** Canonical hash of the validated Action metadata at preparation time. */
+  action_metadata_hash: Sha256Schema,
+  adapter_id: ContractKeySchema,
+  operation: ContractKeySchema,
+  input: ContractJsonValueSchema,
+  idempotency_key: external_exports.string().min(1).max(1024).optional(),
+  credential_binding_id: ContractIdSchema.optional()
+}).strict();
+var PreparedActionV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  plan_id: Sha256Schema,
+  adapter_id: ContractKeySchema,
+  adapter_version: external_exports.string().min(1).max(128),
+  operation: ContractKeySchema,
+  account_id: external_exports.string().uuid(),
+  action_id: ContractIdSchema,
+  action_revision: ContractIdSchema,
+  action_metadata_hash: Sha256Schema,
+  project_id: ContractIdSchema.optional(),
+  thought_id: ContractIdSchema.optional(),
+  context_manifest_hash: Sha256Schema,
+  input: ContractJsonValueSchema,
+  input_hash: Sha256Schema,
+  idempotency_key: external_exports.string().min(1).max(1024).optional(),
+  credential_binding_id: ContractIdSchema.optional(),
+  effect: external_exports.enum(["read", "internal_write", "external_write"]),
+  risk: external_exports.enum(["low", "medium", "high"]),
+  approval: external_exports.object({
+    state: external_exports.enum(["not_required", "required", "approved"]),
+    approved_by: ContractIdSchema.optional(),
+    approved_at: IsoDateSchema.optional(),
+    policy_revision: external_exports.string().min(1).max(256)
+  }).strict(),
+  preview: external_exports.string().min(1).max(16e3),
+  prepared_at: IsoDateSchema,
+  expires_at: IsoDateSchema
+}).strict().superRefine((prepared, ctx) => {
+  if (prepared.approval.state === "approved") {
+    if (!prepared.approval.approved_by || !prepared.approval.approved_at) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["approval"],
+        message: "approved actions require approved_by and approved_at"
+      });
+    }
+  }
+});
+var ActionApprovalV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  execution_id: ContractIdSchema,
+  plan_id: Sha256Schema,
+  decision: external_exports.enum(["approved", "rejected"]),
+  approved_by: ContractIdSchema,
+  approved_at: IsoDateSchema,
+  context_manifest_hash: Sha256Schema,
+  action_revision: ContractIdSchema,
+  action_metadata_hash: Sha256Schema,
+  adapter_version: external_exports.string().min(1).max(128),
+  policy_revision: external_exports.string().min(1).max(256)
+}).strict();
+var ActionReceiptV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  execution_id: ContractIdSchema,
+  plan_id: Sha256Schema,
+  adapter_id: ContractKeySchema,
+  adapter_version: external_exports.string().min(1).max(128),
+  operation: ContractKeySchema,
+  status: external_exports.enum(["succeeded", "failed", "indeterminate", "compensated"]),
+  started_at: IsoDateSchema,
+  completed_at: IsoDateSchema,
+  attempts: external_exports.number().int().positive(),
+  /** Durable audit event inserted in the same transaction as reservation. */
+  pre_effect_audit_id: ContractIdSchema,
+  /** True when an idempotent retry returned the stored receipt. */
+  replayed: external_exports.boolean().default(false),
+  output: ContractJsonValueSchema.optional(),
+  output_hash: Sha256Schema.optional(),
+  effects: external_exports.array(
+    external_exports.object({
+      type: ContractKeySchema,
+      external_id: ContractIdSchema.optional(),
+      canonical_uri: external_exports.string().url().max(4096).optional(),
+      reversible: external_exports.boolean()
+    }).strict()
+  ).max(1e3).default([]),
+  evidence_ids: external_exports.array(ContractIdSchema).max(1e4).default([]),
+  error_code: ContractKeySchema.optional(),
+  error: external_exports.string().min(1).max(4096).optional()
+}).strict().superRefine((receipt, ctx) => {
+  if (receipt.status !== "succeeded" && receipt.status !== "compensated" && !receipt.error_code) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["error_code"],
+      message: `${receipt.status} receipts require error_code`
+    });
+  }
+});
+
+// packages/shared/dist/context-host.js
+var HostContextV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  host_kind: ContractKeySchema,
+  host_instance_id: ContractIdSchema,
+  client_version: external_exports.string().min(1).max(128).optional(),
+  session_id: ContractIdSchema,
+  cwd: external_exports.string().min(1).max(4096).optional(),
+  git_remote: external_exports.string().min(1).max(1024).optional(),
+  git_branch: external_exports.string().min(1).max(512).optional(),
+  workspace_fingerprint: Sha256Schema.optional(),
+  capabilities: external_exports.array(
+    external_exports.object({
+      name: ContractKeySchema,
+      state: external_exports.enum(["enabled", "limited", "blocked"]),
+      source: external_exports.enum(["enforced", "reported", "derived"]),
+      scope: external_exports.string().min(1).max(512).optional()
+    }).strict()
+  ).max(256).default([])
+}).strict();
+var HostHookEnvelopeV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  event_id: ContractIdSchema,
+  event: external_exports.enum(["session_start", "user_prompt_submit", "pre_tool_use", "post_tool_use", "stop"]),
+  occurred_at: IsoDateSchema,
+  host: HostContextV1Schema,
+  /** Required once a context has been selected; protects late delivery. */
+  context_manifest_hash: Sha256Schema.optional(),
+  payload: external_exports.record(ContractJsonValueSchema).default({})
+}).strict();
+var HostDeliveryCapabilitiesV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  modes: external_exports.array(external_exports.enum(["inline", "bundle_handle", "mcp_resource"])).min(1).max(3),
+  max_inline_bytes: external_exports.number().int().min(1).max(1e7),
+  supports_manifest_invalidation: external_exports.boolean(),
+  supports_structured_citations: external_exports.boolean()
+}).strict();
+var HostContextDeliveryV1Schema = external_exports.object({
+  manifest_hash: Sha256Schema,
+  bundle_id: Sha256Schema.optional(),
+  inline_markdown: external_exports.string().max(1e7).optional(),
+  resource_uri: external_exports.string().min(1).max(4096).optional()
+}).strict();
+
+// packages/shared/dist/context-training.js
+var TrainingConsentV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  id: ContractIdSchema,
+  account_id: external_exports.string().uuid(),
+  user_id: external_exports.string().uuid(),
+  status: external_exports.enum(["granted", "revoked", "expired"]),
+  purposes: external_exports.array(external_exports.enum(["personalization", "evaluation", "personal_fine_tuning"])).min(1).max(3),
+  provider_ids: external_exports.array(ContractKeySchema).max(64).default([]),
+  granted_at: IsoDateSchema,
+  expires_at: IsoDateSchema.optional(),
+  revoked_at: IsoDateSchema.optional()
+}).strict().superRefine((consent, ctx) => {
+  if (consent.status === "revoked" && !consent.revoked_at) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["revoked_at"],
+      message: "revoked consent requires revoked_at"
+    });
+  }
+});
+var TrainingExampleV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  id: ContractIdSchema,
+  account_id: external_exports.string().uuid(),
+  owner_user_id: external_exports.string().uuid(),
+  consent_id: ContractIdSchema,
+  source: external_exports.enum(["explicit_save", "accepted_feedback"]),
+  created_at: IsoDateSchema,
+  input: external_exports.string().min(1).max(2e5),
+  preferred_output: external_exports.string().min(1).max(2e5),
+  context_manifest_hash: Sha256Schema,
+  resolver_audit_id: ContractIdSchema,
+  evidence_ids: external_exports.array(ContractIdSchema).max(1e4).default([]),
+  model_id: external_exports.string().min(1).max(256).optional(),
+  presentation_profile_version: external_exports.string().min(1).max(256).optional(),
+  labels: external_exports.array(ContractKeySchema).max(128).default([]),
+  redaction_state: external_exports.enum(["not_needed", "redacted", "review_required"]),
+  metadata: external_exports.record(ContractJsonValueSchema).default({})
+}).strict();
+var TrainingJobRequestV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  id: ContractIdSchema,
+  account_id: external_exports.string().uuid(),
+  owner_user_id: external_exports.string().uuid(),
+  consent_id: ContractIdSchema,
+  purpose: external_exports.enum(["evaluation", "personal_fine_tuning"]),
+  provider_id: ContractKeySchema,
+  base_model_id: external_exports.string().min(1).max(256),
+  example_ids: external_exports.array(ContractIdSchema).min(1).max(1e5),
+  evaluation_suite_id: ContractIdSchema,
+  requested_at: IsoDateSchema
+}).strict();
+var TrainingJobResultV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  job_id: ContractIdSchema,
+  status: external_exports.enum(["queued", "running", "passed", "failed", "cancelled"]),
+  provider_job_id: ContractIdSchema.optional(),
+  model_id: external_exports.string().min(1).max(256).optional(),
+  evaluation_passed: external_exports.boolean().optional(),
+  metrics: external_exports.record(external_exports.number().finite()).default({}),
+  error_code: ContractKeySchema.optional(),
+  error: external_exports.string().min(1).max(4096).optional(),
+  updated_at: IsoDateSchema
+}).strict();
+
+// packages/shared/dist/resource-evidence.js
+var RESOURCE_KINDS = [
+  "markdown",
+  "text",
+  "webpage",
+  "youtube",
+  "pdf",
+  "document",
+  "image",
+  "audio",
+  "video",
+  "jira",
+  "slack",
+  "github",
+  "code",
+  "dataset"
+];
+var ResourceKindV1Schema = external_exports.enum(RESOURCE_KINDS);
+var ResourceEntityMentionV1Schema = external_exports.object({
+  kind: external_exports.enum(["ticket", "url", "named_mention"]),
+  text: external_exports.string().min(2).max(256),
+  // Unicode code-point offsets, matching PostgreSQL substring positions.
+  start_offset: external_exports.number().int().nonnegative().max(32e3),
+  end_offset: external_exports.number().int().positive().max(32e3)
+}).strict().refine((value) => value.end_offset > value.start_offset, {
+  message: "A mention must cover an exact nonempty source span"
+});
+var ResourceEntityChunkWriteV1Schema = external_exports.object({
+  chunk_id: external_exports.string().uuid(),
+  content_sha256: Sha256Schema,
+  mentions: external_exports.array(ResourceEntityMentionV1Schema).max(16)
+}).strict();
+var PublicStudyResourceV2Schema = external_exports.object({
+  provider: external_exports.enum(["pubmed", "clinicaltrials.gov", "crossref", "openalex", "openfda"]),
+  external_id: external_exports.string().min(1).max(512),
+  title: external_exports.string().min(1).max(500),
+  canonical_url: external_exports.string().url().max(4096),
+  retrieval_url: external_exports.string().url().max(4096),
+  coverage: external_exports.enum(["full_text", "abstract", "registry_protocol", "regulatory_record"]),
+  rights_basis: external_exports.enum([
+    "open_access_license",
+    "provider_api_abstract",
+    "public_registry_record",
+    "us_government_public_record"
+  ]),
+  license_label: external_exports.string().max(512).nullable(),
+  license_url: external_exports.string().url().nullable(),
+  content: external_exports.string().min(1).max(5e5),
+  provenance: external_exports.record(ContractJsonValueSchema),
+  passages: external_exports.array(
+    external_exports.object({
+      heading: external_exports.string().max(500),
+      // Includes the retained corpus's existing 6,000-character limit.
+      text: external_exports.string().min(1).max(6e3),
+      locator: external_exports.record(ContractJsonValueSchema)
+    }).strict()
+  ).min(1).max(512)
+}).strict();
+var WholeResourceLocatorV1Schema = external_exports.object({ kind: external_exports.literal("whole") }).strict();
+var LineResourceLocatorV1Schema = external_exports.object({
+  kind: external_exports.literal("line"),
+  start_line: external_exports.number().int().positive(),
+  end_line: external_exports.number().int().positive()
+}).strict().refine((value) => value.end_line >= value.start_line, {
+  message: "end_line must be greater than or equal to start_line",
+  path: ["end_line"]
+});
+var PageResourceLocatorV1Schema = external_exports.object({
+  kind: external_exports.literal("page"),
+  page: external_exports.number().int().positive(),
+  start_offset: external_exports.number().int().nonnegative().optional(),
+  end_offset: external_exports.number().int().nonnegative().optional()
+}).strict().refine(
+  (value) => value.start_offset === void 0 || value.end_offset === void 0 || value.end_offset >= value.start_offset,
+  {
+    message: "end_offset must be greater than or equal to start_offset",
+    path: ["end_offset"]
+  }
+);
+var TimeResourceLocatorV1Schema = external_exports.object({
+  kind: external_exports.literal("time"),
+  start_ms: external_exports.number().int().nonnegative(),
+  end_ms: external_exports.number().int().nonnegative()
+}).strict().refine((value) => value.end_ms >= value.start_ms, {
+  message: "end_ms must be greater than or equal to start_ms",
+  path: ["end_ms"]
+});
+var WebResourceLocatorV1Schema = external_exports.object({
+  kind: external_exports.literal("web"),
+  url: external_exports.string().url().max(4096),
+  selector: external_exports.string().min(1).max(2048).optional(),
+  fragment: external_exports.string().min(1).max(2048).optional(),
+  text_quote: external_exports.string().min(1).max(2048).optional()
+}).strict().refine((value) => Boolean(value.selector || value.fragment || value.text_quote), {
+  message: "web locators require a selector, fragment, or text quote"
+});
+var RegionResourceLocatorV1Schema = external_exports.object({
+  kind: external_exports.literal("region"),
+  page: external_exports.number().int().positive().optional(),
+  x: external_exports.number().finite(),
+  y: external_exports.number().finite(),
+  width: external_exports.number().finite().positive(),
+  height: external_exports.number().finite().positive()
+}).strict();
+var ExternalResourceLocatorV1Schema = external_exports.object({
+  kind: external_exports.literal("external"),
+  provider: ContractKeySchema,
+  item_id: ContractIdSchema,
+  subpath: external_exports.string().min(1).max(2048).optional()
+}).strict();
+var ResourceLocatorV1Schema = external_exports.union([
+  WholeResourceLocatorV1Schema,
+  LineResourceLocatorV1Schema,
+  PageResourceLocatorV1Schema,
+  TimeResourceLocatorV1Schema,
+  WebResourceLocatorV1Schema,
+  RegionResourceLocatorV1Schema,
+  ExternalResourceLocatorV1Schema
+]);
+var ResourceEntityEvidenceV1Schema = external_exports.object({
+  version: external_exports.literal(1),
+  resource_id: external_exports.string().uuid(),
+  resource_version_id: external_exports.string().uuid(),
+  status: external_exports.enum(["queued", "processing", "partial", "unavailable", "failed"]),
+  truncated: external_exports.boolean(),
+  mentions: external_exports.array(
+    external_exports.object({
+      kind: external_exports.enum(["ticket", "url", "named_mention"]),
+      text: external_exports.string().min(2).max(256),
+      chunk_id: external_exports.string().uuid(),
+      locator: ResourceLocatorV1Schema,
+      excerpt: external_exports.string().max(2e3)
+    }).strict()
+  ).max(64)
+}).strict();
+var ResourceIngestChunkV1Schema = external_exports.object({
+  id: external_exports.string().uuid(),
+  ordinal: external_exports.number().int().min(0).max(2047),
+  content: external_exports.string().min(1).max(32e3),
+  excerpt: external_exports.string().min(1).max(2e3),
+  content_sha256: Sha256Schema,
+  locator: ResourceLocatorV1Schema,
+  metadata: external_exports.record(ContractJsonValueSchema).default({})
+}).strict();
+var ResourceIngestManifestV1Schema = external_exports.object({
+  version: external_exports.literal(CONTEXT_CONTRACT_VERSION),
+  ingest_id: ContractIdSchema,
+  account_id: external_exports.string().uuid(),
+  project_id: external_exports.string().uuid().nullable(),
+  resource_id: external_exports.string().uuid(),
+  owner_id: external_exports.string().uuid().nullable(),
+  scope: external_exports.enum(["private", "project", "team", "public"]),
+  kind: ResourceKindV1Schema,
+  title: external_exports.string().min(1).max(500),
+  canonical_uri: external_exports.string().url().max(4096).nullable(),
+  source_revision: external_exports.string().min(1).max(512),
+  mime_type: external_exports.string().min(1).max(256),
+  content: external_exports.string().max(2e6),
+  content_sha256: Sha256Schema,
+  byte_size: external_exports.number().int().nonnegative().max(1e8),
+  rights_basis: external_exports.string().min(1).max(512),
+  license: external_exports.string().min(1).max(512).nullable(),
+  provenance: external_exports.record(ContractJsonValueSchema),
+  storage_locator: external_exports.record(ContractJsonValueSchema).default({}),
+  observed_at: IsoDateSchema,
+  occurred_at: IsoDateSchema.nullable().default(null),
+  chunks: external_exports.array(ResourceIngestChunkV1Schema).min(1).max(2048)
+}).strict().superRefine((manifest, ctx) => {
+  if (manifest.scope === "project" && !manifest.project_id) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["project_id"],
+      message: "project-scoped resources require project_id"
+    });
+  }
+  if (manifest.scope === "private" && !manifest.owner_id) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["owner_id"],
+      message: "private resources require owner_id"
+    });
+  }
+  if (manifest.byte_size !== new TextEncoder().encode(manifest.content).byteLength) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      path: ["byte_size"],
+      message: "byte_size does not match normalized UTF-8 content"
+    });
+  }
+  const ids = /* @__PURE__ */ new Set();
+  const ordinals = /* @__PURE__ */ new Set();
+  manifest.chunks.forEach((chunk, index) => {
+    if (ids.has(chunk.id)) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["chunks", index, "id"],
+        message: "chunk ids must be unique"
+      });
+    }
+    if (ordinals.has(chunk.ordinal) || chunk.ordinal !== index) {
+      ctx.addIssue({
+        code: external_exports.ZodIssueCode.custom,
+        path: ["chunks", index, "ordinal"],
+        message: "chunk ordinals must be unique and contiguous from zero"
+      });
+    }
+    ids.add(chunk.id);
+    ordinals.add(chunk.ordinal);
+  });
+});
+var ResourceEvidenceSearchRowV1Schema = external_exports.object({
+  evidence_id: ContractIdSchema,
+  resource_id: external_exports.string().uuid(),
+  resource_version_id: external_exports.string().uuid(),
+  chunk_id: external_exports.string().uuid(),
+  context_type: external_exports.enum(["account", "project", "thought"]),
+  context_id: ContractIdSchema,
+  kind: ResourceKindV1Schema,
+  title: external_exports.string().min(1).max(1024),
+  content: external_exports.string().min(1).max(2e6),
+  source_revision: external_exports.string().min(1).max(512),
+  content_sha256: Sha256Schema,
+  canonical_uri: external_exports.string().url().max(4096).nullable(),
+  locator: ResourceLocatorV1Schema,
+  rights_basis: external_exports.string().min(1).max(512),
+  license: external_exports.string().min(1).max(512).nullable(),
+  observed_at: IsoDateSchema,
+  occurred_at: IsoDateSchema.nullable(),
+  authority: external_exports.enum(["provisional", "verified"]),
+  resource_status: external_exports.literal("active"),
+  version_status: external_exports.literal("active"),
+  audience: external_exports.enum(["private", "team", "room", "external", "public"]),
+  classification: external_exports.enum(["public", "internal", "confidential", "restricted"]),
+  authorized_principal_ids: external_exports.array(ContractIdSchema).max(500).default([]),
+  audience_context_id: ContractIdSchema.optional(),
+  acl_revision: external_exports.string().min(1).max(256).optional(),
+  embedding_profile_id: ContractIdSchema.optional(),
+  semantic_score: external_exports.number().finite().optional(),
+  lexical_score: external_exports.number().finite().optional(),
+  metadata: external_exports.record(ContractJsonValueSchema).default({})
+}).strict();
+
+// packages/shared/dist/thought-runtime.js
+var Id = external_exports.string().uuid();
+var Revision = external_exports.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+var Key = external_exports.string().trim().min(1).max(160);
+var Hash = external_exports.string().regex(/^[a-f0-9]{64}$/);
+var Time = external_exports.string().datetime({ offset: true });
+var Position = external_exports.object({ x: external_exports.number().finite().min(-1e6).max(1e6), y: external_exports.number().finite().min(-1e6).max(1e6) }).strict();
+var Size = external_exports.object({
+  width: external_exports.number().finite().min(80).max(4e3),
+  height: external_exports.number().finite().min(40).max(4e3)
+}).strict();
+var ThoughtRelationKindV2Schema = external_exports.enum([
+  "expands",
+  "answers",
+  "supports",
+  "contradicts",
+  "causes",
+  "depends_on",
+  "leads_to",
+  "related",
+  "references",
+  "decided_by",
+  "produces_action"
+]);
+var ThoughtEntityKindV2Schema = external_exports.enum([
+  "thought",
+  "relation",
+  "placement",
+  "resource_placement",
+  "canvas_element",
+  "canvas_connector",
+  "proposal"
+]);
+var ThoughtEntityPreconditionV2Schema = external_exports.object({ kind: ThoughtEntityKindV2Schema, id: Id, revision: Revision }).strict();
+var ThoughtPatch = external_exports.object({
+  title: external_exports.string().trim().min(1).max(240).optional(),
+  body: external_exports.string().max(2e4).optional(),
+  kind: external_exports.string().trim().min(1).max(40).optional(),
+  workflow_status: external_exports.enum(["active", "resolved", "dismissed"]).optional()
+}).strict().refine((p) => Object.keys(p).length > 0, "empty patch");
+var LayoutPatchShape = external_exports.object({
+  position: Position.optional(),
+  size: Size.optional(),
+  parent_id: Id.nullable().optional(),
+  collapsed: external_exports.boolean().optional(),
+  order: external_exports.number().finite().min(-1e9).max(1e9).optional(),
+  z_index: external_exports.number().int().min(-1e5).max(1e5).optional()
+}).strict();
+var LayoutPatch = LayoutPatchShape.refine((p) => Object.keys(p).length > 0, "empty patch");
+var ThoughtReferenceV2Schema = external_exports.union([
+  external_exports.object({ id: Id }).strict(),
+  external_exports.object({ created: Key }).strict()
+]);
+var ThoughtCommandV2Schema = external_exports.discriminatedUnion("type", [
+  external_exports.object({
+    type: external_exports.literal("thought.create"),
+    key: Key,
+    title: external_exports.string().trim().min(1).max(240),
+    body: external_exports.string().max(2e4).default(""),
+    kind: external_exports.string().trim().min(1).max(40).default("thought"),
+    position: Position.optional()
+  }).strict(),
+  external_exports.object({ type: external_exports.literal("thought.update"), id: Id, patch: ThoughtPatch }).strict(),
+  external_exports.object({ type: external_exports.literal("thought.archive"), id: Id }).strict(),
+  external_exports.object({
+    type: external_exports.literal("relation.create"),
+    key: Key,
+    source: ThoughtReferenceV2Schema,
+    target: ThoughtReferenceV2Schema,
+    relation: ThoughtRelationKindV2Schema,
+    label: external_exports.string().max(120).nullable().optional()
+  }).strict(),
+  external_exports.object({ type: external_exports.literal("relation.archive"), id: Id }).strict(),
+  external_exports.object({
+    type: external_exports.literal("placement.create"),
+    key: Key,
+    thought: ThoughtReferenceV2Schema,
+    position: Position
+  }).strict(),
+  external_exports.object({ type: external_exports.literal("placement.update"), id: Id, patch: LayoutPatch }).strict(),
+  external_exports.object({ type: external_exports.literal("placement.archive"), id: Id }).strict(),
+  external_exports.object({
+    type: external_exports.literal("resource.link"),
+    key: Key,
+    resource_id: Id,
+    thought: ThoughtReferenceV2Schema,
+    position: Position.optional()
+  }).strict(),
+  external_exports.object({ type: external_exports.literal("resource.unlink"), id: Id }).strict(),
+  external_exports.object({ type: external_exports.literal("resource_placement.update"), id: Id, patch: LayoutPatch }).strict(),
+  external_exports.object({
+    type: external_exports.literal("canvas_element.create"),
+    key: Key,
+    kind: external_exports.enum(["frame", "group", "text", "shape", "drawing"]),
+    body: external_exports.string().max(2e4).default(""),
+    position: Position,
+    size: Size
+  }).strict(),
+  external_exports.object({
+    type: external_exports.literal("canvas_element.update"),
+    id: Id,
+    patch: LayoutPatchShape,
+    body: external_exports.string().max(2e4).optional()
+  }).strict(),
+  external_exports.object({ type: external_exports.literal("canvas_element.archive"), id: Id }).strict(),
+  external_exports.object({
+    type: external_exports.literal("canvas_connector.create"),
+    key: Key,
+    source_id: Id,
+    target_id: Id,
+    label: external_exports.string().max(120).default("")
+  }).strict(),
+  external_exports.object({ type: external_exports.literal("canvas_connector.archive"), id: Id }).strict(),
+  external_exports.object({ type: external_exports.literal("proposal.accept"), id: Id }).strict(),
+  external_exports.object({ type: external_exports.literal("proposal.reject"), id: Id }).strict()
+]).superRefine((command, context) => {
+  if (command.type === "canvas_element.update" && Object.keys(command.patch).length === 0 && command.body === void 0)
+    context.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      message: "Canvas content or layout is required",
+      path: ["patch"]
+    });
+});
+var ThoughtCommandBatchV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: Id,
+  base_cursor: Revision,
+  idempotency_key: Key,
+  preconditions: external_exports.array(ThoughtEntityPreconditionV2Schema).max(200),
+  commands: external_exports.array(ThoughtCommandV2Schema).min(1).max(50)
+}).strict().superRefine((batch, ctx) => {
+  const entities = /* @__PURE__ */ new Set();
+  const keys = /* @__PURE__ */ new Set();
+  for (const p of batch.preconditions) {
+    const key = `${p.kind}:${p.id}`;
+    if (entities.has(key))
+      ctx.addIssue({ code: "custom", message: "duplicate entity precondition" });
+    entities.add(key);
+  }
+  for (const c of batch.commands) {
+    if ("key" in c) {
+      if (keys.has(c.key)) ctx.addIssue({ code: "custom", message: "duplicate creation key" });
+      keys.add(c.key);
+    }
+    if (c.type.startsWith("proposal.") && batch.commands.length !== 1)
+      ctx.addIssue({ code: "custom", message: "proposal review must be its own atomic batch" });
+  }
+});
+var CanonicalThoughtV2Schema = external_exports.object({
+  id: Id,
+  account_id: Id,
+  project_id: Id.nullable(),
+  created_by: Id,
+  scope: external_exports.enum(["personal", "project", "team"]),
+  title: external_exports.string(),
+  body: external_exports.string(),
+  kind: external_exports.string(),
+  workflow_status: external_exports.enum(["active", "resolved", "dismissed"]),
+  authority: external_exports.enum(["authored", "proposed", "verified"]),
+  revision: Revision,
+  current_revision_id: Id,
+  updated_at: Time
+}).strict();
+var Layout = external_exports.object({
+  id: Id,
+  revision: Revision,
+  position: Position,
+  size: Size,
+  parent_id: Id.nullable(),
+  collapsed: external_exports.boolean(),
+  order: external_exports.number(),
+  z_index: external_exports.number()
+});
+var ThoughtWorkspaceSnapshotV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root: CanonicalThoughtV2Schema,
+  cursor: Revision,
+  revision_token: external_exports.string().min(1),
+  thoughts: external_exports.array(CanonicalThoughtV2Schema),
+  relations: external_exports.array(
+    external_exports.object({
+      id: Id,
+      revision: Revision,
+      source_thought_id: Id,
+      target_thought_id: Id,
+      relation: ThoughtRelationKindV2Schema,
+      label: external_exports.string().nullable()
+    }).strict()
+  ),
+  placements: external_exports.array(Layout.extend({ thought_id: Id }).strict()),
+  resources: external_exports.array(
+    external_exports.object({
+      id: Id,
+      title: external_exports.string(),
+      kind: external_exports.string(),
+      current_version_id: Id.nullable(),
+      canonical_uri: external_exports.string().nullable(),
+      status: external_exports.string(),
+      coverage: external_exports.enum(["pending", "partial", "complete", "unavailable", "failed"])
+    }).strict()
+  ),
+  resource_placements: external_exports.array(Layout.extend({ resource_id: Id, thought_id: Id }).strict()),
+  canvas_elements: external_exports.array(
+    Layout.extend({
+      kind: external_exports.enum(["frame", "group", "text", "shape", "drawing"]),
+      body: external_exports.string()
+    }).strict()
+  ),
+  canvas_connectors: external_exports.array(
+    external_exports.object({ id: Id, revision: Revision, source_id: Id, target_id: Id, label: external_exports.string() }).strict()
+  ),
+  capabilities: external_exports.object({ read: external_exports.literal(true), edit: external_exports.boolean(), comment: external_exports.boolean() }).strict()
+}).strict();
+var ThoughtWorkspaceChangesQueryV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  after_cursor: Revision,
+  thought_ids: external_exports.array(Id).max(128)
+}).strict();
+var ThoughtWorkspaceChangesV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: Id,
+  cursor: Revision,
+  requires_snapshot: external_exports.boolean(),
+  thoughts: external_exports.array(CanonicalThoughtV2Schema).max(128),
+  missing_thought_ids: external_exports.array(Id).max(128)
+}).strict();
+var ThoughtCommandResultV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  receipt_id: Id,
+  root_thought_id: Id,
+  cursor: Revision,
+  replayed: external_exports.boolean(),
+  created: external_exports.record(external_exports.object({ id: Id, kind: ThoughtEntityKindV2Schema }).strict()),
+  changed: external_exports.array(ThoughtEntityPreconditionV2Schema)
+}).strict();
+var ThoughtCreateV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  idempotency_key: Key,
+  title: external_exports.string().trim().min(1).max(240),
+  body: external_exports.string().max(2e4).default(""),
+  home: external_exports.object({ scope: external_exports.enum(["personal", "project", "team"]), project_id: Id.nullable() }).strict()
+}).strict().refine(
+  (x) => x.home.scope === "project" === (x.home.project_id !== null),
+  "only a project home has a project ID"
+);
+var ThoughtPreferencesV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  thought_id: Id,
+  expected_updated_at: Time,
+  idempotency_key: Key,
+  patch: external_exports.object({
+    importance: external_exports.number().int().min(0).max(5).optional(),
+    scope: external_exports.enum(["personal", "team"]).optional()
+  }).strict().refine((x) => Object.keys(x).length > 0, "empty patch")
+}).strict();
+var ThoughtPreferencesReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  receipt_id: Id,
+  thought_id: Id,
+  cursor: Revision,
+  updated_at: Time,
+  importance: external_exports.number().int().min(0).max(5),
+  scope: external_exports.enum(["personal", "project", "team"]),
+  replayed: external_exports.boolean()
+}).strict();
+var ThoughtTopicDesignateV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: Id,
+  designate: external_exports.boolean(),
+  expected_topic_revision: Revision,
+  idempotency_key: Key
+}).strict();
+var ThoughtTopicDesignationReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  receipt_id: Id,
+  root_thought_id: Id,
+  is_topic: external_exports.boolean(),
+  topic_revision: Revision,
+  /** Members derived on designation that the actor can read. */
+  connected_memberships: external_exports.number().int().nonnegative(),
+  /** Memberships ended by "Stop using as a topic" that the actor can read. */
+  archived_memberships: external_exports.number().int().nonnegative(),
+  changed: external_exports.boolean(),
+  replayed: external_exports.boolean()
+}).strict();
+var ThoughtTopicMembershipV2Schema = external_exports.object({
+  id: Id,
+  topic_root_id: Id,
+  thought_id: Id,
+  parent_thought_id: Id,
+  placement_id: Id,
+  relation_id: Id,
+  revision: Revision
+}).strict();
+var ThoughtGuidanceStageV2Schema = external_exports.enum([
+  "topic",
+  "clarify",
+  "research",
+  "action",
+  "memory",
+  "completed"
+]);
+var ThoughtGuidanceStageStateV2Schema = external_exports.enum(["completed", "skipped", "dismissed"]);
+var GuidanceCardId = external_exports.string().min(1).max(160);
+var ThoughtGuidanceCardV2Schema = external_exports.object({
+  id: GuidanceCardId,
+  kind: external_exports.literal("question"),
+  question: external_exports.string().min(1).max(500),
+  suggested_answers: external_exports.array(external_exports.string().min(1).max(200)).max(4),
+  /** What remains unknown, when research could help. */
+  research_gap: external_exports.string().min(1).max(300).nullable(),
+  status: external_exports.enum(["pending", "answered", "skipped"]),
+  answer: external_exports.string().max(2e3).nullable(),
+  thought_revision: Revision,
+  created_at: Time
+}).strict();
+var ThoughtGuidanceSessionV2Schema = external_exports.object({
+  id: Id,
+  thought_id: Id,
+  context_root_id: Id,
+  stage: ThoughtGuidanceStageV2Schema,
+  stage_states: external_exports.record(ThoughtGuidanceStageStateV2Schema),
+  cards: external_exports.array(ThoughtGuidanceCardV2Schema).max(50),
+  dismissal_count: external_exports.number().int().nonnegative(),
+  offers_paused: external_exports.boolean(),
+  revision: Revision,
+  updated_at: Time
+}).strict();
+var ThoughtGuidanceReadV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  thought_id: Id,
+  context_root_id: Id,
+  thought_revision: Revision,
+  session: ThoughtGuidanceSessionV2Schema.nullable(),
+  /** A pending question was asked about an earlier revision of the Thought. */
+  stale: external_exports.boolean()
+}).strict();
+var GuidanceWriteBase = { version: external_exports.literal(2), context_root_id: Id, idempotency_key: Key };
+var ThoughtGuidanceWriteV2Schema = external_exports.discriminatedUnion("action", [
+  /** Start or resume. An explicit open also lifts a paused session. */
+  external_exports.object({ action: external_exports.literal("open"), ...GuidanceWriteBase }).strict(),
+  external_exports.object({
+    action: external_exports.literal("answer"),
+    ...GuidanceWriteBase,
+    expected_revision: Revision,
+    card_id: GuidanceCardId,
+    answer: external_exports.string().trim().min(1).max(2e3)
+  }).strict(),
+  external_exports.object({
+    action: external_exports.literal("skip"),
+    ...GuidanceWriteBase,
+    expected_revision: Revision,
+    card_id: GuidanceCardId
+  }).strict(),
+  external_exports.object({
+    action: external_exports.literal("stage"),
+    ...GuidanceWriteBase,
+    expected_revision: Revision,
+    stage: ThoughtGuidanceStageV2Schema,
+    completed: external_exports.object({
+      stage: external_exports.enum(["topic", "clarify", "research", "action", "memory"]),
+      state: ThoughtGuidanceStageStateV2Schema
+    }).strict().nullable()
+  }).strict(),
+  /** "Not now". Two dismissals pause offers on this Thought until the person asks. */
+  external_exports.object({ action: external_exports.literal("dismiss"), ...GuidanceWriteBase, expected_revision: Revision }).strict(),
+  external_exports.object({ action: external_exports.literal("reset"), ...GuidanceWriteBase, expected_revision: Revision }).strict()
+]);
+var ThoughtGuidanceQuestionRequestV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  context_root_id: Id,
+  expected_revision: Revision,
+  idempotency_key: Key
+}).strict();
+var ThoughtGuidanceQuestionResultV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  /** Memlin has enough to suggest next steps; no further question was added. */
+  done: external_exports.boolean(),
+  guidance: ThoughtGuidanceReadV2Schema
+}).strict();
+var ThoughtTopicSuggestQueryV2Schema = external_exports.object({
+  thought_id: Id,
+  /** Capture inside a Topic preselects it (and optionally a branch) for confirmation. */
+  context_topic_id: Id.nullable().default(null),
+  context_parent_id: Id.nullable().default(null),
+  query: external_exports.string().trim().max(160).default(""),
+  limit: external_exports.number().int().min(1).max(10).default(3)
+}).strict();
+var ThoughtTopicPathStep = external_exports.object({ thought_id: Id, title: external_exports.string() }).strict();
+var ThoughtTopicSuggestionsV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  thought_id: Id,
+  /** The first suggestion clearly fits: show it preselected with one-tap Add. */
+  strong: external_exports.boolean(),
+  suggestions: external_exports.array(
+    external_exports.object({
+      topic_root_id: Id,
+      topic_title: external_exports.string(),
+      /** Lets one-tap Add connect without first loading the tree. */
+      topic_revision: Revision,
+      parent_thought_id: Id,
+      path: external_exports.array(ThoughtTopicPathStep).max(20),
+      strength: external_exports.number().min(0).max(1),
+      reason: external_exports.enum(["context", "match", "recent", "search"])
+    }).strict()
+  ).max(10)
+}).strict();
+var ThoughtTopicTreeV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  topic_root_id: Id,
+  title: external_exports.string(),
+  topic_revision: Revision,
+  can_edit: external_exports.boolean(),
+  /** Readable members only. A member under a hidden parent is placed under its nearest readable ancestor. */
+  nodes: external_exports.array(
+    external_exports.object({
+      thought_id: Id,
+      parent_thought_id: Id,
+      title: external_exports.string(),
+      kind: external_exports.string(),
+      workflow_status: external_exports.enum(["active", "resolved", "dismissed"]),
+      private_to_you: external_exports.boolean()
+    }).strict()
+  ).max(5e3)
+}).strict();
+var TopicMemberBase = {
+  version: external_exports.literal(2),
+  thought_id: Id,
+  expected_topic_revision: Revision,
+  idempotency_key: Key
+};
+var ThoughtTopicMemberWriteV2Schema = external_exports.discriminatedUnion("action", [
+  external_exports.object({ action: external_exports.literal("connect"), ...TopicMemberBase, parent_thought_id: Id }).strict(),
+  external_exports.object({ action: external_exports.literal("reparent"), ...TopicMemberBase, parent_thought_id: Id }).strict(),
+  external_exports.object({ action: external_exports.literal("remove"), ...TopicMemberBase }).strict(),
+  external_exports.object({
+    action: external_exports.literal("restore"),
+    version: external_exports.literal(2),
+    remove_receipt_id: Id,
+    expected_topic_revision: Revision,
+    idempotency_key: Key
+  }).strict()
+]);
+var ThoughtTopicRemovalPreviewV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  topic_root_id: Id,
+  thought_id: Id,
+  topic_revision: Revision,
+  /** False for a Thought with no readable children: remove immediately with Undo. */
+  requires_confirmation: external_exports.boolean(),
+  nodes: external_exports.array(external_exports.object({ thought_id: Id, parent_thought_id: Id, title: external_exports.string() }).strict()).max(5e3)
+}).strict();
+var ThoughtTopicOperationReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  receipt_id: Id,
+  operation: external_exports.enum(["connect", "reparent", "remove", "restore"]),
+  topic_root_id: Id,
+  thought_id: Id,
+  parent_thought_id: Id.nullable(),
+  topic_revision: Revision,
+  /** Readable members removed or restored by this operation. */
+  affected_memberships: external_exports.number().int().nonnegative(),
+  /** Connecting a private Thought never shares it; the UI offers Keep private or Share. */
+  private_to_you: external_exports.boolean(),
+  changed: external_exports.boolean(),
+  replayed: external_exports.boolean()
+}).strict();
+var ThoughtListCursorV2Schema = external_exports.object({ updated_at: Time, id: Id }).strict();
+var ThoughtWorkspaceListQueryV2Schema = external_exports.object({
+  query: external_exports.string().trim().max(160).default(""),
+  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms"]).default("recent"),
+  limit: external_exports.number().int().min(1).max(100).default(30),
+  cursor: ThoughtListCursorV2Schema.nullable().default(null)
+}).strict();
+var ThoughtWorkspaceListV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  items: external_exports.array(
+    external_exports.object({
+      id: Id,
+      title: external_exports.string().max(500),
+      summary: external_exports.string().max(320),
+      scope: external_exports.enum(["personal", "project", "team"]),
+      project_id: Id.nullable(),
+      created_by: Id,
+      is_room: external_exports.boolean(),
+      importance: external_exports.number().int().min(0).max(5),
+      revision: Revision,
+      updated_at: Time,
+      from_ask: external_exports.boolean(),
+      tags: external_exports.array(external_exports.string().max(40)).max(4),
+      due_dates: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/)).max(12),
+      card_count: Revision,
+      connection_count: Revision,
+      can_edit_workspace: external_exports.boolean(),
+      can_edit_thought: external_exports.boolean()
+    }).strict()
+  ).max(100),
+  next_cursor: ThoughtListCursorV2Schema.nullable()
+}).strict();
+var ThoughtWorkspaceCountsV2Schema = external_exports.object({
+  all: Revision,
+  starred: Revision,
+  rooms: Revision,
+  team: Revision,
+  personal: Revision
+}).strict();
+var ThoughtAssistRequestV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  thought_id: Id,
+  focus: external_exports.object({ kind: external_exports.enum(["thought", "resource"]), id: Id }).strict().optional(),
+  context: external_exports.object({
+    scope: external_exports.enum(["selected", "branch", "workspace"]),
+    resource_ids: external_exports.array(Id).max(8).refine((ids) => new Set(ids).size === ids.length, "duplicate resource")
+  }).strict().optional(),
+  capability: external_exports.enum([
+    "explore",
+    "research",
+    "plan",
+    "review",
+    "explain",
+    "decide",
+    "refine",
+    "tag",
+    "branch",
+    "handoff"
+  ]),
+  audience: external_exports.enum(["private", "team", "public"]),
+  message: external_exports.string().trim().min(1).max(2e4),
+  presentation: external_exports.enum([
+    "default",
+    "explain-like-matt",
+    "hope",
+    "simple",
+    "teach",
+    "peer",
+    "expert",
+    "executive",
+    "concise",
+    "challenge"
+  ]).default("default"),
+  expected_context_hash: Hash.optional(),
+  idempotency_key: Key
+}).strict();
+var ThoughtProposalV1Schema = external_exports.object({
+  version: external_exports.literal(1),
+  id: Id,
+  root_thought_id: Id,
+  assist_run_id: Id,
+  revision: Revision,
+  context_bundle_id: Hash,
+  context_bundle_sha256: Hash,
+  preconditions: external_exports.array(ThoughtEntityPreconditionV2Schema),
+  commands: external_exports.array(ThoughtCommandV2Schema).min(1).max(50),
+  citations: external_exports.array(external_exports.string().min(1).max(1024)).max(100),
+  status: external_exports.enum(["pending", "accepted", "rejected", "expired", "stale"]),
+  expires_at: Time,
+  acceptance_receipt_id: Id.nullable()
+}).strict();
+var ResourceUploadRequestV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  upload_id: Id,
+  home: external_exports.object({ account_id: Id, project_id: Id.nullable(), scope: external_exports.enum(["private", "project"]) }).strict(),
+  file_name: external_exports.string().trim().min(1).max(255).refine((x) => !/[\\/\u0000-\u001f\u007f]/u.test(x), "unsupported file name"),
+  mime_type: external_exports.string().trim().max(256).default(""),
+  byte_size: external_exports.number().int().positive().max(25 * 1024 * 1024),
+  sha256: Hash,
+  title: external_exports.string().trim().max(240).default(""),
+  license: external_exports.string().trim().max(512).nullable().default(null),
+  rights_confirmed: external_exports.literal(true)
+}).strict().refine(
+  (x) => x.home.scope === "project" === (x.home.project_id !== null),
+  "only a project home has a project ID"
+);
+var ResourceUploadReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  upload_id: Id,
+  resource_id: Id,
+  resource_version_id: Id.nullable(),
+  state: external_exports.enum(["prepared", "completed"]),
+  storage_bucket: external_exports.literal("thought-resource-originals"),
+  storage_path: external_exports.string().min(1).max(2048),
+  upload_token: external_exports.string().min(1).nullable(),
+  upload_required: external_exports.boolean(),
+  mime_type: external_exports.string().min(1).max(256)
+}).strict().refine(
+  (x) => x.upload_required === (x.upload_token !== null),
+  "upload token required only for upload"
+).refine(
+  (x) => x.state !== "completed" || x.resource_version_id !== null && !x.upload_required,
+  "completed uploads require a version"
+);
+var ResourceIngestEnvelopeV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  idempotency_key: Key,
+  home: external_exports.object({
+    account_id: Id,
+    project_id: Id.nullable(),
+    scope: external_exports.enum(["private", "project", "team"])
+  }).strict(),
+  source: external_exports.object({
+    kind: external_exports.enum([
+      "text",
+      "markdown",
+      "webpage",
+      "youtube",
+      "pdf",
+      "document",
+      "image",
+      "audio",
+      "video"
+    ]),
+    title: external_exports.string().trim().min(1).max(500),
+    uri: external_exports.string().url().max(4096).optional()
+  }).strict(),
+  original: external_exports.object({
+    upload_id: Id.optional(),
+    content: external_exports.string().max(1e6).optional(),
+    sha256: Hash.optional()
+  }).strict(),
+  rights_basis: external_exports.string().trim().min(1).max(512),
+  license: external_exports.string().trim().max(512).nullable().optional(),
+  extractors: external_exports.array(external_exports.enum(["text", "ocr", "transcript", "keyframes", "structure"])).max(5),
+  thought_id: Id.optional(),
+  root_thought_id: Id.optional(),
+  position: Position.optional()
+}).strict().superRefine((x, ctx) => {
+  const issue2 = (message) => ctx.addIssue({ code: "custom", message });
+  if (!x.original.upload_id && x.original.content === void 0 && !x.source.uri)
+    issue2("original or source URI required");
+  if (x.original.upload_id && x.original.content !== void 0) issue2("choose one original");
+  if (x.original.content !== void 0 && !["text", "markdown"].includes(x.source.kind))
+    issue2("inline originals require text or markdown");
+  if (x.home.scope === "project" !== (x.home.project_id !== null))
+    issue2("only a project home has a project ID");
+  if (x.root_thought_id && !x.thought_id) issue2("workspace requires a selected Thought");
+  if (x.position && !x.thought_id) issue2("position requires a Thought");
+  if (x.source.uri && !["http:", "https:"].includes(new URL(x.source.uri).protocol))
+    issue2("source URI must use HTTP or HTTPS");
+});
+var ResourceIngestReceiptV2Schema = external_exports.object({
+  id: Id,
+  resource_id: Id,
+  status: external_exports.enum(["pending", "processing", "complete", "partial", "unavailable", "failed"]),
+  replayed: external_exports.boolean(),
+  result: external_exports.unknown().optional(),
+  placement_receipt: external_exports.unknown().optional()
+}).strict();
+var ThoughtCollaborationSessionV1Schema = external_exports.object({
+  version: external_exports.literal(1),
+  session_id: Id,
+  root_thought_id: Id,
+  thought_id: Id,
+  canonical_revision: Revision,
+  event_cursor: Revision,
+  document_revision: Revision,
+  document_epoch: Id,
+  update: external_exports.string().max(4e6),
+  state_vector: external_exports.string().max(1e5),
+  body: external_exports.string().max(2e4),
+  dirty: external_exports.boolean(),
+  channel: external_exports.string().min(1),
+  expires_at: Time,
+  capabilities: external_exports.object({ read: external_exports.literal(true), edit: external_exports.boolean() }).strict()
+}).strict();
+var ThoughtWorkspaceEntryV2Schema = external_exports.object({
+  workspace: ThoughtWorkspaceSnapshotV2Schema,
+  focus_thought_id: Id,
+  contexts: external_exports.array(external_exports.object({ root_thought_id: Id, title: external_exports.string() }).strict()).max(101),
+  more_contexts: external_exports.boolean()
+}).strict();
+var ThoughtAssistHistoryV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  history_enabled: external_exports.boolean(),
+  conversation_id: Id.nullable(),
+  context_revision_token: external_exports.string().min(1),
+  messages: external_exports.array(
+    external_exports.object({
+      id: Id,
+      assist_run_id: Id.optional(),
+      feedback_recorded: external_exports.boolean().optional(),
+      coverage: external_exports.enum(["complete", "partial", "unavailable"]).optional(),
+      role: external_exports.enum(["user", "assistant"]),
+      body: external_exports.string().min(1).max(2e4),
+      citations: external_exports.array(external_exports.string().min(1).max(1024)).max(100)
+    }).strict()
+  ).max(12)
+}).strict();
+var ThoughtAssistEvidenceV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  assist_run_id: Id,
+  citation: external_exports.string().min(1).max(1024),
+  resource_id: Id,
+  resource_version_id: Id,
+  title: external_exports.string().min(1).max(500),
+  locator: external_exports.string().max(400),
+  excerpt: external_exports.string().max(2e3),
+  truncated: external_exports.boolean()
+}).strict();
+var ThoughtResourcePreviewV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: Id,
+  resource_id: Id,
+  resource_version_id: Id.nullable(),
+  title: external_exports.string(),
+  kind: external_exports.string(),
+  coverage: external_exports.enum(["pending", "partial", "complete", "unavailable", "failed"]),
+  excerpts: external_exports.array(
+    external_exports.object({
+      chunk_id: Id,
+      excerpt: external_exports.string().max(2e3),
+      locator: external_exports.string().max(400),
+      truncated: external_exports.boolean()
+    }).strict()
+  ).max(3),
+  more_available: external_exports.boolean()
+}).strict();
+var ThoughtPublicLinkWriteV2Schema = external_exports.discriminatedUnion("action", [
+  external_exports.object({
+    action: external_exports.literal("create"),
+    expires_in_days: external_exports.union([external_exports.literal(1), external_exports.literal(7), external_exports.literal(30)]).default(7),
+    allow_template: external_exports.boolean().optional(),
+    preview_sha256: external_exports.string().regex(/^[0-9a-f]{64}$/).optional()
+  }).strict(),
+  external_exports.object({ action: external_exports.literal("revoke"), id: Id }).strict()
+]);
+var ThoughtPublicLinksV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: Id,
+  token: external_exports.string().regex(/^[A-Za-z0-9_-]{32,128}$/).nullable(),
+  links: external_exports.array(
+    external_exports.object({
+      id: Id,
+      created_at: Time,
+      expires_at: Time.nullable(),
+      revoked_at: Time.nullable(),
+      allow_template: external_exports.boolean().optional()
+    }).strict()
+  )
+}).strict();
+var ThoughtDocumentCreateV2Schema = external_exports.object({
+  target: external_exports.enum(["todo", "goal"]),
+  expected_revision: Revision,
+  idempotency_key: Key,
+  outcome: external_exports.string().trim().min(1).max(2e3).optional(),
+  completion_criteria: external_exports.array(external_exports.string().trim().min(1).max(500)).min(1).max(20).optional()
+}).strict();
+var ThoughtDocumentLinkV2Schema = external_exports.discriminatedUnion("action", [
+  external_exports.object({ action: external_exports.literal("link"), document_id: Id }).strict(),
+  external_exports.object({ action: external_exports.literal("unlink"), id: Id }).strict()
+]);
+var ThoughtDocumentsV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: Id,
+  thought_id: Id,
+  can_manage: external_exports.boolean(),
+  can_convert: external_exports.boolean(),
+  links: external_exports.array(
+    external_exports.object({
+      id: Id,
+      document_id: Id,
+      title: external_exports.string(),
+      kind: external_exports.enum(["todo", "goal"]),
+      created_at: Time,
+      reviews: external_exports.array(external_exports.object({ id: Id, created_at: Time }).strict())
+    }).strict()
+  )
+}).strict();
+var ThoughtDocumentCreatedV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: Id,
+  thought_id: Id,
+  document_id: Id,
+  target: external_exports.enum(["todo", "goal"]),
+  replayed: external_exports.boolean()
+}).strict();
+var ThoughtOutcomeResponseV2Schema = external_exports.object({
+  idempotency_key: Key,
+  verdict: external_exports.enum(["held", "broke", "inconclusive"]),
+  note: external_exports.string().max(4e3).nullable().default(null)
+}).strict();
+var ThoughtOutcomeReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  review_id: Id,
+  root_thought_id: Id,
+  replayed: external_exports.boolean(),
+  command_receipt_id: Id.nullable(),
+  legacy_receipt: external_exports.literal(true).optional()
+}).strict();
+var ThoughtDocumentSearchV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: Id,
+  thought_id: Id,
+  items: external_exports.array(
+    external_exports.object({ id: Id, title: external_exports.string(), kind: external_exports.enum(["todo", "goal"]) }).strict()
+  )
+}).strict();
+var ThoughtDecisionAcceptV2Schema = external_exports.object({
+  expected_revision: external_exports.number().int().min(1),
+  idempotency_key: external_exports.string().min(1).max(120),
+  chosen_direction: external_exports.string().trim().min(1).max(2e3).optional(),
+  rationale: external_exports.string().trim().min(1).max(6e3).optional(),
+  supersedes_document_id: Id.optional(),
+  question_id: Id.optional(),
+  question_revision: external_exports.number().int().min(1).optional()
+}).strict().refine(
+  (x) => x.question_id === void 0 === (x.question_revision === void 0),
+  "Question identity and revision are required together"
+);
+var ThoughtDecisionReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: Id,
+  thought_id: Id,
+  thought_revision_id: Id,
+  document_id: Id,
+  document_version_id: Id,
+  projection_id: Id,
+  question_id: Id.nullable(),
+  question_revision_id: Id.nullable(),
+  command_receipt_id: Id,
+  cursor: external_exports.number().int().min(1),
+  replayed: external_exports.boolean()
+}).strict();
+
+// packages/shared/dist/thought-presence.js
+var ThoughtPresenceRequestV2Schema = external_exports.object({
+  session_id: external_exports.string().uuid(),
+  action: external_exports.enum(["touch", "leave"]).default("touch"),
+  selected_thought_id: external_exports.string().uuid().nullable().default(null)
+}).strict();
+var ThoughtPresenceV2Schema = external_exports.object({
+  root_thought_id: external_exports.string().uuid(),
+  expires_at: external_exports.string().datetime({ offset: true }).nullable(),
+  participants: external_exports.array(
+    external_exports.object({
+      user_id: external_exports.string().uuid(),
+      name: external_exports.string(),
+      last_seen_at: external_exports.string().datetime({ offset: true })
+    }).strict()
+  ).max(100),
+  more: external_exports.boolean()
+}).strict();
+
+// packages/shared/dist/thought-discussion.js
+var common = {
+  subject_thought_id: external_exports.string().uuid(),
+  idempotency_key: external_exports.string().min(1).max(96)
+};
+var revision = { comment_id: external_exports.string().uuid(), expected_revision: external_exports.number().int().positive() };
+var ThoughtDiscussionWriteV2Schema = external_exports.discriminatedUnion("action", [
+  external_exports.object({
+    ...common,
+    action: external_exports.literal("create"),
+    body: external_exports.string().trim().min(1).max(5e3),
+    parent_comment_id: external_exports.string().uuid().nullable().optional()
+  }).strict(),
+  external_exports.object({
+    ...common,
+    ...revision,
+    action: external_exports.literal("edit"),
+    body: external_exports.string().trim().min(1).max(5e3)
+  }).strict(),
+  external_exports.object({ ...common, ...revision, action: external_exports.literal("archive") }).strict(),
+  external_exports.object({
+    ...common,
+    ...revision,
+    action: external_exports.literal("resolve"),
+    resolved: external_exports.boolean()
+  }).strict()
+]);
+var ThoughtDiscussionReceiptV2Schema = external_exports.object({
+  comment_id: external_exports.string().uuid(),
+  subject_thought_id: external_exports.string().uuid(),
+  revision: external_exports.number().int().positive(),
+  archived: external_exports.boolean(),
+  replayed: external_exports.boolean()
+}).strict();
+var ThoughtDiscussionV2Schema = external_exports.object({
+  root_thought_id: external_exports.string().uuid(),
+  subject_thought_id: external_exports.string().uuid(),
+  subject_title: external_exports.string(),
+  can_comment: external_exports.boolean(),
+  next_cursor: external_exports.string().nullable(),
+  comments: external_exports.array(
+    external_exports.object({
+      id: external_exports.string().uuid(),
+      parent_comment_id: external_exports.string().uuid().nullable(),
+      body: external_exports.string(),
+      revision: external_exports.number().int().positive(),
+      created_by: external_exports.string().uuid(),
+      author_name: external_exports.string(),
+      can_edit: external_exports.boolean(),
+      created_at: external_exports.string(),
+      updated_at: external_exports.string(),
+      edited_at: external_exports.string().nullable(),
+      resolved_at: external_exports.string().nullable(),
+      revisions: external_exports.array(
+        external_exports.object({
+          revision: external_exports.number().int().positive(),
+          body: external_exports.string(),
+          authored_by: external_exports.string().uuid(),
+          author_name: external_exports.string(),
+          created_at: external_exports.string()
+        }).strict()
+      ).max(20)
+    }).strict()
+  ).max(50)
+}).strict();
+
+// packages/shared/dist/thought-sharing.js
+var ThoughtSharingRoleV2Schema = external_exports.enum(["owner", "editor", "commenter", "viewer"]);
+var ThoughtSharingWriteV2Schema = external_exports.discriminatedUnion("action", [
+  external_exports.object({
+    action: external_exports.literal("set"),
+    expected_version: external_exports.string().regex(/^[a-f0-9]{64}$/),
+    user_id: external_exports.string().uuid(),
+    role: ThoughtSharingRoleV2Schema
+  }).strict(),
+  external_exports.object({
+    action: external_exports.literal("remove"),
+    expected_version: external_exports.string().regex(/^[a-f0-9]{64}$/),
+    user_id: external_exports.string().uuid()
+  }).strict(),
+  external_exports.object({ action: external_exports.literal("close"), expected_version: external_exports.string().regex(/^[a-f0-9]{64}$/) }).strict()
+]);
+var ThoughtSharingV2Schema = external_exports.object({
+  thought_id: external_exports.string().uuid(),
+  title: external_exports.string(),
+  scope: external_exports.enum(["personal", "team", "project"]),
+  version: external_exports.string().regex(/^[a-f0-9]{64}$/),
+  is_room: external_exports.boolean(),
+  can_manage: external_exports.boolean(),
+  can_leave: external_exports.boolean(),
+  participants: external_exports.array(
+    external_exports.object({
+      user_id: external_exports.string().uuid(),
+      name: external_exports.string(),
+      role: ThoughtSharingRoleV2Schema,
+      is_creator: external_exports.boolean()
+    })
+  ),
+  candidates: external_exports.array(
+    external_exports.object({
+      user_id: external_exports.string().uuid(),
+      name: external_exports.string(),
+      account_role: external_exports.enum(["owner", "admin", "member", "viewer"])
+    })
+  )
+});
+
+// packages/shared/dist/thought-feedback.js
+var ThoughtFeedbackWriteV2Schema = external_exports.object({
+  run_id: external_exports.string().uuid(),
+  helpful: external_exports.boolean().nullable().optional(),
+  inaccurate: external_exports.boolean().default(false),
+  too_simple: external_exports.boolean().default(false),
+  too_complex: external_exports.boolean().default(false),
+  too_long: external_exports.boolean().default(false),
+  tone_wrong: external_exports.boolean().default(false),
+  missing_context: external_exports.boolean().default(false),
+  note: external_exports.string().trim().min(1).max(4e3).nullable().optional()
+}).strict().refine((value) => !(value.too_simple && value.too_complex), {
+  message: "Feedback cannot be both too simple and too complex"
+}).refine(
+  (value) => typeof value.helpful === "boolean" || value.inaccurate || value.too_simple || value.too_complex || value.too_long || value.tone_wrong || value.missing_context || Boolean(value.note),
+  { message: "Feedback needs at least one signal" }
+);
+var ThoughtFeedbackReceiptV2Schema = external_exports.object({
+  status: external_exports.literal("recorded"),
+  feedback_id: external_exports.string().uuid(),
+  run_id: external_exports.string().uuid(),
+  created_at: external_exports.string(),
+  replayed: external_exports.boolean()
+}).strict();
+
+// packages/shared/dist/experience-harness.js
+var EXPERIENCE_HARNESS_MAX_NODES = 32;
+var EXPERIENCE_HARNESS_MAX_EDGES = 256;
+var WorkflowAssignmentV2Schema = external_exports.object({
+  task: external_exports.string().trim().min(1).max(8192),
+  target_agent_installation_id: external_exports.string().uuid()
+}).strict();
+var WorkflowMemoryQueryV2Schema = external_exports.object({ query: external_exports.string().trim().min(1).max(2e3) }).strict();
+var WorkflowRegisteredActionV2Schema = external_exports.object({
+  action_id: external_exports.string().uuid(),
+  input: external_exports.record(ContractJsonValueSchema)
+}).strict().refine(
+  (value) => JSON.stringify(value.input).length <= 8192,
+  "Action input exceeds the workflow limit"
+);
+var ExperienceHarnessArtifactV2Schema = HarnessArtifactRefV1Schema.extend({
+  kind: external_exports.enum([
+    "thought",
+    "markdown",
+    "document",
+    "prompt",
+    "source",
+    "memory",
+    "memory_query",
+    "skill",
+    "schema",
+    "agent",
+    "decision_gate",
+    "action",
+    "output"
+  ]),
+  content_hash: Sha256Schema,
+  memory_query: WorkflowMemoryQueryV2Schema.optional(),
+  assignment: WorkflowAssignmentV2Schema.optional(),
+  registered_action: WorkflowRegisteredActionV2Schema.optional()
+}).strict();
+var ExperienceHarnessManifestV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  id: external_exports.string().uuid(),
+  revision: external_exports.number().int().positive(),
+  root_thought_id: external_exports.string().uuid(),
+  root_revision_token: external_exports.string().min(1).max(2048),
+  context: ContextManifestV1Schema,
+  nodes: external_exports.array(
+    external_exports.object({
+      id: external_exports.string().uuid(),
+      artifact: ExperienceHarnessArtifactV2Schema
+    }).strict()
+  ).min(1).max(EXPERIENCE_HARNESS_MAX_NODES),
+  edges: external_exports.array(
+    external_exports.object({
+      id: external_exports.string().uuid(),
+      from_node_id: external_exports.string().uuid(),
+      output: ContractKeySchema,
+      to_node_id: external_exports.string().uuid(),
+      input: ContractKeySchema
+    }).strict()
+  ).max(EXPERIENCE_HARNESS_MAX_EDGES)
+}).strict();
+var ExperienceHarnessSaveV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: external_exports.string().uuid(),
+  idempotency_key: external_exports.string().min(1).max(160),
+  title: external_exports.string().trim().min(1).max(240),
+  root_revision_token: external_exports.string().min(1).max(2048),
+  harness_id: external_exports.string().uuid().nullable().default(null),
+  expected_revision: external_exports.number().int().positive().nullable().default(null),
+  definition: ExperienceHarnessManifestV2Schema.pick({ context: true, nodes: true, edges: true })
+}).strict().refine(
+  (input) => input.harness_id === null === (input.expected_revision === null),
+  "Existing harness requires its current revision"
+);
+var ExperienceHarnessArtifactSelectionV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  thought_ids: external_exports.array(external_exports.string().uuid()).max(EXPERIENCE_HARNESS_MAX_NODES).default([]),
+  resource_ids: external_exports.array(external_exports.string().uuid()).max(EXPERIENCE_HARNESS_MAX_NODES).default([]),
+  document_ids: external_exports.array(external_exports.string().uuid()).max(EXPERIENCE_HARNESS_MAX_NODES).default([]),
+  memory_queries: external_exports.array(WorkflowMemoryQueryV2Schema).max(1).default([]),
+  assignments: external_exports.array(WorkflowAssignmentV2Schema).max(8).default([]),
+  actions: external_exports.array(WorkflowRegisteredActionV2Schema).max(8).default([]),
+  tool_ids: external_exports.array(
+    external_exports.enum([
+      "memlin.thought.review",
+      "memlin.thought.plan",
+      "memlin.thought.review-gate",
+      "memlin.thought.output"
+    ])
+  ).max(4).default([])
+}).strict().refine((selection) => {
+  const ids = [
+    ...selection.thought_ids,
+    ...selection.resource_ids,
+    ...selection.document_ids,
+    ...selection.tool_ids,
+    ...selection.memory_queries.map((item) => JSON.stringify(item)),
+    ...selection.assignments.map((item) => JSON.stringify(item)),
+    ...selection.actions.map((item) => JSON.stringify(item))
+  ];
+  return ids.length > 0 && ids.length <= EXPERIENCE_HARNESS_MAX_NODES && new Set(ids).size === ids.length;
+}, "Select between 1 and 32 distinct artifacts");
+var ExperienceHarnessCompileRequestV2Schema = external_exports.object({ version: external_exports.literal(2), revision: external_exports.number().int().positive() }).strict();
+var ExperienceHarnessReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  harness_id: external_exports.string().uuid(),
+  version_id: external_exports.string().uuid(),
+  revision: external_exports.number().int().positive(),
+  title: external_exports.string().min(1).max(240),
+  manifest: ExperienceHarnessManifestV2Schema,
+  definition_sha256: Sha256Schema,
+  replayed: external_exports.boolean()
+}).strict().refine(
+  (receipt) => receipt.harness_id === receipt.manifest.id && receipt.revision === receipt.manifest.revision,
+  "Harness receipt identity mismatch"
+);
+var ExperienceHarnessListQueryV2Schema = external_exports.object({
+  after: external_exports.string().uuid().optional(),
+  limit: external_exports.coerce.number().int().min(1).max(50).default(20)
+}).strict();
+var ExperienceHarnessListV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  items: external_exports.array(
+    external_exports.object({
+      id: external_exports.string().uuid(),
+      title: external_exports.string().min(1).max(240),
+      current_revision: external_exports.number().int().positive()
+    }).strict()
+  ).max(50),
+  next: external_exports.string().uuid().nullable()
+}).strict();
+var ExperienceHarnessSchemaRefV2Schema = external_exports.object({
+  id: ContractKeySchema,
+  revision: external_exports.string().min(1).max(128),
+  content_hash: Sha256Schema
+}).strict();
+var ExperienceHarnessAdmissionV2Schema = external_exports.object({
+  receipt_id: external_exports.string().uuid(),
+  manifest_hash: Sha256Schema,
+  artifact: ExperienceHarnessArtifactV2Schema,
+  inputs: external_exports.record(
+    ContractKeySchema,
+    external_exports.object({
+      schema: ExperienceHarnessSchemaRefV2Schema,
+      required: external_exports.boolean()
+    }).strict()
+  ),
+  outputs: external_exports.record(ContractKeySchema, ExperienceHarnessSchemaRefV2Schema),
+  model_role: ExperienceHarnessSchemaRefV2Schema.optional(),
+  action: external_exports.object({
+    adapter: ExperienceHarnessSchemaRefV2Schema,
+    operation: ContractKeySchema
+  }).strict().optional()
+}).strict();
+var ExperienceHarnessStageReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  id: external_exports.string().uuid(),
+  kind: external_exports.enum([
+    "artifact",
+    "resource",
+    "proposal",
+    "handoff",
+    "prepared_action",
+    "executed_action",
+    "approval",
+    "output"
+  ]),
+  data: external_exports.record(ContractJsonValueSchema)
+}).strict();
+var ExperienceHarnessRunStateV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  status: external_exports.enum(["running", "waiting_approval", "completed", "failed", "cancelled"]),
+  stages: external_exports.array(
+    external_exports.object({
+      id: external_exports.string().min(1).max(128),
+      status: external_exports.enum([
+        "pending",
+        "running",
+        "waiting_approval",
+        "completed",
+        "failed",
+        "cancelled"
+      ]),
+      attempt: external_exports.number().int().min(0).max(100),
+      input: external_exports.record(ContractJsonValueSchema).nullable(),
+      input_sha256: Sha256Schema.nullable(),
+      lease_id: external_exports.string().uuid().nullable(),
+      lease_expires_at: external_exports.string().datetime().nullable(),
+      receipt: ExperienceHarnessStageReceiptV2Schema.nullable(),
+      failure: external_exports.string().min(1).max(160).nullable()
+    }).strict()
+  ).min(1).max(EXPERIENCE_HARNESS_MAX_NODES * 3)
+}).strict();
+var ExperienceHarnessRunRequestV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  root_thought_id: external_exports.string().uuid(),
+  revision: external_exports.number().int().positive(),
+  idempotency_key: external_exports.string().min(1).max(160)
+}).strict();
+var ExperienceHarnessRunControlV2Schema = external_exports.discriminatedUnion("action", [
+  external_exports.object({
+    version: external_exports.literal(2),
+    action: external_exports.literal("resume"),
+    expected_revision: external_exports.number().int().positive()
+  }).strict(),
+  external_exports.object({
+    version: external_exports.literal(2),
+    action: external_exports.literal("cancel"),
+    expected_revision: external_exports.number().int().nonnegative()
+  }).strict(),
+  external_exports.object({
+    version: external_exports.literal(2),
+    action: external_exports.enum(["approve", "reject"]),
+    expected_revision: external_exports.number().int().positive(),
+    stage_id: external_exports.string().min(1).max(128),
+    input_sha256: Sha256Schema
+  }).strict()
+]);
+
+// packages/shared/dist/light-provenance.js
+var HOSTS = new Set(LIGHT_HOSTS);
+
+// packages/shared/dist/memory-decisions.js
+var DECISION_KIND_IDS = ["replace", "conflict", "sensitive", "runbook", "goal"];
+var DECISION_KINDS = {
+  replace: {
+    id: "replace",
+    label: "Replace live memory",
+    raisedWhen: "A new capture would retire or rewrite a live doc that governs agents: a decision, a correction, a verified directive, or anything a person wrote.",
+    whyHuman: "Agents follow the existing doc today. Replacing it changes what every agent is told, and the evidence alone cannot say the new version is right.",
+    options: [
+      {
+        id: "replace",
+        label: "Replace",
+        consequence: "The new capture goes live and the existing doc is retired.",
+        reversible: true
+      },
+      {
+        id: "keep_both",
+        label: "Keep both",
+        consequence: "Both stay live. Agents may be given both.",
+        reversible: true
+      },
+      {
+        id: "keep_existing",
+        label: "Keep existing",
+        consequence: "Nothing changes for agents. The new capture stays searchable only.",
+        reversible: true
+      }
+    ],
+    defaultOption: "keep_existing",
+    deadlineDays: 7,
+    urgent: true,
+    aiExplanation: true
+  },
+  conflict: {
+    id: "conflict",
+    label: "Two live docs disagree",
+    raisedWhen: "Two live docs contradict, at least one was served to agents in the last 30 days, and at least one is a decision or was written by a person.",
+    whyHuman: "Agents are being given both answers. Which one is current is a judgement about your project that neither doc settles.",
+    options: [
+      {
+        id: "a_wins",
+        label: "First is current",
+        consequence: "The first doc stays live and the second is retired.",
+        reversible: true
+      },
+      {
+        id: "b_wins",
+        label: "Second is current",
+        consequence: "The second doc stays live and the first is retired.",
+        reversible: true
+      },
+      {
+        id: "both_valid",
+        label: "Both are valid",
+        consequence: "Both stay live; the pair is marked as not a conflict and is not raised again.",
+        reversible: true
+      }
+    ],
+    defaultOption: "both_valid",
+    deadlineDays: 14,
+    urgent: false,
+    aiExplanation: true
+  },
+  sensitive: {
+    id: "sensitive",
+    label: "Sensitive content",
+    raisedWhen: "A capture matches a sensitive topic: compensation, HR, personal data or banking.",
+    whyHuman: "Whether this should be remembered, and who may see it, is not something automation should decide.",
+    options: [
+      {
+        id: "keep",
+        label: "Keep for the team",
+        consequence: "It goes live at its captured scope.",
+        reversible: true
+      },
+      {
+        id: "private",
+        label: "Keep private to me",
+        consequence: "It goes live, visible only to you.",
+        reversible: true
+      },
+      {
+        id: "discard",
+        label: "Discard",
+        consequence: "It is removed and will not be captured again.",
+        reversible: true
+      }
+    ],
+    defaultOption: "discard",
+    deadlineDays: 7,
+    urgent: true,
+    aiExplanation: false
+  },
+  runbook: {
+    id: "runbook",
+    label: "Incident runbook",
+    raisedWhen: "A session that handled an incident produced a runbook.",
+    whyHuman: "A runbook steers future incident response. You were there; you know whether it is what should happen next time.",
+    options: [
+      {
+        id: "keep_live",
+        label: "Keep live",
+        consequence: "Agents are given it for similar incidents.",
+        reversible: true
+      },
+      {
+        id: "searchable_only",
+        label: "Searchable only",
+        consequence: "It is kept and findable, but not given to agents unprompted.",
+        reversible: true
+      },
+      {
+        id: "discard",
+        label: "Discard",
+        consequence: "It is removed.",
+        reversible: true
+      }
+    ],
+    defaultOption: "searchable_only",
+    deadlineDays: 7,
+    urgent: false,
+    aiExplanation: true
+  },
+  goal: {
+    id: "goal",
+    label: "Goal approval",
+    raisedWhen: "A goal was proposed and needs approval before agents work toward it.",
+    whyHuman: "Goals direct what agents optimise for. Only a person can commit the team to one.",
+    options: [
+      {
+        id: "approve",
+        label: "Approve",
+        consequence: "Agents are given the goal.",
+        reversible: true
+      },
+      {
+        id: "not_now",
+        label: "Not now",
+        consequence: "It stays a draft that agents are not given.",
+        reversible: true
+      },
+      {
+        id: "reject",
+        label: "Reject",
+        consequence: "It is closed.",
+        reversible: true
+      }
+    ],
+    defaultOption: "not_now",
+    deadlineDays: 14,
+    urgent: false,
+    aiExplanation: true
+  }
+};
+function isDecisionKind(value) {
+  return typeof value === "string" && DECISION_KIND_IDS.includes(value);
+}
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function labelDecisionOptionIds(kind, text) {
+  const spec = DECISION_KINDS[kind];
+  if (!spec || !text) return text;
+  let out = text;
+  const options2 = [...spec.options].sort((a, b) => b.id.length - a.id.length);
+  for (const o of options2) {
+    const id = escapeRegExp(o.id);
+    const bare = o.id.includes("_") ? `|(?<![\\w-])${id}(?![\\w-])` : "";
+    out = out.replace(new RegExp(`\`${id}\`${bare}`, "gi"), o.label);
+  }
+  return out;
+}
+var DECISION_CAPS = {
+  /** Decisions a single capture (one scribe run) may raise. */
+  perCapture: 3,
+  /** Open questions of a session-grouped kind (runbook, sensitive) one agent
+   *  session may hold. Later captures of that kind from the same session are
+   *  attached to the open question instead of raising another. */
+  openPerSession: 1,
+  /** Captures one session-grouped question may cover. Past it the raise is
+   *  capped, like perCapture. */
+  capturesPerDecision: 100,
+  /** Questions injected into one user turn. */
+  perTurn: 1,
+  /** Questions asked in one session before the rest wait for the web list. */
+  perSession: 3,
+  /** Urgent end-of-turn interruptions in one session. */
+  urgentPerSession: 1
+};
+
+// packages/shared/dist/decision-prompt.js
+var encoder = new TextEncoder();
+function utf8Bytes(value) {
+  return encoder.encode(value).length;
+}
+function oneLine(value, max = 400) {
+  const s = value.replace(/\s+/g, " ").trim();
+  return s.length > max ? `${s.slice(0, max - 1).trimEnd()}\u2026` : s;
+}
+function optionLabel(decision, id) {
+  return decision.options.find((o) => o.id === id)?.label ?? DECISION_KINDS[decision.kind]?.options.find((o) => o.id === id)?.label ?? id;
+}
+function describeDeadline(deadlineAt, nowMs = Date.now()) {
+  const t = Date.parse(deadlineAt);
+  if (!Number.isFinite(t)) return "at its deadline";
+  const date5 = new Date(t).toISOString().slice(0, 10);
+  const days = Math.ceil((t - nowMs) / 864e5);
+  if (days <= 0) return `on ${date5} (due now)`;
+  return `on ${date5} (in ${days} day${days === 1 ? "" : "s"})`;
+}
+function askLine(host, decision) {
+  switch (host) {
+    case "claude-code":
+      return `1. Ask with your AskUserQuestion tool: one question, one choice per option (${decision.options.map((o) => `"${o.label}"`).join(", ")}), each choice described by its consequence. Put why a person is needed and the recommendation in the question text.`;
+    case "codex":
+      return "1. The user was shown a one-line notice about this. Ask the question in your reply, in plain language, listing the options.";
+    case "mcp":
+      return "1. Ask me in your reply, in plain language, listing the options.";
+    default:
+      return "1. Ask the question in your reply, in plain language, listing the options.";
+  }
+}
+function renderAt(decision, host, detail, nowMs) {
+  const prose = (text, max) => oneLine(labelDecisionOptionIds(decision.kind, text), max);
+  const lines = [];
+  lines.push(`<memlin-decision id="${decision.id}" kind="${decision.kind}">`);
+  lines.push(
+    "# Memlin needs ONE decision from the user. Finish the user's current request first; do not let this interrupt or change that work."
+  );
+  lines.push(`Question: ${oneLine(decision.question, 300)}`);
+  if (detail !== "minimal") {
+    lines.push(`Why a person is needed: ${oneLine(decision.why_human, 400)}`);
+  }
+  const rec = decision.recommendation;
+  if (rec) {
+    const reason = detail === "minimal" ? "" : ` \u2014 ${prose(rec.rationale, detail === "full" ? 500 : 240)}`;
+    lines.push(`Recommendation: ${optionLabel(decision, rec.option)} (${rec.option})${reason}`);
+  } else if (detail !== "minimal") {
+    lines.push(
+      DECISION_KINDS[decision.kind]?.aiExplanation === false ? "Recommendation: none \u2014 this kind is never sent to an AI model, so present the facts only." : "Recommendation: none yet \u2014 present the options evenly."
+    );
+  }
+  lines.push("Options:");
+  for (const o of decision.options) {
+    if (detail === "minimal") {
+      lines.push(`- ${o.label} (${o.id})`);
+      continue;
+    }
+    lines.push(
+      `- ${o.label} (${o.id}): ${oneLine(o.consequence, 200)}${o.reversible ? " Can be undone." : " Cannot be undone."}`
+    );
+    if (detail === "full") {
+      for (const p of o.pros) lines.push(`  + ${prose(p, 200)}`);
+      for (const c of o.cons) lines.push(`  - ${prose(c, 200)}`);
+    }
+  }
+  lines.push(
+    `If unanswered: ${optionLabel(decision, decision.default_option)} (${decision.default_option}) applies automatically ${describeDeadline(decision.deadline_at, nowMs)}. Ignoring it is safe.`
+  );
+  lines.push("How to ask, after the current request is done:");
+  lines.push(askLine(host, decision));
+  lines.push(
+    "2. Say why a person is needed, the recommendation and its reason, what each option does with its pros and cons, and what happens if they do not answer."
+  );
+  lines.push(
+    `3. Offer to explain more. If they want to know where it came from, what automation already did or the diff, call memlin_explain_decision {"decision_id":"${decision.id}"} and answer from it.`
+  );
+  lines.push(
+    `4. When they choose, call memlin_decide {"decision_id":"${decision.id}","option":"<option id>","note":"<their reason>","user_quote":"<their exact words>"}.`
+  );
+  lines.push(
+    "5. Never choose for them. If they decline, change the subject or do not answer, do nothing: the default applies."
+  );
+  lines.push("</memlin-decision>");
+  return lines.join("\n") + "\n";
+}
+function renderDecisionBlock(decision, opts) {
+  const nowMs = opts.nowMs ?? Date.now();
+  for (const detail of ["full", "compact", "minimal"]) {
+    const block = renderAt(decision, opts.host, detail, nowMs);
+    if (opts.maxBytes === void 0 || utf8Bytes(block) <= opts.maxBytes) return block;
+  }
+  return "";
+}
+
+// packages/shared/dist/thought-handoff-v2.js
+var ThoughtHandoffRequestV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  idempotency_key: external_exports.string().min(1).max(160),
+  task: external_exports.string().trim().min(1).max(8192),
+  target_agent_installation_id: external_exports.string().uuid(),
+  focus_thought_id: external_exports.string().uuid().optional(),
+  context_revision_token: external_exports.string().regex(/^[0-9a-f]{64}$/)
+}).strict();
+var ThoughtHandoffReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  kind: external_exports.literal("thought_handoff_v2"),
+  id: external_exports.string().uuid(),
+  root_thought_id: external_exports.string().uuid(),
+  project_id: external_exports.string().uuid().nullable(),
+  target_agent_installation_id: external_exports.string().uuid(),
+  target_agent_kind: external_exports.enum(AGENT_KINDS),
+  task: external_exports.string(),
+  status: external_exports.enum(["preparing", "pending", "accepted", "completed", "cancelled"]),
+  context_bundle_id: external_exports.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  context_revision_token: external_exports.string(),
+  packet_markdown: external_exports.string().nullable(),
+  target_session_id: external_exports.string().nullable(),
+  created_at: external_exports.string(),
+  stale: external_exports.boolean(),
+  replayed: external_exports.boolean().optional()
+}).passthrough();
+
+// packages/shared/dist/entitlements.js
+var COORDINATION_SELF = [
+  "coordination.work_ledger",
+  "coordination.handoffs",
+  "coordination.collision",
+  "coordination.workstreams",
+  "coordination.fleet_dashboard"
+];
+var INDIVIDUAL_KIT = [
+  ...COORDINATION_SELF,
+  "roles",
+  "connectors",
+  "multi_repo",
+  "governance.audit_replay",
+  "governance.data_control"
+];
+var TEAM_KIT = [
+  ...INDIVIDUAL_KIT,
+  "coordination.shared_people",
+  "governance.audit_export"
+];
+var ENTERPRISE_KIT = [
+  ...TEAM_KIT,
+  "governance.sso_rbac",
+  "governance.compliance",
+  "governance.byoc"
+];
+var ENTITLEMENTS_BY_TIER = {
+  // Free: memory only, BYO key (AI gated separately by AI_QUOTA_BY_TIER.free = 0).
+  free: /* @__PURE__ */ new Set(),
+  // Starter: low-cost "memory + a little funded AI", still no feature gates.
+  starter: /* @__PURE__ */ new Set(),
+  // Pro = Personal Pro.
+  pro: new Set(INDIVIDUAL_KIT),
+  team: new Set(TEAM_KIT),
+  enterprise: new Set(ENTERPRISE_KIT)
+};
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/classic/external.js
+var external_exports2 = {};
+__export(external_exports2, {
+  $brand: () => $brand,
+  $input: () => $input,
+  $output: () => $output,
+  NEVER: () => NEVER2,
+  TimePrecision: () => TimePrecision,
+  ZodAny: () => ZodAny2,
+  ZodArray: () => ZodArray2,
+  ZodBase64: () => ZodBase64,
+  ZodBase64URL: () => ZodBase64URL,
+  ZodBigInt: () => ZodBigInt2,
+  ZodBigIntFormat: () => ZodBigIntFormat,
+  ZodBoolean: () => ZodBoolean2,
+  ZodCIDRv4: () => ZodCIDRv4,
+  ZodCIDRv6: () => ZodCIDRv6,
+  ZodCUID: () => ZodCUID,
+  ZodCUID2: () => ZodCUID2,
+  ZodCatch: () => ZodCatch2,
+  ZodCustom: () => ZodCustom,
+  ZodCustomStringFormat: () => ZodCustomStringFormat,
+  ZodDate: () => ZodDate2,
+  ZodDefault: () => ZodDefault2,
+  ZodDiscriminatedUnion: () => ZodDiscriminatedUnion2,
+  ZodE164: () => ZodE164,
+  ZodEmail: () => ZodEmail,
+  ZodEmoji: () => ZodEmoji,
+  ZodEnum: () => ZodEnum2,
+  ZodError: () => ZodError2,
+  ZodFile: () => ZodFile,
+  ZodGUID: () => ZodGUID,
+  ZodIPv4: () => ZodIPv4,
+  ZodIPv6: () => ZodIPv6,
+  ZodISODate: () => ZodISODate,
+  ZodISODateTime: () => ZodISODateTime,
+  ZodISODuration: () => ZodISODuration,
+  ZodISOTime: () => ZodISOTime,
+  ZodIntersection: () => ZodIntersection2,
+  ZodIssueCode: () => ZodIssueCode2,
+  ZodJWT: () => ZodJWT,
+  ZodKSUID: () => ZodKSUID,
+  ZodLazy: () => ZodLazy2,
+  ZodLiteral: () => ZodLiteral2,
+  ZodMap: () => ZodMap2,
+  ZodNaN: () => ZodNaN2,
+  ZodNanoID: () => ZodNanoID,
+  ZodNever: () => ZodNever2,
+  ZodNonOptional: () => ZodNonOptional,
+  ZodNull: () => ZodNull2,
+  ZodNullable: () => ZodNullable2,
+  ZodNumber: () => ZodNumber2,
+  ZodNumberFormat: () => ZodNumberFormat,
+  ZodObject: () => ZodObject2,
+  ZodOptional: () => ZodOptional2,
+  ZodPipe: () => ZodPipe,
+  ZodPrefault: () => ZodPrefault,
+  ZodPromise: () => ZodPromise2,
+  ZodReadonly: () => ZodReadonly2,
+  ZodRealError: () => ZodRealError,
+  ZodRecord: () => ZodRecord2,
+  ZodSet: () => ZodSet2,
+  ZodString: () => ZodString2,
+  ZodStringFormat: () => ZodStringFormat,
+  ZodSuccess: () => ZodSuccess,
+  ZodSymbol: () => ZodSymbol2,
+  ZodTemplateLiteral: () => ZodTemplateLiteral,
+  ZodTransform: () => ZodTransform,
+  ZodTuple: () => ZodTuple2,
+  ZodType: () => ZodType2,
+  ZodULID: () => ZodULID,
+  ZodURL: () => ZodURL,
+  ZodUUID: () => ZodUUID,
+  ZodUndefined: () => ZodUndefined2,
+  ZodUnion: () => ZodUnion2,
+  ZodUnknown: () => ZodUnknown2,
+  ZodVoid: () => ZodVoid2,
+  ZodXID: () => ZodXID,
+  _ZodString: () => _ZodString,
+  _default: () => _default2,
+  any: () => any,
+  array: () => array,
+  base64: () => base642,
+  base64url: () => base64url2,
+  bigint: () => bigint2,
+  boolean: () => boolean2,
+  catch: () => _catch2,
+  check: () => check,
+  cidrv4: () => cidrv42,
+  cidrv6: () => cidrv62,
+  clone: () => clone,
+  coerce: () => coerce_exports,
+  config: () => config,
+  core: () => core_exports2,
+  cuid: () => cuid3,
+  cuid2: () => cuid22,
+  custom: () => custom2,
+  date: () => date3,
+  discriminatedUnion: () => discriminatedUnion,
+  e164: () => e1642,
+  email: () => email2,
+  emoji: () => emoji2,
+  endsWith: () => _endsWith,
+  enum: () => _enum2,
+  file: () => file,
+  flattenError: () => flattenError,
+  float32: () => float32,
+  float64: () => float64,
+  formatError: () => formatError,
+  function: () => _function,
+  getErrorMap: () => getErrorMap2,
+  globalRegistry: () => globalRegistry,
+  gt: () => _gt,
+  gte: () => _gte,
+  guid: () => guid2,
+  includes: () => _includes,
+  instanceof: () => _instanceof,
+  int: () => int,
+  int32: () => int32,
+  int64: () => int64,
+  intersection: () => intersection,
+  ipv4: () => ipv42,
+  ipv6: () => ipv62,
+  iso: () => iso_exports,
+  json: () => json,
+  jwt: () => jwt,
+  keyof: () => keyof,
+  ksuid: () => ksuid2,
+  lazy: () => lazy,
+  length: () => _length,
+  literal: () => literal,
+  locales: () => locales_exports,
+  looseObject: () => looseObject,
+  lowercase: () => _lowercase,
+  lt: () => _lt,
+  lte: () => _lte,
+  map: () => map,
+  maxLength: () => _maxLength,
+  maxSize: () => _maxSize,
+  mime: () => _mime,
+  minLength: () => _minLength,
+  minSize: () => _minSize,
+  multipleOf: () => _multipleOf,
+  nan: () => nan,
+  nanoid: () => nanoid2,
+  nativeEnum: () => nativeEnum,
+  negative: () => _negative,
+  never: () => never,
+  nonnegative: () => _nonnegative,
+  nonoptional: () => nonoptional,
+  nonpositive: () => _nonpositive,
+  normalize: () => _normalize,
+  null: () => _null3,
+  nullable: () => nullable,
+  nullish: () => nullish2,
+  number: () => number2,
+  object: () => object,
+  optional: () => optional,
+  overwrite: () => _overwrite,
+  parse: () => parse3,
+  parseAsync: () => parseAsync2,
+  partialRecord: () => partialRecord,
+  pipe: () => pipe,
+  positive: () => _positive,
+  prefault: () => prefault,
+  preprocess: () => preprocess,
+  prettifyError: () => prettifyError,
+  promise: () => promise,
+  property: () => _property,
+  readonly: () => readonly,
+  record: () => record,
+  refine: () => refine,
+  regex: () => _regex,
+  regexes: () => regexes_exports,
+  registry: () => registry,
+  safeParse: () => safeParse2,
+  safeParseAsync: () => safeParseAsync2,
+  set: () => set,
+  setErrorMap: () => setErrorMap2,
+  size: () => _size,
+  startsWith: () => _startsWith,
+  strictObject: () => strictObject,
+  string: () => string2,
+  stringFormat: () => stringFormat,
+  stringbool: () => stringbool,
+  success: () => success,
+  superRefine: () => superRefine,
+  symbol: () => symbol,
+  templateLiteral: () => templateLiteral,
+  toJSONSchema: () => toJSONSchema,
+  toLowerCase: () => _toLowerCase,
+  toUpperCase: () => _toUpperCase,
+  transform: () => transform,
+  treeifyError: () => treeifyError,
+  trim: () => _trim,
+  tuple: () => tuple,
+  uint32: () => uint32,
+  uint64: () => uint64,
+  ulid: () => ulid2,
+  undefined: () => _undefined3,
+  union: () => union,
+  unknown: () => unknown,
+  uppercase: () => _uppercase,
+  url: () => url,
+  uuid: () => uuid2,
+  uuidv4: () => uuidv4,
+  uuidv6: () => uuidv6,
+  uuidv7: () => uuidv7,
+  void: () => _void2,
+  xid: () => xid2
+});
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/index.js
+var core_exports2 = {};
+__export(core_exports2, {
+  $ZodAny: () => $ZodAny,
+  $ZodArray: () => $ZodArray,
+  $ZodAsyncError: () => $ZodAsyncError,
+  $ZodBase64: () => $ZodBase64,
+  $ZodBase64URL: () => $ZodBase64URL,
+  $ZodBigInt: () => $ZodBigInt,
+  $ZodBigIntFormat: () => $ZodBigIntFormat,
+  $ZodBoolean: () => $ZodBoolean,
+  $ZodCIDRv4: () => $ZodCIDRv4,
+  $ZodCIDRv6: () => $ZodCIDRv6,
+  $ZodCUID: () => $ZodCUID,
+  $ZodCUID2: () => $ZodCUID2,
+  $ZodCatch: () => $ZodCatch,
+  $ZodCheck: () => $ZodCheck,
+  $ZodCheckBigIntFormat: () => $ZodCheckBigIntFormat,
+  $ZodCheckEndsWith: () => $ZodCheckEndsWith,
+  $ZodCheckGreaterThan: () => $ZodCheckGreaterThan,
+  $ZodCheckIncludes: () => $ZodCheckIncludes,
+  $ZodCheckLengthEquals: () => $ZodCheckLengthEquals,
+  $ZodCheckLessThan: () => $ZodCheckLessThan,
+  $ZodCheckLowerCase: () => $ZodCheckLowerCase,
+  $ZodCheckMaxLength: () => $ZodCheckMaxLength,
+  $ZodCheckMaxSize: () => $ZodCheckMaxSize,
+  $ZodCheckMimeType: () => $ZodCheckMimeType,
+  $ZodCheckMinLength: () => $ZodCheckMinLength,
+  $ZodCheckMinSize: () => $ZodCheckMinSize,
+  $ZodCheckMultipleOf: () => $ZodCheckMultipleOf,
+  $ZodCheckNumberFormat: () => $ZodCheckNumberFormat,
+  $ZodCheckOverwrite: () => $ZodCheckOverwrite,
+  $ZodCheckProperty: () => $ZodCheckProperty,
+  $ZodCheckRegex: () => $ZodCheckRegex,
+  $ZodCheckSizeEquals: () => $ZodCheckSizeEquals,
+  $ZodCheckStartsWith: () => $ZodCheckStartsWith,
+  $ZodCheckStringFormat: () => $ZodCheckStringFormat,
+  $ZodCheckUpperCase: () => $ZodCheckUpperCase,
+  $ZodCustom: () => $ZodCustom,
+  $ZodCustomStringFormat: () => $ZodCustomStringFormat,
+  $ZodDate: () => $ZodDate,
+  $ZodDefault: () => $ZodDefault,
+  $ZodDiscriminatedUnion: () => $ZodDiscriminatedUnion,
+  $ZodE164: () => $ZodE164,
+  $ZodEmail: () => $ZodEmail,
+  $ZodEmoji: () => $ZodEmoji,
+  $ZodEnum: () => $ZodEnum,
+  $ZodError: () => $ZodError,
+  $ZodFile: () => $ZodFile,
+  $ZodFunction: () => $ZodFunction,
+  $ZodGUID: () => $ZodGUID,
+  $ZodIPv4: () => $ZodIPv4,
+  $ZodIPv6: () => $ZodIPv6,
+  $ZodISODate: () => $ZodISODate,
+  $ZodISODateTime: () => $ZodISODateTime,
+  $ZodISODuration: () => $ZodISODuration,
+  $ZodISOTime: () => $ZodISOTime,
+  $ZodIntersection: () => $ZodIntersection,
+  $ZodJWT: () => $ZodJWT,
+  $ZodKSUID: () => $ZodKSUID,
+  $ZodLazy: () => $ZodLazy,
+  $ZodLiteral: () => $ZodLiteral,
+  $ZodMap: () => $ZodMap,
+  $ZodNaN: () => $ZodNaN,
+  $ZodNanoID: () => $ZodNanoID,
+  $ZodNever: () => $ZodNever,
+  $ZodNonOptional: () => $ZodNonOptional,
+  $ZodNull: () => $ZodNull,
+  $ZodNullable: () => $ZodNullable,
+  $ZodNumber: () => $ZodNumber,
+  $ZodNumberFormat: () => $ZodNumberFormat,
+  $ZodObject: () => $ZodObject,
+  $ZodOptional: () => $ZodOptional,
+  $ZodPipe: () => $ZodPipe,
+  $ZodPrefault: () => $ZodPrefault,
+  $ZodPromise: () => $ZodPromise,
+  $ZodReadonly: () => $ZodReadonly,
+  $ZodRealError: () => $ZodRealError,
+  $ZodRecord: () => $ZodRecord,
+  $ZodRegistry: () => $ZodRegistry,
+  $ZodSet: () => $ZodSet,
+  $ZodString: () => $ZodString,
+  $ZodStringFormat: () => $ZodStringFormat,
+  $ZodSuccess: () => $ZodSuccess,
+  $ZodSymbol: () => $ZodSymbol,
+  $ZodTemplateLiteral: () => $ZodTemplateLiteral,
+  $ZodTransform: () => $ZodTransform,
+  $ZodTuple: () => $ZodTuple,
+  $ZodType: () => $ZodType,
+  $ZodULID: () => $ZodULID,
+  $ZodURL: () => $ZodURL,
+  $ZodUUID: () => $ZodUUID,
+  $ZodUndefined: () => $ZodUndefined,
+  $ZodUnion: () => $ZodUnion,
+  $ZodUnknown: () => $ZodUnknown,
+  $ZodVoid: () => $ZodVoid,
+  $ZodXID: () => $ZodXID,
+  $brand: () => $brand,
+  $constructor: () => $constructor,
+  $input: () => $input,
+  $output: () => $output,
+  Doc: () => Doc,
+  JSONSchema: () => json_schema_exports,
+  JSONSchemaGenerator: () => JSONSchemaGenerator,
+  NEVER: () => NEVER2,
+  TimePrecision: () => TimePrecision,
+  _any: () => _any,
+  _array: () => _array,
+  _base64: () => _base64,
+  _base64url: () => _base64url,
+  _bigint: () => _bigint,
+  _boolean: () => _boolean,
+  _catch: () => _catch,
+  _cidrv4: () => _cidrv4,
+  _cidrv6: () => _cidrv6,
+  _coercedBigint: () => _coercedBigint,
+  _coercedBoolean: () => _coercedBoolean,
+  _coercedDate: () => _coercedDate,
+  _coercedNumber: () => _coercedNumber,
+  _coercedString: () => _coercedString,
+  _cuid: () => _cuid,
+  _cuid2: () => _cuid2,
+  _custom: () => _custom,
+  _date: () => _date,
+  _default: () => _default,
+  _discriminatedUnion: () => _discriminatedUnion,
+  _e164: () => _e164,
+  _email: () => _email,
+  _emoji: () => _emoji2,
+  _endsWith: () => _endsWith,
+  _enum: () => _enum,
+  _file: () => _file,
+  _float32: () => _float32,
+  _float64: () => _float64,
+  _gt: () => _gt,
+  _gte: () => _gte,
+  _guid: () => _guid,
+  _includes: () => _includes,
+  _int: () => _int,
+  _int32: () => _int32,
+  _int64: () => _int64,
+  _intersection: () => _intersection,
+  _ipv4: () => _ipv4,
+  _ipv6: () => _ipv6,
+  _isoDate: () => _isoDate,
+  _isoDateTime: () => _isoDateTime,
+  _isoDuration: () => _isoDuration,
+  _isoTime: () => _isoTime,
+  _jwt: () => _jwt,
+  _ksuid: () => _ksuid,
+  _lazy: () => _lazy,
+  _length: () => _length,
+  _literal: () => _literal,
+  _lowercase: () => _lowercase,
+  _lt: () => _lt,
+  _lte: () => _lte,
+  _map: () => _map,
+  _max: () => _lte,
+  _maxLength: () => _maxLength,
+  _maxSize: () => _maxSize,
+  _mime: () => _mime,
+  _min: () => _gte,
+  _minLength: () => _minLength,
+  _minSize: () => _minSize,
+  _multipleOf: () => _multipleOf,
+  _nan: () => _nan,
+  _nanoid: () => _nanoid,
+  _nativeEnum: () => _nativeEnum,
+  _negative: () => _negative,
+  _never: () => _never,
+  _nonnegative: () => _nonnegative,
+  _nonoptional: () => _nonoptional,
+  _nonpositive: () => _nonpositive,
+  _normalize: () => _normalize,
+  _null: () => _null2,
+  _nullable: () => _nullable,
+  _number: () => _number,
+  _optional: () => _optional,
+  _overwrite: () => _overwrite,
+  _parse: () => _parse,
+  _parseAsync: () => _parseAsync,
+  _pipe: () => _pipe,
+  _positive: () => _positive,
+  _promise: () => _promise,
+  _property: () => _property,
+  _readonly: () => _readonly,
+  _record: () => _record,
+  _refine: () => _refine,
+  _regex: () => _regex,
+  _safeParse: () => _safeParse,
+  _safeParseAsync: () => _safeParseAsync,
+  _set: () => _set,
+  _size: () => _size,
+  _startsWith: () => _startsWith,
+  _string: () => _string,
+  _stringFormat: () => _stringFormat,
+  _stringbool: () => _stringbool,
+  _success: () => _success,
+  _symbol: () => _symbol,
+  _templateLiteral: () => _templateLiteral,
+  _toLowerCase: () => _toLowerCase,
+  _toUpperCase: () => _toUpperCase,
+  _transform: () => _transform,
+  _trim: () => _trim,
+  _tuple: () => _tuple,
+  _uint32: () => _uint32,
+  _uint64: () => _uint64,
+  _ulid: () => _ulid,
+  _undefined: () => _undefined2,
+  _union: () => _union,
+  _unknown: () => _unknown,
+  _uppercase: () => _uppercase,
+  _url: () => _url,
+  _uuid: () => _uuid,
+  _uuidv4: () => _uuidv4,
+  _uuidv6: () => _uuidv6,
+  _uuidv7: () => _uuidv7,
+  _void: () => _void,
+  _xid: () => _xid,
+  clone: () => clone,
+  config: () => config,
+  flattenError: () => flattenError,
+  formatError: () => formatError,
+  function: () => _function,
+  globalConfig: () => globalConfig,
+  globalRegistry: () => globalRegistry,
+  isValidBase64: () => isValidBase64,
+  isValidBase64URL: () => isValidBase64URL,
+  isValidJWT: () => isValidJWT2,
+  locales: () => locales_exports,
+  parse: () => parse2,
+  parseAsync: () => parseAsync,
+  prettifyError: () => prettifyError,
+  regexes: () => regexes_exports,
+  registry: () => registry,
+  safeParse: () => safeParse,
+  safeParseAsync: () => safeParseAsync,
+  toDotPath: () => toDotPath,
+  toJSONSchema: () => toJSONSchema,
+  treeifyError: () => treeifyError,
+  util: () => util_exports,
+  version: () => version
+});
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/core.js
+var NEVER2 = Object.freeze({
+  status: "aborted"
+});
+// @__NO_SIDE_EFFECTS__
+function $constructor(name, initializer3, params) {
+  function init(inst, def) {
+    var _a;
+    Object.defineProperty(inst, "_zod", {
+      value: inst._zod ?? {},
+      enumerable: false
+    });
+    (_a = inst._zod).traits ?? (_a.traits = /* @__PURE__ */ new Set());
+    inst._zod.traits.add(name);
+    initializer3(inst, def);
+    for (const k in _.prototype) {
+      if (!(k in inst))
+        Object.defineProperty(inst, k, { value: _.prototype[k].bind(inst) });
+    }
+    inst._zod.constr = _;
+    inst._zod.def = def;
+  }
+  const Parent = params?.Parent ?? Object;
+  class Definition extends Parent {
+  }
+  Object.defineProperty(Definition, "name", { value: name });
+  function _(def) {
+    var _a;
+    const inst = params?.Parent ? new Definition() : this;
+    init(inst, def);
+    (_a = inst._zod).deferred ?? (_a.deferred = []);
+    for (const fn of inst._zod.deferred) {
+      fn();
+    }
+    return inst;
+  }
+  Object.defineProperty(_, "init", { value: init });
+  Object.defineProperty(_, Symbol.hasInstance, {
+    value: (inst) => {
+      if (params?.Parent && inst instanceof params.Parent)
+        return true;
+      return inst?._zod?.traits?.has(name);
+    }
+  });
+  Object.defineProperty(_, "name", { value: name });
+  return _;
+}
+var $brand = /* @__PURE__ */ Symbol("zod_brand");
+var $ZodAsyncError = class extends Error {
+  constructor() {
+    super(`Encountered Promise during synchronous parse. Use .parseAsync() instead.`);
+  }
+};
+var globalConfig = {};
+function config(newConfig) {
+  if (newConfig)
+    Object.assign(globalConfig, newConfig);
+  return globalConfig;
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/util.js
+var util_exports = {};
+__export(util_exports, {
+  BIGINT_FORMAT_RANGES: () => BIGINT_FORMAT_RANGES,
+  Class: () => Class,
+  NUMBER_FORMAT_RANGES: () => NUMBER_FORMAT_RANGES,
+  aborted: () => aborted,
+  allowsEval: () => allowsEval,
+  assert: () => assert,
+  assertEqual: () => assertEqual,
+  assertIs: () => assertIs,
+  assertNever: () => assertNever,
+  assertNotEqual: () => assertNotEqual,
+  assignProp: () => assignProp,
+  cached: () => cached,
+  captureStackTrace: () => captureStackTrace,
+  cleanEnum: () => cleanEnum,
+  cleanRegex: () => cleanRegex,
+  clone: () => clone,
+  createTransparentProxy: () => createTransparentProxy,
+  defineLazy: () => defineLazy,
+  esc: () => esc,
+  escapeRegex: () => escapeRegex,
+  extend: () => extend,
+  finalizeIssue: () => finalizeIssue,
+  floatSafeRemainder: () => floatSafeRemainder2,
+  getElementAtPath: () => getElementAtPath,
+  getEnumValues: () => getEnumValues,
+  getLengthableOrigin: () => getLengthableOrigin,
+  getParsedType: () => getParsedType2,
+  getSizableOrigin: () => getSizableOrigin,
+  isObject: () => isObject,
+  isPlainObject: () => isPlainObject,
+  issue: () => issue,
+  joinValues: () => joinValues,
+  jsonStringifyReplacer: () => jsonStringifyReplacer,
+  merge: () => merge,
+  normalizeParams: () => normalizeParams,
+  nullish: () => nullish,
+  numKeys: () => numKeys,
+  omit: () => omit,
+  optionalKeys: () => optionalKeys,
+  partial: () => partial,
+  pick: () => pick,
+  prefixIssues: () => prefixIssues,
+  primitiveTypes: () => primitiveTypes,
+  promiseAllObject: () => promiseAllObject,
+  propertyKeyTypes: () => propertyKeyTypes,
+  randomString: () => randomString,
+  required: () => required,
+  stringifyPrimitive: () => stringifyPrimitive,
+  unwrapMessage: () => unwrapMessage
+});
+function assertEqual(val) {
+  return val;
+}
+function assertNotEqual(val) {
+  return val;
+}
+function assertIs(_arg) {
+}
+function assertNever(_x) {
+  throw new Error();
+}
+function assert(_) {
+}
+function getEnumValues(entries) {
+  const numericValues = Object.values(entries).filter((v) => typeof v === "number");
+  const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
+  return values;
+}
+function joinValues(array2, separator = "|") {
+  return array2.map((val) => stringifyPrimitive(val)).join(separator);
+}
+function jsonStringifyReplacer(_, value) {
+  if (typeof value === "bigint")
+    return value.toString();
+  return value;
+}
+function cached(getter) {
+  const set2 = false;
+  return {
+    get value() {
+      if (!set2) {
+        const value = getter();
+        Object.defineProperty(this, "value", { value });
+        return value;
+      }
+      throw new Error("cached value already set");
+    }
+  };
+}
+function nullish(input) {
+  return input === null || input === void 0;
+}
+function cleanRegex(source) {
+  const start = source.startsWith("^") ? 1 : 0;
+  const end = source.endsWith("$") ? source.length - 1 : source.length;
+  return source.slice(start, end);
+}
+function floatSafeRemainder2(val, step) {
+  const valDecCount = (val.toString().split(".")[1] || "").length;
+  const stepDecCount = (step.toString().split(".")[1] || "").length;
+  const decCount = valDecCount > stepDecCount ? valDecCount : stepDecCount;
+  const valInt = Number.parseInt(val.toFixed(decCount).replace(".", ""));
+  const stepInt = Number.parseInt(step.toFixed(decCount).replace(".", ""));
+  return valInt % stepInt / 10 ** decCount;
+}
+function defineLazy(object2, key, getter) {
+  const set2 = false;
+  Object.defineProperty(object2, key, {
+    get() {
+      if (!set2) {
+        const value = getter();
+        object2[key] = value;
+        return value;
+      }
+      throw new Error("cached value already set");
+    },
+    set(v) {
+      Object.defineProperty(object2, key, {
+        value: v
+        // configurable: true,
+      });
+    },
+    configurable: true
+  });
+}
+function assignProp(target, prop, value) {
+  Object.defineProperty(target, prop, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true
+  });
+}
+function getElementAtPath(obj, path13) {
+  if (!path13)
+    return obj;
+  return path13.reduce((acc, key) => acc?.[key], obj);
+}
+function promiseAllObject(promisesObj) {
+  const keys = Object.keys(promisesObj);
+  const promises = keys.map((key) => promisesObj[key]);
+  return Promise.all(promises).then((results) => {
+    const resolvedObj = {};
+    for (let i = 0; i < keys.length; i++) {
+      resolvedObj[keys[i]] = results[i];
+    }
+    return resolvedObj;
+  });
+}
+function randomString(length = 10) {
+  const chars = "abcdefghijklmnopqrstuvwxyz";
+  let str2 = "";
+  for (let i = 0; i < length; i++) {
+    str2 += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return str2;
+}
+function esc(str2) {
+  return JSON.stringify(str2);
+}
+var captureStackTrace = Error.captureStackTrace ? Error.captureStackTrace : (..._args) => {
+};
+function isObject(data) {
+  return typeof data === "object" && data !== null && !Array.isArray(data);
+}
+var allowsEval = cached(() => {
+  if (typeof navigator !== "undefined" && navigator?.userAgent?.includes("Cloudflare")) {
+    return false;
+  }
+  try {
+    const F = Function;
+    new F("");
+    return true;
+  } catch (_) {
+    return false;
+  }
+});
+function isPlainObject(o) {
+  if (isObject(o) === false)
+    return false;
+  const ctor = o.constructor;
+  if (ctor === void 0)
+    return true;
+  const prot = ctor.prototype;
+  if (isObject(prot) === false)
+    return false;
+  if (Object.prototype.hasOwnProperty.call(prot, "isPrototypeOf") === false) {
+    return false;
+  }
+  return true;
+}
+function numKeys(data) {
+  let keyCount = 0;
+  for (const key in data) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      keyCount++;
+    }
+  }
+  return keyCount;
+}
+var getParsedType2 = (data) => {
+  const t = typeof data;
+  switch (t) {
+    case "undefined":
+      return "undefined";
+    case "string":
+      return "string";
+    case "number":
+      return Number.isNaN(data) ? "nan" : "number";
+    case "boolean":
+      return "boolean";
+    case "function":
+      return "function";
+    case "bigint":
+      return "bigint";
+    case "symbol":
+      return "symbol";
+    case "object":
+      if (Array.isArray(data)) {
+        return "array";
+      }
+      if (data === null) {
+        return "null";
+      }
+      if (data.then && typeof data.then === "function" && data.catch && typeof data.catch === "function") {
+        return "promise";
+      }
+      if (typeof Map !== "undefined" && data instanceof Map) {
+        return "map";
+      }
+      if (typeof Set !== "undefined" && data instanceof Set) {
+        return "set";
+      }
+      if (typeof Date !== "undefined" && data instanceof Date) {
+        return "date";
+      }
+      if (typeof File !== "undefined" && data instanceof File) {
+        return "file";
+      }
+      return "object";
+    default:
+      throw new Error(`Unknown data type: ${t}`);
+  }
+};
+var propertyKeyTypes = /* @__PURE__ */ new Set(["string", "number", "symbol"]);
+var primitiveTypes = /* @__PURE__ */ new Set(["string", "number", "bigint", "boolean", "symbol", "undefined"]);
+function escapeRegex(str2) {
+  return str2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function clone(inst, def, params) {
+  const cl = new inst._zod.constr(def ?? inst._zod.def);
+  if (!def || params?.parent)
+    cl._zod.parent = inst;
+  return cl;
+}
+function normalizeParams(_params) {
+  const params = _params;
+  if (!params)
+    return {};
+  if (typeof params === "string")
+    return { error: () => params };
+  if (params?.message !== void 0) {
+    if (params?.error !== void 0)
+      throw new Error("Cannot specify both `message` and `error` params");
+    params.error = params.message;
+  }
+  delete params.message;
+  if (typeof params.error === "string")
+    return { ...params, error: () => params.error };
+  return params;
+}
+function createTransparentProxy(getter) {
+  let target;
+  return new Proxy({}, {
+    get(_, prop, receiver) {
+      target ?? (target = getter());
+      return Reflect.get(target, prop, receiver);
+    },
+    set(_, prop, value, receiver) {
+      target ?? (target = getter());
+      return Reflect.set(target, prop, value, receiver);
+    },
+    has(_, prop) {
+      target ?? (target = getter());
+      return Reflect.has(target, prop);
+    },
+    deleteProperty(_, prop) {
+      target ?? (target = getter());
+      return Reflect.deleteProperty(target, prop);
+    },
+    ownKeys(_) {
+      target ?? (target = getter());
+      return Reflect.ownKeys(target);
+    },
+    getOwnPropertyDescriptor(_, prop) {
+      target ?? (target = getter());
+      return Reflect.getOwnPropertyDescriptor(target, prop);
+    },
+    defineProperty(_, prop, descriptor) {
+      target ?? (target = getter());
+      return Reflect.defineProperty(target, prop, descriptor);
+    }
+  });
+}
+function stringifyPrimitive(value) {
+  if (typeof value === "bigint")
+    return value.toString() + "n";
+  if (typeof value === "string")
+    return `"${value}"`;
+  return `${value}`;
+}
+function optionalKeys(shape) {
+  return Object.keys(shape).filter((k) => {
+    return shape[k]._zod.optin === "optional" && shape[k]._zod.optout === "optional";
+  });
+}
+var NUMBER_FORMAT_RANGES = {
+  safeint: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+  int32: [-2147483648, 2147483647],
+  uint32: [0, 4294967295],
+  float32: [-34028234663852886e22, 34028234663852886e22],
+  float64: [-Number.MAX_VALUE, Number.MAX_VALUE]
+};
+var BIGINT_FORMAT_RANGES = {
+  int64: [/* @__PURE__ */ BigInt("-9223372036854775808"), /* @__PURE__ */ BigInt("9223372036854775807")],
+  uint64: [/* @__PURE__ */ BigInt(0), /* @__PURE__ */ BigInt("18446744073709551615")]
+};
+function pick(schema, mask) {
+  const newShape = {};
+  const currDef = schema._zod.def;
+  for (const key in mask) {
+    if (!(key in currDef.shape)) {
+      throw new Error(`Unrecognized key: "${key}"`);
+    }
+    if (!mask[key])
+      continue;
+    newShape[key] = currDef.shape[key];
+  }
+  return clone(schema, {
+    ...schema._zod.def,
+    shape: newShape,
+    checks: []
+  });
+}
+function omit(schema, mask) {
+  const newShape = { ...schema._zod.def.shape };
+  const currDef = schema._zod.def;
+  for (const key in mask) {
+    if (!(key in currDef.shape)) {
+      throw new Error(`Unrecognized key: "${key}"`);
+    }
+    if (!mask[key])
+      continue;
+    delete newShape[key];
+  }
+  return clone(schema, {
+    ...schema._zod.def,
+    shape: newShape,
+    checks: []
+  });
+}
+function extend(schema, shape) {
+  if (!isPlainObject(shape)) {
+    throw new Error("Invalid input to extend: expected a plain object");
+  }
+  const def = {
+    ...schema._zod.def,
+    get shape() {
+      const _shape = { ...schema._zod.def.shape, ...shape };
+      assignProp(this, "shape", _shape);
+      return _shape;
+    },
+    checks: []
+    // delete existing checks
+  };
+  return clone(schema, def);
+}
+function merge(a, b) {
+  return clone(a, {
+    ...a._zod.def,
+    get shape() {
+      const _shape = { ...a._zod.def.shape, ...b._zod.def.shape };
+      assignProp(this, "shape", _shape);
+      return _shape;
+    },
+    catchall: b._zod.def.catchall,
+    checks: []
+    // delete existing checks
+  });
+}
+function partial(Class2, schema, mask) {
+  const oldShape = schema._zod.def.shape;
+  const shape = { ...oldShape };
+  if (mask) {
+    for (const key in mask) {
+      if (!(key in oldShape)) {
+        throw new Error(`Unrecognized key: "${key}"`);
+      }
+      if (!mask[key])
+        continue;
+      shape[key] = Class2 ? new Class2({
+        type: "optional",
+        innerType: oldShape[key]
+      }) : oldShape[key];
+    }
+  } else {
+    for (const key in oldShape) {
+      shape[key] = Class2 ? new Class2({
+        type: "optional",
+        innerType: oldShape[key]
+      }) : oldShape[key];
+    }
+  }
+  return clone(schema, {
+    ...schema._zod.def,
+    shape,
+    checks: []
+  });
+}
+function required(Class2, schema, mask) {
+  const oldShape = schema._zod.def.shape;
+  const shape = { ...oldShape };
+  if (mask) {
+    for (const key in mask) {
+      if (!(key in shape)) {
+        throw new Error(`Unrecognized key: "${key}"`);
+      }
+      if (!mask[key])
+        continue;
+      shape[key] = new Class2({
+        type: "nonoptional",
+        innerType: oldShape[key]
+      });
+    }
+  } else {
+    for (const key in oldShape) {
+      shape[key] = new Class2({
+        type: "nonoptional",
+        innerType: oldShape[key]
+      });
+    }
+  }
+  return clone(schema, {
+    ...schema._zod.def,
+    shape,
+    // optional: [],
+    checks: []
+  });
+}
+function aborted(x, startIndex = 0) {
+  for (let i = startIndex; i < x.issues.length; i++) {
+    if (x.issues[i]?.continue !== true)
+      return true;
+  }
+  return false;
+}
+function prefixIssues(path13, issues) {
+  return issues.map((iss) => {
+    var _a;
+    (_a = iss).path ?? (_a.path = []);
+    iss.path.unshift(path13);
+    return iss;
+  });
+}
+function unwrapMessage(message) {
+  return typeof message === "string" ? message : message?.message;
+}
+function finalizeIssue(iss, ctx, config2) {
+  const full = { ...iss, path: iss.path ?? [] };
+  if (!iss.message) {
+    const message = unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config2.customError?.(iss)) ?? unwrapMessage(config2.localeError?.(iss)) ?? "Invalid input";
+    full.message = message;
+  }
+  delete full.inst;
+  delete full.continue;
+  if (!ctx?.reportInput) {
+    delete full.input;
+  }
+  return full;
+}
+function getSizableOrigin(input) {
+  if (input instanceof Set)
+    return "set";
+  if (input instanceof Map)
+    return "map";
+  if (input instanceof File)
+    return "file";
+  return "unknown";
+}
+function getLengthableOrigin(input) {
+  if (Array.isArray(input))
+    return "array";
+  if (typeof input === "string")
+    return "string";
+  return "unknown";
+}
+function issue(...args) {
+  const [iss, input, inst] = args;
+  if (typeof iss === "string") {
+    return {
+      message: iss,
+      code: "custom",
+      input,
+      inst
+    };
+  }
+  return { ...iss };
+}
+function cleanEnum(obj) {
+  return Object.entries(obj).filter(([k, _]) => {
+    return Number.isNaN(Number.parseInt(k, 10));
+  }).map((el) => el[1]);
+}
+var Class = class {
+  constructor(..._args) {
+  }
+};
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/errors.js
+var initializer = (inst, def) => {
+  inst.name = "$ZodError";
+  Object.defineProperty(inst, "_zod", {
+    value: inst._zod,
+    enumerable: false
+  });
+  Object.defineProperty(inst, "issues", {
+    value: def,
+    enumerable: false
+  });
+  Object.defineProperty(inst, "message", {
+    get() {
+      return JSON.stringify(def, jsonStringifyReplacer, 2);
+    },
+    enumerable: true
+    // configurable: false,
+  });
+  Object.defineProperty(inst, "toString", {
+    value: () => inst.message,
+    enumerable: false
+  });
+};
+var $ZodError = $constructor("$ZodError", initializer);
+var $ZodRealError = $constructor("$ZodError", initializer, { Parent: Error });
+function flattenError(error40, mapper = (issue2) => issue2.message) {
+  const fieldErrors = {};
+  const formErrors = [];
+  for (const sub of error40.issues) {
+    if (sub.path.length > 0) {
+      fieldErrors[sub.path[0]] = fieldErrors[sub.path[0]] || [];
+      fieldErrors[sub.path[0]].push(mapper(sub));
+    } else {
+      formErrors.push(mapper(sub));
+    }
+  }
+  return { formErrors, fieldErrors };
+}
+function formatError(error40, _mapper) {
+  const mapper = _mapper || function(issue2) {
+    return issue2.message;
+  };
+  const fieldErrors = { _errors: [] };
+  const processError = (error41) => {
+    for (const issue2 of error41.issues) {
+      if (issue2.code === "invalid_union" && issue2.errors.length) {
+        issue2.errors.map((issues) => processError({ issues }));
+      } else if (issue2.code === "invalid_key") {
+        processError({ issues: issue2.issues });
+      } else if (issue2.code === "invalid_element") {
+        processError({ issues: issue2.issues });
+      } else if (issue2.path.length === 0) {
+        fieldErrors._errors.push(mapper(issue2));
+      } else {
+        let curr = fieldErrors;
+        let i = 0;
+        while (i < issue2.path.length) {
+          const el = issue2.path[i];
+          const terminal = i === issue2.path.length - 1;
+          if (!terminal) {
+            curr[el] = curr[el] || { _errors: [] };
+          } else {
+            curr[el] = curr[el] || { _errors: [] };
+            curr[el]._errors.push(mapper(issue2));
+          }
+          curr = curr[el];
+          i++;
+        }
+      }
+    }
+  };
+  processError(error40);
+  return fieldErrors;
+}
+function treeifyError(error40, _mapper) {
+  const mapper = _mapper || function(issue2) {
+    return issue2.message;
+  };
+  const result = { errors: [] };
+  const processError = (error41, path13 = []) => {
+    var _a, _b;
+    for (const issue2 of error41.issues) {
+      if (issue2.code === "invalid_union" && issue2.errors.length) {
+        issue2.errors.map((issues) => processError({ issues }, issue2.path));
+      } else if (issue2.code === "invalid_key") {
+        processError({ issues: issue2.issues }, issue2.path);
+      } else if (issue2.code === "invalid_element") {
+        processError({ issues: issue2.issues }, issue2.path);
+      } else {
+        const fullpath = [...path13, ...issue2.path];
+        if (fullpath.length === 0) {
+          result.errors.push(mapper(issue2));
+          continue;
+        }
+        let curr = result;
+        let i = 0;
+        while (i < fullpath.length) {
+          const el = fullpath[i];
+          const terminal = i === fullpath.length - 1;
+          if (typeof el === "string") {
+            curr.properties ?? (curr.properties = {});
+            (_a = curr.properties)[el] ?? (_a[el] = { errors: [] });
+            curr = curr.properties[el];
+          } else {
+            curr.items ?? (curr.items = []);
+            (_b = curr.items)[el] ?? (_b[el] = { errors: [] });
+            curr = curr.items[el];
+          }
+          if (terminal) {
+            curr.errors.push(mapper(issue2));
+          }
+          i++;
+        }
+      }
+    }
+  };
+  processError(error40);
+  return result;
+}
+function toDotPath(path13) {
+  const segs = [];
+  for (const seg of path13) {
+    if (typeof seg === "number")
+      segs.push(`[${seg}]`);
+    else if (typeof seg === "symbol")
+      segs.push(`[${JSON.stringify(String(seg))}]`);
+    else if (/[^\w$]/.test(seg))
+      segs.push(`[${JSON.stringify(seg)}]`);
+    else {
+      if (segs.length)
+        segs.push(".");
+      segs.push(seg);
+    }
+  }
+  return segs.join("");
+}
+function prettifyError(error40) {
+  const lines = [];
+  const issues = [...error40.issues].sort((a, b) => a.path.length - b.path.length);
+  for (const issue2 of issues) {
+    lines.push(`\u2716 ${issue2.message}`);
+    if (issue2.path?.length)
+      lines.push(`  \u2192 at ${toDotPath(issue2.path)}`);
+  }
+  return lines.join("\n");
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/parse.js
+var _parse = (_Err) => (schema, value, _ctx, _params) => {
+  const ctx = _ctx ? Object.assign(_ctx, { async: false }) : { async: false };
+  const result = schema._zod.run({ value, issues: [] }, ctx);
+  if (result instanceof Promise) {
+    throw new $ZodAsyncError();
+  }
+  if (result.issues.length) {
+    const e = new (_params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())));
+    captureStackTrace(e, _params?.callee);
+    throw e;
+  }
+  return result.value;
+};
+var parse2 = /* @__PURE__ */ _parse($ZodRealError);
+var _parseAsync = (_Err) => async (schema, value, _ctx, params) => {
+  const ctx = _ctx ? Object.assign(_ctx, { async: true }) : { async: true };
+  let result = schema._zod.run({ value, issues: [] }, ctx);
+  if (result instanceof Promise)
+    result = await result;
+  if (result.issues.length) {
+    const e = new (params?.Err ?? _Err)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())));
+    captureStackTrace(e, params?.callee);
+    throw e;
+  }
+  return result.value;
+};
+var parseAsync = /* @__PURE__ */ _parseAsync($ZodRealError);
+var _safeParse = (_Err) => (schema, value, _ctx) => {
+  const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
+  const result = schema._zod.run({ value, issues: [] }, ctx);
+  if (result instanceof Promise) {
+    throw new $ZodAsyncError();
+  }
+  return result.issues.length ? {
+    success: false,
+    error: new (_Err ?? $ZodError)(result.issues.map((iss) => finalizeIssue(iss, ctx, config())))
+  } : { success: true, data: result.value };
+};
+var safeParse = /* @__PURE__ */ _safeParse($ZodRealError);
+var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
+  const ctx = _ctx ? Object.assign(_ctx, { async: true }) : { async: true };
+  let result = schema._zod.run({ value, issues: [] }, ctx);
+  if (result instanceof Promise)
+    result = await result;
+  return result.issues.length ? {
+    success: false,
+    error: new _Err(result.issues.map((iss) => finalizeIssue(iss, ctx, config())))
+  } : { success: true, data: result.value };
+};
+var safeParseAsync = /* @__PURE__ */ _safeParseAsync($ZodRealError);
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/regexes.js
+var regexes_exports = {};
+__export(regexes_exports, {
+  _emoji: () => _emoji,
+  base64: () => base64,
+  base64url: () => base64url,
+  bigint: () => bigint,
+  boolean: () => boolean,
+  browserEmail: () => browserEmail,
+  cidrv4: () => cidrv4,
+  cidrv6: () => cidrv6,
+  cuid: () => cuid,
+  cuid2: () => cuid2,
+  date: () => date,
+  datetime: () => datetime,
+  domain: () => domain,
+  duration: () => duration,
+  e164: () => e164,
+  email: () => email,
+  emoji: () => emoji,
+  extendedDuration: () => extendedDuration,
+  guid: () => guid,
+  hostname: () => hostname,
+  html5Email: () => html5Email,
+  integer: () => integer,
+  ipv4: () => ipv4,
+  ipv6: () => ipv6,
+  ksuid: () => ksuid,
+  lowercase: () => lowercase,
+  nanoid: () => nanoid,
+  null: () => _null,
+  number: () => number,
+  rfc5322Email: () => rfc5322Email,
+  string: () => string,
+  time: () => time,
+  ulid: () => ulid,
+  undefined: () => _undefined,
+  unicodeEmail: () => unicodeEmail,
+  uppercase: () => uppercase,
+  uuid: () => uuid,
+  uuid4: () => uuid4,
+  uuid6: () => uuid6,
+  uuid7: () => uuid7,
+  xid: () => xid
+});
+var cuid = /^[cC][^\s-]{8,}$/;
+var cuid2 = /^[0-9a-z]+$/;
+var ulid = /^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$/;
+var xid = /^[0-9a-vA-V]{20}$/;
+var ksuid = /^[A-Za-z0-9]{27}$/;
+var nanoid = /^[a-zA-Z0-9_-]{21}$/;
+var duration = /^P(?:(\d+W)|(?!.*W)(?=\d|T\d)(\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+([.,]\d+)?S)?)?)$/;
+var extendedDuration = /^[-+]?P(?!$)(?:(?:[-+]?\d+Y)|(?:[-+]?\d+[.,]\d+Y$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:(?:[-+]?\d+W)|(?:[-+]?\d+[.,]\d+W$))?(?:(?:[-+]?\d+D)|(?:[-+]?\d+[.,]\d+D$))?(?:T(?=[\d+-])(?:(?:[-+]?\d+H)|(?:[-+]?\d+[.,]\d+H$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:[-+]?\d+(?:[.,]\d+)?S)?)??$/;
+var guid = /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
+var uuid = (version2) => {
+  if (!version2)
+    return /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$/;
+  return new RegExp(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-${version2}[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$`);
+};
+var uuid4 = /* @__PURE__ */ uuid(4);
+var uuid6 = /* @__PURE__ */ uuid(6);
+var uuid7 = /* @__PURE__ */ uuid(7);
+var email = /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$/;
+var html5Email = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+var rfc5322Email = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+var unicodeEmail = /^[^\s@"]{1,64}@[^\s@]{1,255}$/u;
+var browserEmail = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+var _emoji = `^(\\p{Extended_Pictographic}|\\p{Emoji_Component})+$`;
+function emoji() {
+  return new RegExp(_emoji, "u");
+}
+var ipv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
+var ipv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|::|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:?){0,6})$/;
+var cidrv4 = /^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/([0-9]|[1-2][0-9]|3[0-2])$/;
+var cidrv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|::|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:?){0,6})\/(12[0-8]|1[01][0-9]|[1-9]?[0-9])$/;
+var base64 = /^$|^(?:[0-9a-zA-Z+/]{4})*(?:(?:[0-9a-zA-Z+/]{2}==)|(?:[0-9a-zA-Z+/]{3}=))?$/;
+var base64url = /^[A-Za-z0-9_-]*$/;
+var hostname = /^([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$/;
+var domain = /^([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+var e164 = /^\+(?:[0-9]){6,14}[0-9]$/;
+var dateSource = `(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))`;
+var date = /* @__PURE__ */ new RegExp(`^${dateSource}$`);
+function timeSource(args) {
+  const hhmm = `(?:[01]\\d|2[0-3]):[0-5]\\d`;
+  const regex = typeof args.precision === "number" ? args.precision === -1 ? `${hhmm}` : args.precision === 0 ? `${hhmm}:[0-5]\\d` : `${hhmm}:[0-5]\\d\\.\\d{${args.precision}}` : `${hhmm}(?::[0-5]\\d(?:\\.\\d+)?)?`;
+  return regex;
+}
+function time(args) {
+  return new RegExp(`^${timeSource(args)}$`);
+}
+function datetime(args) {
+  const time3 = timeSource({ precision: args.precision });
+  const opts = ["Z"];
+  if (args.local)
+    opts.push("");
+  if (args.offset)
+    opts.push(`([+-]\\d{2}:\\d{2})`);
+  const timeRegex2 = `${time3}(?:${opts.join("|")})`;
+  return new RegExp(`^${dateSource}T(?:${timeRegex2})$`);
+}
+var string = (params) => {
+  const regex = params ? `[\\s\\S]{${params?.minimum ?? 0},${params?.maximum ?? ""}}` : `[\\s\\S]*`;
+  return new RegExp(`^${regex}$`);
+};
+var bigint = /^\d+n?$/;
+var integer = /^\d+$/;
+var number = /^-?\d+(?:\.\d+)?/i;
+var boolean = /true|false/i;
+var _null = /null/i;
+var _undefined = /undefined/i;
+var lowercase = /^[^A-Z]*$/;
+var uppercase = /^[^a-z]*$/;
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/checks.js
+var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
+  var _a;
+  inst._zod ?? (inst._zod = {});
+  inst._zod.def = def;
+  (_a = inst._zod).onattach ?? (_a.onattach = []);
+});
+var numericOriginMap = {
+  number: "number",
+  bigint: "bigint",
+  object: "date"
+};
+var $ZodCheckLessThan = /* @__PURE__ */ $constructor("$ZodCheckLessThan", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const origin = numericOriginMap[typeof def.value];
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    const curr = (def.inclusive ? bag.maximum : bag.exclusiveMaximum) ?? Number.POSITIVE_INFINITY;
+    if (def.value < curr) {
+      if (def.inclusive)
+        bag.maximum = def.value;
+      else
+        bag.exclusiveMaximum = def.value;
+    }
+  });
+  inst._zod.check = (payload) => {
+    if (def.inclusive ? payload.value <= def.value : payload.value < def.value) {
+      return;
+    }
+    payload.issues.push({
+      origin,
+      code: "too_big",
+      maximum: def.value,
+      input: payload.value,
+      inclusive: def.inclusive,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckGreaterThan = /* @__PURE__ */ $constructor("$ZodCheckGreaterThan", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const origin = numericOriginMap[typeof def.value];
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    const curr = (def.inclusive ? bag.minimum : bag.exclusiveMinimum) ?? Number.NEGATIVE_INFINITY;
+    if (def.value > curr) {
+      if (def.inclusive)
+        bag.minimum = def.value;
+      else
+        bag.exclusiveMinimum = def.value;
+    }
+  });
+  inst._zod.check = (payload) => {
+    if (def.inclusive ? payload.value >= def.value : payload.value > def.value) {
+      return;
+    }
+    payload.issues.push({
+      origin,
+      code: "too_small",
+      minimum: def.value,
+      input: payload.value,
+      inclusive: def.inclusive,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckMultipleOf = /* @__PURE__ */ $constructor("$ZodCheckMultipleOf", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  inst._zod.onattach.push((inst2) => {
+    var _a;
+    (_a = inst2._zod.bag).multipleOf ?? (_a.multipleOf = def.value);
+  });
+  inst._zod.check = (payload) => {
+    if (typeof payload.value !== typeof def.value)
+      throw new Error("Cannot mix number and bigint in multiple_of check.");
+    const isMultiple = typeof payload.value === "bigint" ? payload.value % def.value === BigInt(0) : floatSafeRemainder2(payload.value, def.value) === 0;
+    if (isMultiple)
+      return;
+    payload.issues.push({
+      origin: typeof payload.value,
+      code: "not_multiple_of",
+      divisor: def.value,
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckNumberFormat = /* @__PURE__ */ $constructor("$ZodCheckNumberFormat", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  def.format = def.format || "float64";
+  const isInt = def.format?.includes("int");
+  const origin = isInt ? "int" : "number";
+  const [minimum, maximum] = NUMBER_FORMAT_RANGES[def.format];
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    bag.format = def.format;
+    bag.minimum = minimum;
+    bag.maximum = maximum;
+    if (isInt)
+      bag.pattern = integer;
+  });
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    if (isInt) {
+      if (!Number.isInteger(input)) {
+        payload.issues.push({
+          expected: origin,
+          format: def.format,
+          code: "invalid_type",
+          input,
+          inst
+        });
+        return;
+      }
+      if (!Number.isSafeInteger(input)) {
+        if (input > 0) {
+          payload.issues.push({
+            input,
+            code: "too_big",
+            maximum: Number.MAX_SAFE_INTEGER,
+            note: "Integers must be within the safe integer range.",
+            inst,
+            origin,
+            continue: !def.abort
+          });
+        } else {
+          payload.issues.push({
+            input,
+            code: "too_small",
+            minimum: Number.MIN_SAFE_INTEGER,
+            note: "Integers must be within the safe integer range.",
+            inst,
+            origin,
+            continue: !def.abort
+          });
+        }
+        return;
+      }
+    }
+    if (input < minimum) {
+      payload.issues.push({
+        origin: "number",
+        input,
+        code: "too_small",
+        minimum,
+        inclusive: true,
+        inst,
+        continue: !def.abort
+      });
+    }
+    if (input > maximum) {
+      payload.issues.push({
+        origin: "number",
+        input,
+        code: "too_big",
+        maximum,
+        inst
+      });
+    }
+  };
+});
+var $ZodCheckBigIntFormat = /* @__PURE__ */ $constructor("$ZodCheckBigIntFormat", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const [minimum, maximum] = BIGINT_FORMAT_RANGES[def.format];
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    bag.format = def.format;
+    bag.minimum = minimum;
+    bag.maximum = maximum;
+  });
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    if (input < minimum) {
+      payload.issues.push({
+        origin: "bigint",
+        input,
+        code: "too_small",
+        minimum,
+        inclusive: true,
+        inst,
+        continue: !def.abort
+      });
+    }
+    if (input > maximum) {
+      payload.issues.push({
+        origin: "bigint",
+        input,
+        code: "too_big",
+        maximum,
+        inst
+      });
+    }
+  };
+});
+var $ZodCheckMaxSize = /* @__PURE__ */ $constructor("$ZodCheckMaxSize", (inst, def) => {
+  var _a;
+  $ZodCheck.init(inst, def);
+  (_a = inst._zod.def).when ?? (_a.when = (payload) => {
+    const val = payload.value;
+    return !nullish(val) && val.size !== void 0;
+  });
+  inst._zod.onattach.push((inst2) => {
+    const curr = inst2._zod.bag.maximum ?? Number.POSITIVE_INFINITY;
+    if (def.maximum < curr)
+      inst2._zod.bag.maximum = def.maximum;
+  });
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    const size = input.size;
+    if (size <= def.maximum)
+      return;
+    payload.issues.push({
+      origin: getSizableOrigin(input),
+      code: "too_big",
+      maximum: def.maximum,
+      input,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckMinSize = /* @__PURE__ */ $constructor("$ZodCheckMinSize", (inst, def) => {
+  var _a;
+  $ZodCheck.init(inst, def);
+  (_a = inst._zod.def).when ?? (_a.when = (payload) => {
+    const val = payload.value;
+    return !nullish(val) && val.size !== void 0;
+  });
+  inst._zod.onattach.push((inst2) => {
+    const curr = inst2._zod.bag.minimum ?? Number.NEGATIVE_INFINITY;
+    if (def.minimum > curr)
+      inst2._zod.bag.minimum = def.minimum;
+  });
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    const size = input.size;
+    if (size >= def.minimum)
+      return;
+    payload.issues.push({
+      origin: getSizableOrigin(input),
+      code: "too_small",
+      minimum: def.minimum,
+      input,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckSizeEquals = /* @__PURE__ */ $constructor("$ZodCheckSizeEquals", (inst, def) => {
+  var _a;
+  $ZodCheck.init(inst, def);
+  (_a = inst._zod.def).when ?? (_a.when = (payload) => {
+    const val = payload.value;
+    return !nullish(val) && val.size !== void 0;
+  });
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    bag.minimum = def.size;
+    bag.maximum = def.size;
+    bag.size = def.size;
+  });
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    const size = input.size;
+    if (size === def.size)
+      return;
+    const tooBig = size > def.size;
+    payload.issues.push({
+      origin: getSizableOrigin(input),
+      ...tooBig ? { code: "too_big", maximum: def.size } : { code: "too_small", minimum: def.size },
+      inclusive: true,
+      exact: true,
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (inst, def) => {
+  var _a;
+  $ZodCheck.init(inst, def);
+  (_a = inst._zod.def).when ?? (_a.when = (payload) => {
+    const val = payload.value;
+    return !nullish(val) && val.length !== void 0;
+  });
+  inst._zod.onattach.push((inst2) => {
+    const curr = inst2._zod.bag.maximum ?? Number.POSITIVE_INFINITY;
+    if (def.maximum < curr)
+      inst2._zod.bag.maximum = def.maximum;
+  });
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    const length = input.length;
+    if (length <= def.maximum)
+      return;
+    const origin = getLengthableOrigin(input);
+    payload.issues.push({
+      origin,
+      code: "too_big",
+      maximum: def.maximum,
+      inclusive: true,
+      input,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckMinLength = /* @__PURE__ */ $constructor("$ZodCheckMinLength", (inst, def) => {
+  var _a;
+  $ZodCheck.init(inst, def);
+  (_a = inst._zod.def).when ?? (_a.when = (payload) => {
+    const val = payload.value;
+    return !nullish(val) && val.length !== void 0;
+  });
+  inst._zod.onattach.push((inst2) => {
+    const curr = inst2._zod.bag.minimum ?? Number.NEGATIVE_INFINITY;
+    if (def.minimum > curr)
+      inst2._zod.bag.minimum = def.minimum;
+  });
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    const length = input.length;
+    if (length >= def.minimum)
+      return;
+    const origin = getLengthableOrigin(input);
+    payload.issues.push({
+      origin,
+      code: "too_small",
+      minimum: def.minimum,
+      inclusive: true,
+      input,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckLengthEquals = /* @__PURE__ */ $constructor("$ZodCheckLengthEquals", (inst, def) => {
+  var _a;
+  $ZodCheck.init(inst, def);
+  (_a = inst._zod.def).when ?? (_a.when = (payload) => {
+    const val = payload.value;
+    return !nullish(val) && val.length !== void 0;
+  });
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    bag.minimum = def.length;
+    bag.maximum = def.length;
+    bag.length = def.length;
+  });
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    const length = input.length;
+    if (length === def.length)
+      return;
+    const origin = getLengthableOrigin(input);
+    const tooBig = length > def.length;
+    payload.issues.push({
+      origin,
+      ...tooBig ? { code: "too_big", maximum: def.length } : { code: "too_small", minimum: def.length },
+      inclusive: true,
+      exact: true,
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckStringFormat = /* @__PURE__ */ $constructor("$ZodCheckStringFormat", (inst, def) => {
+  var _a, _b;
+  $ZodCheck.init(inst, def);
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    bag.format = def.format;
+    if (def.pattern) {
+      bag.patterns ?? (bag.patterns = /* @__PURE__ */ new Set());
+      bag.patterns.add(def.pattern);
+    }
+  });
+  if (def.pattern)
+    (_a = inst._zod).check ?? (_a.check = (payload) => {
+      def.pattern.lastIndex = 0;
+      if (def.pattern.test(payload.value))
+        return;
+      payload.issues.push({
+        origin: "string",
+        code: "invalid_format",
+        format: def.format,
+        input: payload.value,
+        ...def.pattern ? { pattern: def.pattern.toString() } : {},
+        inst,
+        continue: !def.abort
+      });
+    });
+  else
+    (_b = inst._zod).check ?? (_b.check = () => {
+    });
+});
+var $ZodCheckRegex = /* @__PURE__ */ $constructor("$ZodCheckRegex", (inst, def) => {
+  $ZodCheckStringFormat.init(inst, def);
+  inst._zod.check = (payload) => {
+    def.pattern.lastIndex = 0;
+    if (def.pattern.test(payload.value))
+      return;
+    payload.issues.push({
+      origin: "string",
+      code: "invalid_format",
+      format: "regex",
+      input: payload.value,
+      pattern: def.pattern.toString(),
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckLowerCase = /* @__PURE__ */ $constructor("$ZodCheckLowerCase", (inst, def) => {
+  def.pattern ?? (def.pattern = lowercase);
+  $ZodCheckStringFormat.init(inst, def);
+});
+var $ZodCheckUpperCase = /* @__PURE__ */ $constructor("$ZodCheckUpperCase", (inst, def) => {
+  def.pattern ?? (def.pattern = uppercase);
+  $ZodCheckStringFormat.init(inst, def);
+});
+var $ZodCheckIncludes = /* @__PURE__ */ $constructor("$ZodCheckIncludes", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const escapedRegex = escapeRegex(def.includes);
+  const pattern = new RegExp(typeof def.position === "number" ? `^.{${def.position}}${escapedRegex}` : escapedRegex);
+  def.pattern = pattern;
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    bag.patterns ?? (bag.patterns = /* @__PURE__ */ new Set());
+    bag.patterns.add(pattern);
+  });
+  inst._zod.check = (payload) => {
+    if (payload.value.includes(def.includes, def.position))
+      return;
+    payload.issues.push({
+      origin: "string",
+      code: "invalid_format",
+      format: "includes",
+      includes: def.includes,
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckStartsWith = /* @__PURE__ */ $constructor("$ZodCheckStartsWith", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const pattern = new RegExp(`^${escapeRegex(def.prefix)}.*`);
+  def.pattern ?? (def.pattern = pattern);
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    bag.patterns ?? (bag.patterns = /* @__PURE__ */ new Set());
+    bag.patterns.add(pattern);
+  });
+  inst._zod.check = (payload) => {
+    if (payload.value.startsWith(def.prefix))
+      return;
+    payload.issues.push({
+      origin: "string",
+      code: "invalid_format",
+      format: "starts_with",
+      prefix: def.prefix,
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckEndsWith = /* @__PURE__ */ $constructor("$ZodCheckEndsWith", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const pattern = new RegExp(`.*${escapeRegex(def.suffix)}$`);
+  def.pattern ?? (def.pattern = pattern);
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    bag.patterns ?? (bag.patterns = /* @__PURE__ */ new Set());
+    bag.patterns.add(pattern);
+  });
+  inst._zod.check = (payload) => {
+    if (payload.value.endsWith(def.suffix))
+      return;
+    payload.issues.push({
+      origin: "string",
+      code: "invalid_format",
+      format: "ends_with",
+      suffix: def.suffix,
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+function handleCheckPropertyResult(result, payload, property) {
+  if (result.issues.length) {
+    payload.issues.push(...prefixIssues(property, result.issues));
+  }
+}
+var $ZodCheckProperty = /* @__PURE__ */ $constructor("$ZodCheckProperty", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  inst._zod.check = (payload) => {
+    const result = def.schema._zod.run({
+      value: payload.value[def.property],
+      issues: []
+    }, {});
+    if (result instanceof Promise) {
+      return result.then((result2) => handleCheckPropertyResult(result2, payload, def.property));
+    }
+    handleCheckPropertyResult(result, payload, def.property);
+    return;
+  };
+});
+var $ZodCheckMimeType = /* @__PURE__ */ $constructor("$ZodCheckMimeType", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const mimeSet = new Set(def.mime);
+  inst._zod.onattach.push((inst2) => {
+    inst2._zod.bag.mime = def.mime;
+  });
+  inst._zod.check = (payload) => {
+    if (mimeSet.has(payload.value.type))
+      return;
+    payload.issues.push({
+      code: "invalid_value",
+      values: def.mime,
+      input: payload.value.type,
+      inst
+    });
+  };
+});
+var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  inst._zod.check = (payload) => {
+    payload.value = def.tx(payload.value);
+  };
+});
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/doc.js
+var Doc = class {
+  constructor(args = []) {
+    this.content = [];
+    this.indent = 0;
+    if (this)
+      this.args = args;
+  }
+  indented(fn) {
+    this.indent += 1;
+    fn(this);
+    this.indent -= 1;
+  }
+  write(arg) {
+    if (typeof arg === "function") {
+      arg(this, { execution: "sync" });
+      arg(this, { execution: "async" });
+      return;
+    }
+    const content = arg;
+    const lines = content.split("\n").filter((x) => x);
+    const minIndent = Math.min(...lines.map((x) => x.length - x.trimStart().length));
+    const dedented = lines.map((x) => x.slice(minIndent)).map((x) => " ".repeat(this.indent * 2) + x);
+    for (const line of dedented) {
+      this.content.push(line);
+    }
+  }
+  compile() {
+    const F = Function;
+    const args = this?.args;
+    const content = this?.content ?? [``];
+    const lines = [...content.map((x) => `  ${x}`)];
+    return new F(...args, lines.join("\n"));
+  }
+};
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/versions.js
+var version = {
+  major: 4,
+  minor: 0,
+  patch: 0
+};
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/schemas.js
+var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
+  var _a;
+  inst ?? (inst = {});
+  inst._zod.def = def;
+  inst._zod.bag = inst._zod.bag || {};
+  inst._zod.version = version;
+  const checks = [...inst._zod.def.checks ?? []];
+  if (inst._zod.traits.has("$ZodCheck")) {
+    checks.unshift(inst);
+  }
+  for (const ch of checks) {
+    for (const fn of ch._zod.onattach) {
+      fn(inst);
+    }
+  }
+  if (checks.length === 0) {
+    (_a = inst._zod).deferred ?? (_a.deferred = []);
+    inst._zod.deferred?.push(() => {
+      inst._zod.run = inst._zod.parse;
+    });
+  } else {
+    const runChecks = (payload, checks2, ctx) => {
+      let isAborted2 = aborted(payload);
+      let asyncResult;
+      for (const ch of checks2) {
+        if (ch._zod.def.when) {
+          const shouldRun = ch._zod.def.when(payload);
+          if (!shouldRun)
+            continue;
+        } else if (isAborted2) {
+          continue;
+        }
+        const currLen = payload.issues.length;
+        const _ = ch._zod.check(payload);
+        if (_ instanceof Promise && ctx?.async === false) {
+          throw new $ZodAsyncError();
+        }
+        if (asyncResult || _ instanceof Promise) {
+          asyncResult = (asyncResult ?? Promise.resolve()).then(async () => {
+            await _;
+            const nextLen = payload.issues.length;
+            if (nextLen === currLen)
+              return;
+            if (!isAborted2)
+              isAborted2 = aborted(payload, currLen);
+          });
+        } else {
+          const nextLen = payload.issues.length;
+          if (nextLen === currLen)
+            continue;
+          if (!isAborted2)
+            isAborted2 = aborted(payload, currLen);
+        }
+      }
+      if (asyncResult) {
+        return asyncResult.then(() => {
+          return payload;
+        });
+      }
+      return payload;
+    };
+    inst._zod.run = (payload, ctx) => {
+      const result = inst._zod.parse(payload, ctx);
+      if (result instanceof Promise) {
+        if (ctx.async === false)
+          throw new $ZodAsyncError();
+        return result.then((result2) => runChecks(result2, checks, ctx));
+      }
+      return runChecks(result, checks, ctx);
+    };
+  }
+  inst["~standard"] = {
+    validate: (value) => {
+      try {
+        const r = safeParse(inst, value);
+        return r.success ? { value: r.data } : { issues: r.error?.issues };
+      } catch (_) {
+        return safeParseAsync(inst, value).then((r) => r.success ? { value: r.data } : { issues: r.error?.issues });
+      }
+    },
+    vendor: "zod",
+    version: 1
+  };
+});
+var $ZodString = /* @__PURE__ */ $constructor("$ZodString", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = [...inst?._zod.bag?.patterns ?? []].pop() ?? string(inst._zod.bag);
+  inst._zod.parse = (payload, _) => {
+    if (def.coerce)
+      try {
+        payload.value = String(payload.value);
+      } catch (_2) {
+      }
+    if (typeof payload.value === "string")
+      return payload;
+    payload.issues.push({
+      expected: "string",
+      code: "invalid_type",
+      input: payload.value,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodStringFormat = /* @__PURE__ */ $constructor("$ZodStringFormat", (inst, def) => {
+  $ZodCheckStringFormat.init(inst, def);
+  $ZodString.init(inst, def);
+});
+var $ZodGUID = /* @__PURE__ */ $constructor("$ZodGUID", (inst, def) => {
+  def.pattern ?? (def.pattern = guid);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodUUID = /* @__PURE__ */ $constructor("$ZodUUID", (inst, def) => {
+  if (def.version) {
+    const versionMap = {
+      v1: 1,
+      v2: 2,
+      v3: 3,
+      v4: 4,
+      v5: 5,
+      v6: 6,
+      v7: 7,
+      v8: 8
+    };
+    const v = versionMap[def.version];
+    if (v === void 0)
+      throw new Error(`Invalid UUID version: "${def.version}"`);
+    def.pattern ?? (def.pattern = uuid(v));
+  } else
+    def.pattern ?? (def.pattern = uuid());
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodEmail = /* @__PURE__ */ $constructor("$ZodEmail", (inst, def) => {
+  def.pattern ?? (def.pattern = email);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodURL = /* @__PURE__ */ $constructor("$ZodURL", (inst, def) => {
+  $ZodStringFormat.init(inst, def);
+  inst._zod.check = (payload) => {
+    try {
+      const orig = payload.value;
+      const url2 = new URL(orig);
+      const href = url2.href;
+      if (def.hostname) {
+        def.hostname.lastIndex = 0;
+        if (!def.hostname.test(url2.hostname)) {
+          payload.issues.push({
+            code: "invalid_format",
+            format: "url",
+            note: "Invalid hostname",
+            pattern: hostname.source,
+            input: payload.value,
+            inst,
+            continue: !def.abort
+          });
+        }
+      }
+      if (def.protocol) {
+        def.protocol.lastIndex = 0;
+        if (!def.protocol.test(url2.protocol.endsWith(":") ? url2.protocol.slice(0, -1) : url2.protocol)) {
+          payload.issues.push({
+            code: "invalid_format",
+            format: "url",
+            note: "Invalid protocol",
+            pattern: def.protocol.source,
+            input: payload.value,
+            inst,
+            continue: !def.abort
+          });
+        }
+      }
+      if (!orig.endsWith("/") && href.endsWith("/")) {
+        payload.value = href.slice(0, -1);
+      } else {
+        payload.value = href;
+      }
+      return;
+    } catch (_) {
+      payload.issues.push({
+        code: "invalid_format",
+        format: "url",
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    }
+  };
+});
+var $ZodEmoji = /* @__PURE__ */ $constructor("$ZodEmoji", (inst, def) => {
+  def.pattern ?? (def.pattern = emoji());
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodNanoID = /* @__PURE__ */ $constructor("$ZodNanoID", (inst, def) => {
+  def.pattern ?? (def.pattern = nanoid);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodCUID = /* @__PURE__ */ $constructor("$ZodCUID", (inst, def) => {
+  def.pattern ?? (def.pattern = cuid);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodCUID2 = /* @__PURE__ */ $constructor("$ZodCUID2", (inst, def) => {
+  def.pattern ?? (def.pattern = cuid2);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodULID = /* @__PURE__ */ $constructor("$ZodULID", (inst, def) => {
+  def.pattern ?? (def.pattern = ulid);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodXID = /* @__PURE__ */ $constructor("$ZodXID", (inst, def) => {
+  def.pattern ?? (def.pattern = xid);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodKSUID = /* @__PURE__ */ $constructor("$ZodKSUID", (inst, def) => {
+  def.pattern ?? (def.pattern = ksuid);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodISODateTime = /* @__PURE__ */ $constructor("$ZodISODateTime", (inst, def) => {
+  def.pattern ?? (def.pattern = datetime(def));
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodISODate = /* @__PURE__ */ $constructor("$ZodISODate", (inst, def) => {
+  def.pattern ?? (def.pattern = date);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodISOTime = /* @__PURE__ */ $constructor("$ZodISOTime", (inst, def) => {
+  def.pattern ?? (def.pattern = time(def));
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodISODuration = /* @__PURE__ */ $constructor("$ZodISODuration", (inst, def) => {
+  def.pattern ?? (def.pattern = duration);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodIPv4 = /* @__PURE__ */ $constructor("$ZodIPv4", (inst, def) => {
+  def.pattern ?? (def.pattern = ipv4);
+  $ZodStringFormat.init(inst, def);
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    bag.format = `ipv4`;
+  });
+});
+var $ZodIPv6 = /* @__PURE__ */ $constructor("$ZodIPv6", (inst, def) => {
+  def.pattern ?? (def.pattern = ipv6);
+  $ZodStringFormat.init(inst, def);
+  inst._zod.onattach.push((inst2) => {
+    const bag = inst2._zod.bag;
+    bag.format = `ipv6`;
+  });
+  inst._zod.check = (payload) => {
+    try {
+      new URL(`http://[${payload.value}]`);
+    } catch {
+      payload.issues.push({
+        code: "invalid_format",
+        format: "ipv6",
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    }
+  };
+});
+var $ZodCIDRv4 = /* @__PURE__ */ $constructor("$ZodCIDRv4", (inst, def) => {
+  def.pattern ?? (def.pattern = cidrv4);
+  $ZodStringFormat.init(inst, def);
+});
+var $ZodCIDRv6 = /* @__PURE__ */ $constructor("$ZodCIDRv6", (inst, def) => {
+  def.pattern ?? (def.pattern = cidrv6);
+  $ZodStringFormat.init(inst, def);
+  inst._zod.check = (payload) => {
+    const [address, prefix] = payload.value.split("/");
+    try {
+      if (!prefix)
+        throw new Error();
+      const prefixNum = Number(prefix);
+      if (`${prefixNum}` !== prefix)
+        throw new Error();
+      if (prefixNum < 0 || prefixNum > 128)
+        throw new Error();
+      new URL(`http://[${address}]`);
+    } catch {
+      payload.issues.push({
+        code: "invalid_format",
+        format: "cidrv6",
+        input: payload.value,
+        inst,
+        continue: !def.abort
+      });
+    }
+  };
+});
+function isValidBase64(data) {
+  if (data === "")
+    return true;
+  if (data.length % 4 !== 0)
+    return false;
+  try {
+    atob(data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+var $ZodBase64 = /* @__PURE__ */ $constructor("$ZodBase64", (inst, def) => {
+  def.pattern ?? (def.pattern = base64);
+  $ZodStringFormat.init(inst, def);
+  inst._zod.onattach.push((inst2) => {
+    inst2._zod.bag.contentEncoding = "base64";
+  });
+  inst._zod.check = (payload) => {
+    if (isValidBase64(payload.value))
+      return;
+    payload.issues.push({
+      code: "invalid_format",
+      format: "base64",
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+function isValidBase64URL(data) {
+  if (!base64url.test(data))
+    return false;
+  const base643 = data.replace(/[-_]/g, (c) => c === "-" ? "+" : "/");
+  const padded = base643.padEnd(Math.ceil(base643.length / 4) * 4, "=");
+  return isValidBase64(padded);
+}
+var $ZodBase64URL = /* @__PURE__ */ $constructor("$ZodBase64URL", (inst, def) => {
+  def.pattern ?? (def.pattern = base64url);
+  $ZodStringFormat.init(inst, def);
+  inst._zod.onattach.push((inst2) => {
+    inst2._zod.bag.contentEncoding = "base64url";
+  });
+  inst._zod.check = (payload) => {
+    if (isValidBase64URL(payload.value))
+      return;
+    payload.issues.push({
+      code: "invalid_format",
+      format: "base64url",
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodE164 = /* @__PURE__ */ $constructor("$ZodE164", (inst, def) => {
+  def.pattern ?? (def.pattern = e164);
+  $ZodStringFormat.init(inst, def);
+});
+function isValidJWT2(token, algorithm = null) {
+  try {
+    const tokensParts = token.split(".");
+    if (tokensParts.length !== 3)
+      return false;
+    const [header] = tokensParts;
+    if (!header)
+      return false;
+    const parsedHeader = JSON.parse(atob(header));
+    if ("typ" in parsedHeader && parsedHeader?.typ !== "JWT")
+      return false;
+    if (!parsedHeader.alg)
+      return false;
+    if (algorithm && (!("alg" in parsedHeader) || parsedHeader.alg !== algorithm))
+      return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+var $ZodJWT = /* @__PURE__ */ $constructor("$ZodJWT", (inst, def) => {
+  $ZodStringFormat.init(inst, def);
+  inst._zod.check = (payload) => {
+    if (isValidJWT2(payload.value, def.alg))
+      return;
+    payload.issues.push({
+      code: "invalid_format",
+      format: "jwt",
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCustomStringFormat = /* @__PURE__ */ $constructor("$ZodCustomStringFormat", (inst, def) => {
+  $ZodStringFormat.init(inst, def);
+  inst._zod.check = (payload) => {
+    if (def.fn(payload.value))
+      return;
+    payload.issues.push({
+      code: "invalid_format",
+      format: def.format,
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodNumber = /* @__PURE__ */ $constructor("$ZodNumber", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = inst._zod.bag.pattern ?? number;
+  inst._zod.parse = (payload, _ctx) => {
+    if (def.coerce)
+      try {
+        payload.value = Number(payload.value);
+      } catch (_) {
+      }
+    const input = payload.value;
+    if (typeof input === "number" && !Number.isNaN(input) && Number.isFinite(input)) {
+      return payload;
+    }
+    const received = typeof input === "number" ? Number.isNaN(input) ? "NaN" : !Number.isFinite(input) ? "Infinity" : void 0 : void 0;
+    payload.issues.push({
+      expected: "number",
+      code: "invalid_type",
+      input,
+      inst,
+      ...received ? { received } : {}
+    });
+    return payload;
+  };
+});
+var $ZodNumberFormat = /* @__PURE__ */ $constructor("$ZodNumber", (inst, def) => {
+  $ZodCheckNumberFormat.init(inst, def);
+  $ZodNumber.init(inst, def);
+});
+var $ZodBoolean = /* @__PURE__ */ $constructor("$ZodBoolean", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = boolean;
+  inst._zod.parse = (payload, _ctx) => {
+    if (def.coerce)
+      try {
+        payload.value = Boolean(payload.value);
+      } catch (_) {
+      }
+    const input = payload.value;
+    if (typeof input === "boolean")
+      return payload;
+    payload.issues.push({
+      expected: "boolean",
+      code: "invalid_type",
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodBigInt = /* @__PURE__ */ $constructor("$ZodBigInt", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = bigint;
+  inst._zod.parse = (payload, _ctx) => {
+    if (def.coerce)
+      try {
+        payload.value = BigInt(payload.value);
+      } catch (_) {
+      }
+    if (typeof payload.value === "bigint")
+      return payload;
+    payload.issues.push({
+      expected: "bigint",
+      code: "invalid_type",
+      input: payload.value,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodBigIntFormat = /* @__PURE__ */ $constructor("$ZodBigInt", (inst, def) => {
+  $ZodCheckBigIntFormat.init(inst, def);
+  $ZodBigInt.init(inst, def);
+});
+var $ZodSymbol = /* @__PURE__ */ $constructor("$ZodSymbol", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (typeof input === "symbol")
+      return payload;
+    payload.issues.push({
+      expected: "symbol",
+      code: "invalid_type",
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodUndefined = /* @__PURE__ */ $constructor("$ZodUndefined", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = _undefined;
+  inst._zod.values = /* @__PURE__ */ new Set([void 0]);
+  inst._zod.optin = "optional";
+  inst._zod.optout = "optional";
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (typeof input === "undefined")
+      return payload;
+    payload.issues.push({
+      expected: "undefined",
+      code: "invalid_type",
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodNull = /* @__PURE__ */ $constructor("$ZodNull", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = _null;
+  inst._zod.values = /* @__PURE__ */ new Set([null]);
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (input === null)
+      return payload;
+    payload.issues.push({
+      expected: "null",
+      code: "invalid_type",
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodAny = /* @__PURE__ */ $constructor("$ZodAny", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload) => payload;
+});
+var $ZodUnknown = /* @__PURE__ */ $constructor("$ZodUnknown", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload) => payload;
+});
+var $ZodNever = /* @__PURE__ */ $constructor("$ZodNever", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, _ctx) => {
+    payload.issues.push({
+      expected: "never",
+      code: "invalid_type",
+      input: payload.value,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodVoid = /* @__PURE__ */ $constructor("$ZodVoid", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (typeof input === "undefined")
+      return payload;
+    payload.issues.push({
+      expected: "void",
+      code: "invalid_type",
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodDate = /* @__PURE__ */ $constructor("$ZodDate", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, _ctx) => {
+    if (def.coerce) {
+      try {
+        payload.value = new Date(payload.value);
+      } catch (_err) {
+      }
+    }
+    const input = payload.value;
+    const isDate = input instanceof Date;
+    const isValidDate = isDate && !Number.isNaN(input.getTime());
+    if (isValidDate)
+      return payload;
+    payload.issues.push({
+      expected: "date",
+      code: "invalid_type",
+      input,
+      ...isDate ? { received: "Invalid Date" } : {},
+      inst
+    });
+    return payload;
+  };
+});
+function handleArrayResult(result, final, index) {
+  if (result.issues.length) {
+    final.issues.push(...prefixIssues(index, result.issues));
+  }
+  final.value[index] = result.value;
+}
+var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, ctx) => {
+    const input = payload.value;
+    if (!Array.isArray(input)) {
+      payload.issues.push({
+        expected: "array",
+        code: "invalid_type",
+        input,
+        inst
+      });
+      return payload;
+    }
+    payload.value = Array(input.length);
+    const proms = [];
+    for (let i = 0; i < input.length; i++) {
+      const item = input[i];
+      const result = def.element._zod.run({
+        value: item,
+        issues: []
+      }, ctx);
+      if (result instanceof Promise) {
+        proms.push(result.then((result2) => handleArrayResult(result2, payload, i)));
+      } else {
+        handleArrayResult(result, payload, i);
+      }
+    }
+    if (proms.length) {
+      return Promise.all(proms).then(() => payload);
+    }
+    return payload;
+  };
+});
+function handleObjectResult(result, final, key) {
+  if (result.issues.length) {
+    final.issues.push(...prefixIssues(key, result.issues));
+  }
+  final.value[key] = result.value;
+}
+function handleOptionalObjectResult(result, final, key, input) {
+  if (result.issues.length) {
+    if (input[key] === void 0) {
+      if (key in input) {
+        final.value[key] = void 0;
+      } else {
+        final.value[key] = result.value;
+      }
+    } else {
+      final.issues.push(...prefixIssues(key, result.issues));
+    }
+  } else if (result.value === void 0) {
+    if (key in input)
+      final.value[key] = void 0;
+  } else {
+    final.value[key] = result.value;
+  }
+}
+var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
+  $ZodType.init(inst, def);
+  const _normalized = cached(() => {
+    const keys = Object.keys(def.shape);
+    for (const k of keys) {
+      if (!(def.shape[k] instanceof $ZodType)) {
+        throw new Error(`Invalid element at key "${k}": expected a Zod schema`);
+      }
+    }
+    const okeys = optionalKeys(def.shape);
+    return {
+      shape: def.shape,
+      keys,
+      keySet: new Set(keys),
+      numKeys: keys.length,
+      optionalKeys: new Set(okeys)
+    };
+  });
+  defineLazy(inst._zod, "propValues", () => {
+    const shape = def.shape;
+    const propValues = {};
+    for (const key in shape) {
+      const field = shape[key]._zod;
+      if (field.values) {
+        propValues[key] ?? (propValues[key] = /* @__PURE__ */ new Set());
+        for (const v of field.values)
+          propValues[key].add(v);
+      }
+    }
+    return propValues;
+  });
+  const generateFastpass = (shape) => {
+    const doc = new Doc(["shape", "payload", "ctx"]);
+    const normalized = _normalized.value;
+    const parseStr = (key) => {
+      const k = esc(key);
+      return `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
+    };
+    doc.write(`const input = payload.value;`);
+    const ids = /* @__PURE__ */ Object.create(null);
+    let counter = 0;
+    for (const key of normalized.keys) {
+      ids[key] = `key_${counter++}`;
+    }
+    doc.write(`const newResult = {}`);
+    for (const key of normalized.keys) {
+      if (normalized.optionalKeys.has(key)) {
+        const id = ids[key];
+        doc.write(`const ${id} = ${parseStr(key)};`);
+        const k = esc(key);
+        doc.write(`
+        if (${id}.issues.length) {
+          if (input[${k}] === undefined) {
+            if (${k} in input) {
+              newResult[${k}] = undefined;
+            }
+          } else {
+            payload.issues = payload.issues.concat(
+              ${id}.issues.map((iss) => ({
+                ...iss,
+                path: iss.path ? [${k}, ...iss.path] : [${k}],
+              }))
+            );
+          }
+        } else if (${id}.value === undefined) {
+          if (${k} in input) newResult[${k}] = undefined;
+        } else {
+          newResult[${k}] = ${id}.value;
+        }
+        `);
+      } else {
+        const id = ids[key];
+        doc.write(`const ${id} = ${parseStr(key)};`);
+        doc.write(`
+          if (${id}.issues.length) payload.issues = payload.issues.concat(${id}.issues.map(iss => ({
+            ...iss,
+            path: iss.path ? [${esc(key)}, ...iss.path] : [${esc(key)}]
+          })));`);
+        doc.write(`newResult[${esc(key)}] = ${id}.value`);
+      }
+    }
+    doc.write(`payload.value = newResult;`);
+    doc.write(`return payload;`);
+    const fn = doc.compile();
+    return (payload, ctx) => fn(shape, payload, ctx);
+  };
+  let fastpass;
+  const isObject2 = isObject;
+  const jit = !globalConfig.jitless;
+  const allowsEval2 = allowsEval;
+  const fastEnabled = jit && allowsEval2.value;
+  const catchall = def.catchall;
+  let value;
+  inst._zod.parse = (payload, ctx) => {
+    value ?? (value = _normalized.value);
+    const input = payload.value;
+    if (!isObject2(input)) {
+      payload.issues.push({
+        expected: "object",
+        code: "invalid_type",
+        input,
+        inst
+      });
+      return payload;
+    }
+    const proms = [];
+    if (jit && fastEnabled && ctx?.async === false && ctx.jitless !== true) {
+      if (!fastpass)
+        fastpass = generateFastpass(def.shape);
+      payload = fastpass(payload, ctx);
+    } else {
+      payload.value = {};
+      const shape = value.shape;
+      for (const key of value.keys) {
+        const el = shape[key];
+        const r = el._zod.run({ value: input[key], issues: [] }, ctx);
+        const isOptional = el._zod.optin === "optional" && el._zod.optout === "optional";
+        if (r instanceof Promise) {
+          proms.push(r.then((r2) => isOptional ? handleOptionalObjectResult(r2, payload, key, input) : handleObjectResult(r2, payload, key)));
+        } else if (isOptional) {
+          handleOptionalObjectResult(r, payload, key, input);
+        } else {
+          handleObjectResult(r, payload, key);
+        }
+      }
+    }
+    if (!catchall) {
+      return proms.length ? Promise.all(proms).then(() => payload) : payload;
+    }
+    const unrecognized = [];
+    const keySet = value.keySet;
+    const _catchall = catchall._zod;
+    const t = _catchall.def.type;
+    for (const key of Object.keys(input)) {
+      if (keySet.has(key))
+        continue;
+      if (t === "never") {
+        unrecognized.push(key);
+        continue;
+      }
+      const r = _catchall.run({ value: input[key], issues: [] }, ctx);
+      if (r instanceof Promise) {
+        proms.push(r.then((r2) => handleObjectResult(r2, payload, key)));
+      } else {
+        handleObjectResult(r, payload, key);
+      }
+    }
+    if (unrecognized.length) {
+      payload.issues.push({
+        code: "unrecognized_keys",
+        keys: unrecognized,
+        input,
+        inst
+      });
+    }
+    if (!proms.length)
+      return payload;
+    return Promise.all(proms).then(() => {
+      return payload;
+    });
+  };
+});
+function handleUnionResults(results, final, inst, ctx) {
+  for (const result of results) {
+    if (result.issues.length === 0) {
+      final.value = result.value;
+      return final;
+    }
+  }
+  final.issues.push({
+    code: "invalid_union",
+    input: final.value,
+    inst,
+    errors: results.map((result) => result.issues.map((iss) => finalizeIssue(iss, ctx, config())))
+  });
+  return final;
+}
+var $ZodUnion = /* @__PURE__ */ $constructor("$ZodUnion", (inst, def) => {
+  $ZodType.init(inst, def);
+  defineLazy(inst._zod, "optin", () => def.options.some((o) => o._zod.optin === "optional") ? "optional" : void 0);
+  defineLazy(inst._zod, "optout", () => def.options.some((o) => o._zod.optout === "optional") ? "optional" : void 0);
+  defineLazy(inst._zod, "values", () => {
+    if (def.options.every((o) => o._zod.values)) {
+      return new Set(def.options.flatMap((option) => Array.from(option._zod.values)));
+    }
+    return void 0;
+  });
+  defineLazy(inst._zod, "pattern", () => {
+    if (def.options.every((o) => o._zod.pattern)) {
+      const patterns = def.options.map((o) => o._zod.pattern);
+      return new RegExp(`^(${patterns.map((p) => cleanRegex(p.source)).join("|")})$`);
+    }
+    return void 0;
+  });
+  inst._zod.parse = (payload, ctx) => {
+    let async = false;
+    const results = [];
+    for (const option of def.options) {
+      const result = option._zod.run({
+        value: payload.value,
+        issues: []
+      }, ctx);
+      if (result instanceof Promise) {
+        results.push(result);
+        async = true;
+      } else {
+        if (result.issues.length === 0)
+          return result;
+        results.push(result);
+      }
+    }
+    if (!async)
+      return handleUnionResults(results, payload, inst, ctx);
+    return Promise.all(results).then((results2) => {
+      return handleUnionResults(results2, payload, inst, ctx);
+    });
+  };
+});
+var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnion", (inst, def) => {
+  $ZodUnion.init(inst, def);
+  const _super = inst._zod.parse;
+  defineLazy(inst._zod, "propValues", () => {
+    const propValues = {};
+    for (const option of def.options) {
+      const pv = option._zod.propValues;
+      if (!pv || Object.keys(pv).length === 0)
+        throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(option)}"`);
+      for (const [k, v] of Object.entries(pv)) {
+        if (!propValues[k])
+          propValues[k] = /* @__PURE__ */ new Set();
+        for (const val of v) {
+          propValues[k].add(val);
+        }
+      }
+    }
+    return propValues;
+  });
+  const disc = cached(() => {
+    const opts = def.options;
+    const map2 = /* @__PURE__ */ new Map();
+    for (const o of opts) {
+      const values = o._zod.propValues[def.discriminator];
+      if (!values || values.size === 0)
+        throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(o)}"`);
+      for (const v of values) {
+        if (map2.has(v)) {
+          throw new Error(`Duplicate discriminator value "${String(v)}"`);
+        }
+        map2.set(v, o);
+      }
+    }
+    return map2;
+  });
+  inst._zod.parse = (payload, ctx) => {
+    const input = payload.value;
+    if (!isObject(input)) {
+      payload.issues.push({
+        code: "invalid_type",
+        expected: "object",
+        input,
+        inst
+      });
+      return payload;
+    }
+    const opt = disc.value.get(input?.[def.discriminator]);
+    if (opt) {
+      return opt._zod.run(payload, ctx);
+    }
+    if (def.unionFallback) {
+      return _super(payload, ctx);
+    }
+    payload.issues.push({
+      code: "invalid_union",
+      errors: [],
+      note: "No matching discriminator",
+      input,
+      path: [def.discriminator],
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodIntersection = /* @__PURE__ */ $constructor("$ZodIntersection", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, ctx) => {
+    const input = payload.value;
+    const left = def.left._zod.run({ value: input, issues: [] }, ctx);
+    const right = def.right._zod.run({ value: input, issues: [] }, ctx);
+    const async = left instanceof Promise || right instanceof Promise;
+    if (async) {
+      return Promise.all([left, right]).then(([left2, right2]) => {
+        return handleIntersectionResults(payload, left2, right2);
+      });
+    }
+    return handleIntersectionResults(payload, left, right);
+  };
+});
+function mergeValues2(a, b) {
+  if (a === b) {
+    return { valid: true, data: a };
+  }
+  if (a instanceof Date && b instanceof Date && +a === +b) {
+    return { valid: true, data: a };
+  }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const bKeys = Object.keys(b);
+    const sharedKeys = Object.keys(a).filter((key) => bKeys.indexOf(key) !== -1);
+    const newObj = { ...a, ...b };
+    for (const key of sharedKeys) {
+      const sharedValue = mergeValues2(a[key], b[key]);
+      if (!sharedValue.valid) {
+        return {
+          valid: false,
+          mergeErrorPath: [key, ...sharedValue.mergeErrorPath]
+        };
+      }
+      newObj[key] = sharedValue.data;
+    }
+    return { valid: true, data: newObj };
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) {
+      return { valid: false, mergeErrorPath: [] };
+    }
+    const newArray = [];
+    for (let index = 0; index < a.length; index++) {
+      const itemA = a[index];
+      const itemB = b[index];
+      const sharedValue = mergeValues2(itemA, itemB);
+      if (!sharedValue.valid) {
+        return {
+          valid: false,
+          mergeErrorPath: [index, ...sharedValue.mergeErrorPath]
+        };
+      }
+      newArray.push(sharedValue.data);
+    }
+    return { valid: true, data: newArray };
+  }
+  return { valid: false, mergeErrorPath: [] };
+}
+function handleIntersectionResults(result, left, right) {
+  if (left.issues.length) {
+    result.issues.push(...left.issues);
+  }
+  if (right.issues.length) {
+    result.issues.push(...right.issues);
+  }
+  if (aborted(result))
+    return result;
+  const merged = mergeValues2(left.value, right.value);
+  if (!merged.valid) {
+    throw new Error(`Unmergable intersection. Error path: ${JSON.stringify(merged.mergeErrorPath)}`);
+  }
+  result.value = merged.data;
+  return result;
+}
+var $ZodTuple = /* @__PURE__ */ $constructor("$ZodTuple", (inst, def) => {
+  $ZodType.init(inst, def);
+  const items = def.items;
+  const optStart = items.length - [...items].reverse().findIndex((item) => item._zod.optin !== "optional");
+  inst._zod.parse = (payload, ctx) => {
+    const input = payload.value;
+    if (!Array.isArray(input)) {
+      payload.issues.push({
+        input,
+        inst,
+        expected: "tuple",
+        code: "invalid_type"
+      });
+      return payload;
+    }
+    payload.value = [];
+    const proms = [];
+    if (!def.rest) {
+      const tooBig = input.length > items.length;
+      const tooSmall = input.length < optStart - 1;
+      if (tooBig || tooSmall) {
+        payload.issues.push({
+          input,
+          inst,
+          origin: "array",
+          ...tooBig ? { code: "too_big", maximum: items.length } : { code: "too_small", minimum: items.length }
+        });
+        return payload;
+      }
+    }
+    let i = -1;
+    for (const item of items) {
+      i++;
+      if (i >= input.length) {
+        if (i >= optStart)
+          continue;
+      }
+      const result = item._zod.run({
+        value: input[i],
+        issues: []
+      }, ctx);
+      if (result instanceof Promise) {
+        proms.push(result.then((result2) => handleTupleResult(result2, payload, i)));
+      } else {
+        handleTupleResult(result, payload, i);
+      }
+    }
+    if (def.rest) {
+      const rest = input.slice(items.length);
+      for (const el of rest) {
+        i++;
+        const result = def.rest._zod.run({
+          value: el,
+          issues: []
+        }, ctx);
+        if (result instanceof Promise) {
+          proms.push(result.then((result2) => handleTupleResult(result2, payload, i)));
+        } else {
+          handleTupleResult(result, payload, i);
+        }
+      }
+    }
+    if (proms.length)
+      return Promise.all(proms).then(() => payload);
+    return payload;
+  };
+});
+function handleTupleResult(result, final, index) {
+  if (result.issues.length) {
+    final.issues.push(...prefixIssues(index, result.issues));
+  }
+  final.value[index] = result.value;
+}
+var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, ctx) => {
+    const input = payload.value;
+    if (!isPlainObject(input)) {
+      payload.issues.push({
+        expected: "record",
+        code: "invalid_type",
+        input,
+        inst
+      });
+      return payload;
+    }
+    const proms = [];
+    if (def.keyType._zod.values) {
+      const values = def.keyType._zod.values;
+      payload.value = {};
+      for (const key of values) {
+        if (typeof key === "string" || typeof key === "number" || typeof key === "symbol") {
+          const result = def.valueType._zod.run({ value: input[key], issues: [] }, ctx);
+          if (result instanceof Promise) {
+            proms.push(result.then((result2) => {
+              if (result2.issues.length) {
+                payload.issues.push(...prefixIssues(key, result2.issues));
+              }
+              payload.value[key] = result2.value;
+            }));
+          } else {
+            if (result.issues.length) {
+              payload.issues.push(...prefixIssues(key, result.issues));
+            }
+            payload.value[key] = result.value;
+          }
+        }
+      }
+      let unrecognized;
+      for (const key in input) {
+        if (!values.has(key)) {
+          unrecognized = unrecognized ?? [];
+          unrecognized.push(key);
+        }
+      }
+      if (unrecognized && unrecognized.length > 0) {
+        payload.issues.push({
+          code: "unrecognized_keys",
+          input,
+          inst,
+          keys: unrecognized
+        });
+      }
+    } else {
+      payload.value = {};
+      for (const key of Reflect.ownKeys(input)) {
+        if (key === "__proto__")
+          continue;
+        const keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
+        if (keyResult instanceof Promise) {
+          throw new Error("Async schemas not supported in object keys currently");
+        }
+        if (keyResult.issues.length) {
+          payload.issues.push({
+            origin: "record",
+            code: "invalid_key",
+            issues: keyResult.issues.map((iss) => finalizeIssue(iss, ctx, config())),
+            input: key,
+            path: [key],
+            inst
+          });
+          payload.value[keyResult.value] = keyResult.value;
+          continue;
+        }
+        const result = def.valueType._zod.run({ value: input[key], issues: [] }, ctx);
+        if (result instanceof Promise) {
+          proms.push(result.then((result2) => {
+            if (result2.issues.length) {
+              payload.issues.push(...prefixIssues(key, result2.issues));
+            }
+            payload.value[keyResult.value] = result2.value;
+          }));
+        } else {
+          if (result.issues.length) {
+            payload.issues.push(...prefixIssues(key, result.issues));
+          }
+          payload.value[keyResult.value] = result.value;
+        }
+      }
+    }
+    if (proms.length) {
+      return Promise.all(proms).then(() => payload);
+    }
+    return payload;
+  };
+});
+var $ZodMap = /* @__PURE__ */ $constructor("$ZodMap", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, ctx) => {
+    const input = payload.value;
+    if (!(input instanceof Map)) {
+      payload.issues.push({
+        expected: "map",
+        code: "invalid_type",
+        input,
+        inst
+      });
+      return payload;
+    }
+    const proms = [];
+    payload.value = /* @__PURE__ */ new Map();
+    for (const [key, value] of input) {
+      const keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
+      const valueResult = def.valueType._zod.run({ value, issues: [] }, ctx);
+      if (keyResult instanceof Promise || valueResult instanceof Promise) {
+        proms.push(Promise.all([keyResult, valueResult]).then(([keyResult2, valueResult2]) => {
+          handleMapResult(keyResult2, valueResult2, payload, key, input, inst, ctx);
+        }));
+      } else {
+        handleMapResult(keyResult, valueResult, payload, key, input, inst, ctx);
+      }
+    }
+    if (proms.length)
+      return Promise.all(proms).then(() => payload);
+    return payload;
+  };
+});
+function handleMapResult(keyResult, valueResult, final, key, input, inst, ctx) {
+  if (keyResult.issues.length) {
+    if (propertyKeyTypes.has(typeof key)) {
+      final.issues.push(...prefixIssues(key, keyResult.issues));
+    } else {
+      final.issues.push({
+        origin: "map",
+        code: "invalid_key",
+        input,
+        inst,
+        issues: keyResult.issues.map((iss) => finalizeIssue(iss, ctx, config()))
+      });
+    }
+  }
+  if (valueResult.issues.length) {
+    if (propertyKeyTypes.has(typeof key)) {
+      final.issues.push(...prefixIssues(key, valueResult.issues));
+    } else {
+      final.issues.push({
+        origin: "map",
+        code: "invalid_element",
+        input,
+        inst,
+        key,
+        issues: valueResult.issues.map((iss) => finalizeIssue(iss, ctx, config()))
+      });
+    }
+  }
+  final.value.set(keyResult.value, valueResult.value);
+}
+var $ZodSet = /* @__PURE__ */ $constructor("$ZodSet", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, ctx) => {
+    const input = payload.value;
+    if (!(input instanceof Set)) {
+      payload.issues.push({
+        input,
+        inst,
+        expected: "set",
+        code: "invalid_type"
+      });
+      return payload;
+    }
+    const proms = [];
+    payload.value = /* @__PURE__ */ new Set();
+    for (const item of input) {
+      const result = def.valueType._zod.run({ value: item, issues: [] }, ctx);
+      if (result instanceof Promise) {
+        proms.push(result.then((result2) => handleSetResult(result2, payload)));
+      } else
+        handleSetResult(result, payload);
+    }
+    if (proms.length)
+      return Promise.all(proms).then(() => payload);
+    return payload;
+  };
+});
+function handleSetResult(result, final) {
+  if (result.issues.length) {
+    final.issues.push(...result.issues);
+  }
+  final.value.add(result.value);
+}
+var $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
+  $ZodType.init(inst, def);
+  const values = getEnumValues(def.entries);
+  inst._zod.values = new Set(values);
+  inst._zod.pattern = new RegExp(`^(${values.filter((k) => propertyKeyTypes.has(typeof k)).map((o) => typeof o === "string" ? escapeRegex(o) : o.toString()).join("|")})$`);
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (inst._zod.values.has(input)) {
+      return payload;
+    }
+    payload.issues.push({
+      code: "invalid_value",
+      values,
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodLiteral = /* @__PURE__ */ $constructor("$ZodLiteral", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.values = new Set(def.values);
+  inst._zod.pattern = new RegExp(`^(${def.values.map((o) => typeof o === "string" ? escapeRegex(o) : o ? o.toString() : String(o)).join("|")})$`);
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (inst._zod.values.has(input)) {
+      return payload;
+    }
+    payload.issues.push({
+      code: "invalid_value",
+      values: def.values,
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodFile = /* @__PURE__ */ $constructor("$ZodFile", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (input instanceof File)
+      return payload;
+    payload.issues.push({
+      expected: "file",
+      code: "invalid_type",
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodTransform = /* @__PURE__ */ $constructor("$ZodTransform", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, _ctx) => {
+    const _out = def.transform(payload.value, payload);
+    if (_ctx.async) {
+      const output = _out instanceof Promise ? _out : Promise.resolve(_out);
+      return output.then((output2) => {
+        payload.value = output2;
+        return payload;
+      });
+    }
+    if (_out instanceof Promise) {
+      throw new $ZodAsyncError();
+    }
+    payload.value = _out;
+    return payload;
+  };
+});
+var $ZodOptional = /* @__PURE__ */ $constructor("$ZodOptional", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.optin = "optional";
+  inst._zod.optout = "optional";
+  defineLazy(inst._zod, "values", () => {
+    return def.innerType._zod.values ? /* @__PURE__ */ new Set([...def.innerType._zod.values, void 0]) : void 0;
+  });
+  defineLazy(inst._zod, "pattern", () => {
+    const pattern = def.innerType._zod.pattern;
+    return pattern ? new RegExp(`^(${cleanRegex(pattern.source)})?$`) : void 0;
+  });
+  inst._zod.parse = (payload, ctx) => {
+    if (def.innerType._zod.optin === "optional") {
+      return def.innerType._zod.run(payload, ctx);
+    }
+    if (payload.value === void 0) {
+      return payload;
+    }
+    return def.innerType._zod.run(payload, ctx);
+  };
+});
+var $ZodNullable = /* @__PURE__ */ $constructor("$ZodNullable", (inst, def) => {
+  $ZodType.init(inst, def);
+  defineLazy(inst._zod, "optin", () => def.innerType._zod.optin);
+  defineLazy(inst._zod, "optout", () => def.innerType._zod.optout);
+  defineLazy(inst._zod, "pattern", () => {
+    const pattern = def.innerType._zod.pattern;
+    return pattern ? new RegExp(`^(${cleanRegex(pattern.source)}|null)$`) : void 0;
+  });
+  defineLazy(inst._zod, "values", () => {
+    return def.innerType._zod.values ? /* @__PURE__ */ new Set([...def.innerType._zod.values, null]) : void 0;
+  });
+  inst._zod.parse = (payload, ctx) => {
+    if (payload.value === null)
+      return payload;
+    return def.innerType._zod.run(payload, ctx);
+  };
+});
+var $ZodDefault = /* @__PURE__ */ $constructor("$ZodDefault", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.optin = "optional";
+  defineLazy(inst._zod, "values", () => def.innerType._zod.values);
+  inst._zod.parse = (payload, ctx) => {
+    if (payload.value === void 0) {
+      payload.value = def.defaultValue;
+      return payload;
+    }
+    const result = def.innerType._zod.run(payload, ctx);
+    if (result instanceof Promise) {
+      return result.then((result2) => handleDefaultResult(result2, def));
+    }
+    return handleDefaultResult(result, def);
+  };
+});
+function handleDefaultResult(payload, def) {
+  if (payload.value === void 0) {
+    payload.value = def.defaultValue;
+  }
+  return payload;
+}
+var $ZodPrefault = /* @__PURE__ */ $constructor("$ZodPrefault", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.optin = "optional";
+  defineLazy(inst._zod, "values", () => def.innerType._zod.values);
+  inst._zod.parse = (payload, ctx) => {
+    if (payload.value === void 0) {
+      payload.value = def.defaultValue;
+    }
+    return def.innerType._zod.run(payload, ctx);
+  };
+});
+var $ZodNonOptional = /* @__PURE__ */ $constructor("$ZodNonOptional", (inst, def) => {
+  $ZodType.init(inst, def);
+  defineLazy(inst._zod, "values", () => {
+    const v = def.innerType._zod.values;
+    return v ? new Set([...v].filter((x) => x !== void 0)) : void 0;
+  });
+  inst._zod.parse = (payload, ctx) => {
+    const result = def.innerType._zod.run(payload, ctx);
+    if (result instanceof Promise) {
+      return result.then((result2) => handleNonOptionalResult(result2, inst));
+    }
+    return handleNonOptionalResult(result, inst);
+  };
+});
+function handleNonOptionalResult(payload, inst) {
+  if (!payload.issues.length && payload.value === void 0) {
+    payload.issues.push({
+      code: "invalid_type",
+      expected: "nonoptional",
+      input: payload.value,
+      inst
+    });
+  }
+  return payload;
+}
+var $ZodSuccess = /* @__PURE__ */ $constructor("$ZodSuccess", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, ctx) => {
+    const result = def.innerType._zod.run(payload, ctx);
+    if (result instanceof Promise) {
+      return result.then((result2) => {
+        payload.value = result2.issues.length === 0;
+        return payload;
+      });
+    }
+    payload.value = result.issues.length === 0;
+    return payload;
+  };
+});
+var $ZodCatch = /* @__PURE__ */ $constructor("$ZodCatch", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.optin = "optional";
+  defineLazy(inst._zod, "optout", () => def.innerType._zod.optout);
+  defineLazy(inst._zod, "values", () => def.innerType._zod.values);
+  inst._zod.parse = (payload, ctx) => {
+    const result = def.innerType._zod.run(payload, ctx);
+    if (result instanceof Promise) {
+      return result.then((result2) => {
+        payload.value = result2.value;
+        if (result2.issues.length) {
+          payload.value = def.catchValue({
+            ...payload,
+            error: {
+              issues: result2.issues.map((iss) => finalizeIssue(iss, ctx, config()))
+            },
+            input: payload.value
+          });
+          payload.issues = [];
+        }
+        return payload;
+      });
+    }
+    payload.value = result.value;
+    if (result.issues.length) {
+      payload.value = def.catchValue({
+        ...payload,
+        error: {
+          issues: result.issues.map((iss) => finalizeIssue(iss, ctx, config()))
+        },
+        input: payload.value
+      });
+      payload.issues = [];
+    }
+    return payload;
+  };
+});
+var $ZodNaN = /* @__PURE__ */ $constructor("$ZodNaN", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, _ctx) => {
+    if (typeof payload.value !== "number" || !Number.isNaN(payload.value)) {
+      payload.issues.push({
+        input: payload.value,
+        inst,
+        expected: "nan",
+        code: "invalid_type"
+      });
+      return payload;
+    }
+    return payload;
+  };
+});
+var $ZodPipe = /* @__PURE__ */ $constructor("$ZodPipe", (inst, def) => {
+  $ZodType.init(inst, def);
+  defineLazy(inst._zod, "values", () => def.in._zod.values);
+  defineLazy(inst._zod, "optin", () => def.in._zod.optin);
+  defineLazy(inst._zod, "optout", () => def.out._zod.optout);
+  inst._zod.parse = (payload, ctx) => {
+    const left = def.in._zod.run(payload, ctx);
+    if (left instanceof Promise) {
+      return left.then((left2) => handlePipeResult(left2, def, ctx));
+    }
+    return handlePipeResult(left, def, ctx);
+  };
+});
+function handlePipeResult(left, def, ctx) {
+  if (aborted(left)) {
+    return left;
+  }
+  return def.out._zod.run({ value: left.value, issues: left.issues }, ctx);
+}
+var $ZodReadonly = /* @__PURE__ */ $constructor("$ZodReadonly", (inst, def) => {
+  $ZodType.init(inst, def);
+  defineLazy(inst._zod, "propValues", () => def.innerType._zod.propValues);
+  defineLazy(inst._zod, "values", () => def.innerType._zod.values);
+  defineLazy(inst._zod, "optin", () => def.innerType._zod.optin);
+  defineLazy(inst._zod, "optout", () => def.innerType._zod.optout);
+  inst._zod.parse = (payload, ctx) => {
+    const result = def.innerType._zod.run(payload, ctx);
+    if (result instanceof Promise) {
+      return result.then(handleReadonlyResult);
+    }
+    return handleReadonlyResult(result);
+  };
+});
+function handleReadonlyResult(payload) {
+  payload.value = Object.freeze(payload.value);
+  return payload;
+}
+var $ZodTemplateLiteral = /* @__PURE__ */ $constructor("$ZodTemplateLiteral", (inst, def) => {
+  $ZodType.init(inst, def);
+  const regexParts = [];
+  for (const part of def.parts) {
+    if (part instanceof $ZodType) {
+      if (!part._zod.pattern) {
+        throw new Error(`Invalid template literal part, no pattern found: ${[...part._zod.traits].shift()}`);
+      }
+      const source = part._zod.pattern instanceof RegExp ? part._zod.pattern.source : part._zod.pattern;
+      if (!source)
+        throw new Error(`Invalid template literal part: ${part._zod.traits}`);
+      const start = source.startsWith("^") ? 1 : 0;
+      const end = source.endsWith("$") ? source.length - 1 : source.length;
+      regexParts.push(source.slice(start, end));
+    } else if (part === null || primitiveTypes.has(typeof part)) {
+      regexParts.push(escapeRegex(`${part}`));
+    } else {
+      throw new Error(`Invalid template literal part: ${part}`);
+    }
+  }
+  inst._zod.pattern = new RegExp(`^${regexParts.join("")}$`);
+  inst._zod.parse = (payload, _ctx) => {
+    if (typeof payload.value !== "string") {
+      payload.issues.push({
+        input: payload.value,
+        inst,
+        expected: "template_literal",
+        code: "invalid_type"
+      });
+      return payload;
+    }
+    inst._zod.pattern.lastIndex = 0;
+    if (!inst._zod.pattern.test(payload.value)) {
+      payload.issues.push({
+        input: payload.value,
+        inst,
+        code: "invalid_format",
+        format: "template_literal",
+        pattern: inst._zod.pattern.source
+      });
+      return payload;
+    }
+    return payload;
+  };
+});
+var $ZodPromise = /* @__PURE__ */ $constructor("$ZodPromise", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, ctx) => {
+    return Promise.resolve(payload.value).then((inner) => def.innerType._zod.run({ value: inner, issues: [] }, ctx));
+  };
+});
+var $ZodLazy = /* @__PURE__ */ $constructor("$ZodLazy", (inst, def) => {
+  $ZodType.init(inst, def);
+  defineLazy(inst._zod, "innerType", () => def.getter());
+  defineLazy(inst._zod, "pattern", () => inst._zod.innerType._zod.pattern);
+  defineLazy(inst._zod, "propValues", () => inst._zod.innerType._zod.propValues);
+  defineLazy(inst._zod, "optin", () => inst._zod.innerType._zod.optin);
+  defineLazy(inst._zod, "optout", () => inst._zod.innerType._zod.optout);
+  inst._zod.parse = (payload, ctx) => {
+    const inner = inst._zod.innerType;
+    return inner._zod.run(payload, ctx);
+  };
+});
+var $ZodCustom = /* @__PURE__ */ $constructor("$ZodCustom", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, _) => {
+    return payload;
+  };
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    const r = def.fn(input);
+    if (r instanceof Promise) {
+      return r.then((r2) => handleRefineResult(r2, payload, input, inst));
+    }
+    handleRefineResult(r, payload, input, inst);
+    return;
+  };
+});
+function handleRefineResult(result, payload, input, inst) {
+  if (!result) {
+    const _iss = {
+      code: "custom",
+      input,
+      inst,
+      // incorporates params.error into issue reporting
+      path: [...inst._zod.def.path ?? []],
+      // incorporates params.error into issue reporting
+      continue: !inst._zod.def.abort
+      // params: inst._zod.def.params,
+    };
+    if (inst._zod.def.params)
+      _iss.params = inst._zod.def.params;
+    payload.issues.push(issue(_iss));
+  }
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/index.js
+var locales_exports = {};
+__export(locales_exports, {
+  ar: () => ar_default,
+  az: () => az_default,
+  be: () => be_default,
+  ca: () => ca_default,
+  cs: () => cs_default,
+  de: () => de_default,
+  en: () => en_default2,
+  eo: () => eo_default,
+  es: () => es_default,
+  fa: () => fa_default,
+  fi: () => fi_default,
+  fr: () => fr_default,
+  frCA: () => fr_CA_default,
+  he: () => he_default,
+  hu: () => hu_default,
+  id: () => id_default,
+  it: () => it_default,
+  ja: () => ja_default,
+  kh: () => kh_default,
+  ko: () => ko_default,
+  mk: () => mk_default,
+  ms: () => ms_default,
+  nl: () => nl_default,
+  no: () => no_default,
+  ota: () => ota_default,
+  pl: () => pl_default,
+  ps: () => ps_default,
+  pt: () => pt_default,
+  ru: () => ru_default,
+  sl: () => sl_default,
+  sv: () => sv_default,
+  ta: () => ta_default,
+  th: () => th_default,
+  tr: () => tr_default,
+  ua: () => ua_default,
+  ur: () => ur_default,
+  vi: () => vi_default,
+  zhCN: () => zh_CN_default,
+  zhTW: () => zh_TW_default
+});
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ar.js
+var error = () => {
+  const Sizable = {
+    string: { unit: "\u062D\u0631\u0641", verb: "\u0623\u0646 \u064A\u062D\u0648\u064A" },
+    file: { unit: "\u0628\u0627\u064A\u062A", verb: "\u0623\u0646 \u064A\u062D\u0648\u064A" },
+    array: { unit: "\u0639\u0646\u0635\u0631", verb: "\u0623\u0646 \u064A\u062D\u0648\u064A" },
+    set: { unit: "\u0639\u0646\u0635\u0631", verb: "\u0623\u0646 \u064A\u062D\u0648\u064A" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "number";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0645\u062F\u062E\u0644",
+    email: "\u0628\u0631\u064A\u062F \u0625\u0644\u0643\u062A\u0631\u0648\u0646\u064A",
+    url: "\u0631\u0627\u0628\u0637",
+    emoji: "\u0625\u064A\u0645\u0648\u062C\u064A",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "\u062A\u0627\u0631\u064A\u062E \u0648\u0648\u0642\u062A \u0628\u0645\u0639\u064A\u0627\u0631 ISO",
+    date: "\u062A\u0627\u0631\u064A\u062E \u0628\u0645\u0639\u064A\u0627\u0631 ISO",
+    time: "\u0648\u0642\u062A \u0628\u0645\u0639\u064A\u0627\u0631 ISO",
+    duration: "\u0645\u062F\u0629 \u0628\u0645\u0639\u064A\u0627\u0631 ISO",
+    ipv4: "\u0639\u0646\u0648\u0627\u0646 IPv4",
+    ipv6: "\u0639\u0646\u0648\u0627\u0646 IPv6",
+    cidrv4: "\u0645\u062F\u0649 \u0639\u0646\u0627\u0648\u064A\u0646 \u0628\u0635\u064A\u063A\u0629 IPv4",
+    cidrv6: "\u0645\u062F\u0649 \u0639\u0646\u0627\u0648\u064A\u0646 \u0628\u0635\u064A\u063A\u0629 IPv6",
+    base64: "\u0646\u064E\u0635 \u0628\u062A\u0631\u0645\u064A\u0632 base64-encoded",
+    base64url: "\u0646\u064E\u0635 \u0628\u062A\u0631\u0645\u064A\u0632 base64url-encoded",
+    json_string: "\u0646\u064E\u0635 \u0639\u0644\u0649 \u0647\u064A\u0626\u0629 JSON",
+    e164: "\u0631\u0642\u0645 \u0647\u0627\u062A\u0641 \u0628\u0645\u0639\u064A\u0627\u0631 E.164",
+    jwt: "JWT",
+    template_literal: "\u0645\u062F\u062E\u0644"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u0645\u062F\u062E\u0644\u0627\u062A \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644\u0629: \u064A\u0641\u062A\u0631\u0636 \u0625\u062F\u062E\u0627\u0644 ${issue2.expected}\u060C \u0648\u0644\u0643\u0646 \u062A\u0645 \u0625\u062F\u062E\u0627\u0644 ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u0645\u062F\u062E\u0644\u0627\u062A \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644\u0629: \u064A\u0641\u062A\u0631\u0636 \u0625\u062F\u062E\u0627\u0644 ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u0627\u062E\u062A\u064A\u0627\u0631 \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644: \u064A\u062A\u0648\u0642\u0639 \u0627\u0646\u062A\u0642\u0627\u0621 \u0623\u062D\u062F \u0647\u0630\u0647 \u0627\u0644\u062E\u064A\u0627\u0631\u0627\u062A: ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return ` \u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0644\u0627\u0632\u0645: \u064A\u0641\u062A\u0631\u0636 \u0623\u0646 \u062A\u0643\u0648\u0646 ${issue2.origin ?? "\u0627\u0644\u0642\u064A\u0645\u0629"} ${adj} ${issue2.maximum.toString()} ${sizing.unit ?? "\u0639\u0646\u0635\u0631"}`;
+        return `\u0623\u0643\u0628\u0631 \u0645\u0646 \u0627\u0644\u0644\u0627\u0632\u0645: \u064A\u0641\u062A\u0631\u0636 \u0623\u0646 \u062A\u0643\u0648\u0646 ${issue2.origin ?? "\u0627\u0644\u0642\u064A\u0645\u0629"} ${adj} ${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u0623\u0635\u063A\u0631 \u0645\u0646 \u0627\u0644\u0644\u0627\u0632\u0645: \u064A\u0641\u062A\u0631\u0636 \u0644\u0640 ${issue2.origin} \u0623\u0646 \u064A\u0643\u0648\u0646 ${adj} ${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `\u0623\u0635\u063A\u0631 \u0645\u0646 \u0627\u0644\u0644\u0627\u0632\u0645: \u064A\u0641\u062A\u0631\u0636 \u0644\u0640 ${issue2.origin} \u0623\u0646 \u064A\u0643\u0648\u0646 ${adj} ${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `\u0646\u064E\u0635 \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644: \u064A\u062C\u0628 \u0623\u0646 \u064A\u0628\u062F\u0623 \u0628\u0640 "${issue2.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `\u0646\u064E\u0635 \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644: \u064A\u062C\u0628 \u0623\u0646 \u064A\u0646\u062A\u0647\u064A \u0628\u0640 "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `\u0646\u064E\u0635 \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644: \u064A\u062C\u0628 \u0623\u0646 \u064A\u062A\u0636\u0645\u0651\u064E\u0646 "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u0646\u064E\u0635 \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644: \u064A\u062C\u0628 \u0623\u0646 \u064A\u0637\u0627\u0628\u0642 \u0627\u0644\u0646\u0645\u0637 ${_issue.pattern}`;
+        return `${Nouns[_issue.format] ?? issue2.format} \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644`;
+      }
+      case "not_multiple_of":
+        return `\u0631\u0642\u0645 \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644: \u064A\u062C\u0628 \u0623\u0646 \u064A\u0643\u0648\u0646 \u0645\u0646 \u0645\u0636\u0627\u0639\u0641\u0627\u062A ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `\u0645\u0639\u0631\u0641${issue2.keys.length > 1 ? "\u0627\u062A" : ""} \u063A\u0631\u064A\u0628${issue2.keys.length > 1 ? "\u0629" : ""}: ${joinValues(issue2.keys, "\u060C ")}`;
+      case "invalid_key":
+        return `\u0645\u0639\u0631\u0641 \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644 \u0641\u064A ${issue2.origin}`;
+      case "invalid_union":
+        return "\u0645\u062F\u062E\u0644 \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644";
+      case "invalid_element":
+        return `\u0645\u062F\u062E\u0644 \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644 \u0641\u064A ${issue2.origin}`;
+      default:
+        return "\u0645\u062F\u062E\u0644 \u063A\u064A\u0631 \u0645\u0642\u0628\u0648\u0644";
+    }
+  };
+};
+function ar_default() {
+  return {
+    localeError: error()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/az.js
+var error2 = () => {
+  const Sizable = {
+    string: { unit: "simvol", verb: "olmal\u0131d\u0131r" },
+    file: { unit: "bayt", verb: "olmal\u0131d\u0131r" },
+    array: { unit: "element", verb: "olmal\u0131d\u0131r" },
+    set: { unit: "element", verb: "olmal\u0131d\u0131r" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "number";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "input",
+    email: "email address",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO datetime",
+    date: "ISO date",
+    time: "ISO time",
+    duration: "ISO duration",
+    ipv4: "IPv4 address",
+    ipv6: "IPv6 address",
+    cidrv4: "IPv4 range",
+    cidrv6: "IPv6 range",
+    base64: "base64-encoded string",
+    base64url: "base64url-encoded string",
+    json_string: "JSON string",
+    e164: "E.164 number",
+    jwt: "JWT",
+    template_literal: "input"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Yanl\u0131\u015F d\u0259y\u0259r: g\xF6zl\u0259nil\u0259n ${issue2.expected}, daxil olan ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Yanl\u0131\u015F d\u0259y\u0259r: g\xF6zl\u0259nil\u0259n ${stringifyPrimitive(issue2.values[0])}`;
+        return `Yanl\u0131\u015F se\xE7im: a\u015Fa\u011F\u0131dak\u0131lardan biri olmal\u0131d\u0131r: ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\xC7ox b\xF6y\xFCk: g\xF6zl\u0259nil\u0259n ${issue2.origin ?? "d\u0259y\u0259r"} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "element"}`;
+        return `\xC7ox b\xF6y\xFCk: g\xF6zl\u0259nil\u0259n ${issue2.origin ?? "d\u0259y\u0259r"} ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\xC7ox ki\xE7ik: g\xF6zl\u0259nil\u0259n ${issue2.origin} ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        return `\xC7ox ki\xE7ik: g\xF6zl\u0259nil\u0259n ${issue2.origin} ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Yanl\u0131\u015F m\u0259tn: "${_issue.prefix}" il\u0259 ba\u015Flamal\u0131d\u0131r`;
+        if (_issue.format === "ends_with")
+          return `Yanl\u0131\u015F m\u0259tn: "${_issue.suffix}" il\u0259 bitm\u0259lidir`;
+        if (_issue.format === "includes")
+          return `Yanl\u0131\u015F m\u0259tn: "${_issue.includes}" daxil olmal\u0131d\u0131r`;
+        if (_issue.format === "regex")
+          return `Yanl\u0131\u015F m\u0259tn: ${_issue.pattern} \u015Fablonuna uy\u011Fun olmal\u0131d\u0131r`;
+        return `Yanl\u0131\u015F ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Yanl\u0131\u015F \u0259d\u0259d: ${issue2.divisor} il\u0259 b\xF6l\xFCn\u0259 bil\u0259n olmal\u0131d\u0131r`;
+      case "unrecognized_keys":
+        return `Tan\u0131nmayan a\xE7ar${issue2.keys.length > 1 ? "lar" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `${issue2.origin} daxilind\u0259 yanl\u0131\u015F a\xE7ar`;
+      case "invalid_union":
+        return "Yanl\u0131\u015F d\u0259y\u0259r";
+      case "invalid_element":
+        return `${issue2.origin} daxilind\u0259 yanl\u0131\u015F d\u0259y\u0259r`;
+      default:
+        return `Yanl\u0131\u015F d\u0259y\u0259r`;
+    }
+  };
+};
+function az_default() {
+  return {
+    localeError: error2()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/be.js
+function getBelarusianPlural(count2, one, few, many) {
+  const absCount = Math.abs(count2);
+  const lastDigit = absCount % 10;
+  const lastTwoDigits = absCount % 100;
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
+    return many;
+  }
+  if (lastDigit === 1) {
+    return one;
+  }
+  if (lastDigit >= 2 && lastDigit <= 4) {
+    return few;
+  }
+  return many;
+}
+var error3 = () => {
+  const Sizable = {
+    string: {
+      unit: {
+        one: "\u0441\u0456\u043C\u0432\u0430\u043B",
+        few: "\u0441\u0456\u043C\u0432\u0430\u043B\u044B",
+        many: "\u0441\u0456\u043C\u0432\u0430\u043B\u0430\u045E"
+      },
+      verb: "\u043C\u0435\u0446\u044C"
+    },
+    array: {
+      unit: {
+        one: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442",
+        few: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u044B",
+        many: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u045E"
+      },
+      verb: "\u043C\u0435\u0446\u044C"
+    },
+    set: {
+      unit: {
+        one: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442",
+        few: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u044B",
+        many: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u045E"
+      },
+      verb: "\u043C\u0435\u0446\u044C"
+    },
+    file: {
+      unit: {
+        one: "\u0431\u0430\u0439\u0442",
+        few: "\u0431\u0430\u0439\u0442\u044B",
+        many: "\u0431\u0430\u0439\u0442\u0430\u045E"
+      },
+      verb: "\u043C\u0435\u0446\u044C"
+    }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "\u043B\u0456\u043A";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u043C\u0430\u0441\u0456\u045E";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0443\u0432\u043E\u0434",
+    email: "email \u0430\u0434\u0440\u0430\u0441",
+    url: "URL",
+    emoji: "\u044D\u043C\u043E\u0434\u0437\u0456",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO \u0434\u0430\u0442\u0430 \u0456 \u0447\u0430\u0441",
+    date: "ISO \u0434\u0430\u0442\u0430",
+    time: "ISO \u0447\u0430\u0441",
+    duration: "ISO \u043F\u0440\u0430\u0446\u044F\u0433\u043B\u0430\u0441\u0446\u044C",
+    ipv4: "IPv4 \u0430\u0434\u0440\u0430\u0441",
+    ipv6: "IPv6 \u0430\u0434\u0440\u0430\u0441",
+    cidrv4: "IPv4 \u0434\u044B\u044F\u043F\u0430\u0437\u043E\u043D",
+    cidrv6: "IPv6 \u0434\u044B\u044F\u043F\u0430\u0437\u043E\u043D",
+    base64: "\u0440\u0430\u0434\u043E\u043A \u0443 \u0444\u0430\u0440\u043C\u0430\u0446\u0435 base64",
+    base64url: "\u0440\u0430\u0434\u043E\u043A \u0443 \u0444\u0430\u0440\u043C\u0430\u0446\u0435 base64url",
+    json_string: "JSON \u0440\u0430\u0434\u043E\u043A",
+    e164: "\u043D\u0443\u043C\u0430\u0440 E.164",
+    jwt: "JWT",
+    template_literal: "\u0443\u0432\u043E\u0434"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u045E\u0432\u043E\u0434: \u0447\u0430\u043A\u0430\u045E\u0441\u044F ${issue2.expected}, \u0430\u0442\u0440\u044B\u043C\u0430\u043D\u0430 ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u045E\u0432\u043E\u0434: \u0447\u0430\u043A\u0430\u043B\u0430\u0441\u044F ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u0432\u0430\u0440\u044B\u044F\u043D\u0442: \u0447\u0430\u043A\u0430\u045E\u0441\u044F \u0430\u0434\u0437\u0456\u043D \u0437 ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          const maxValue = Number(issue2.maximum);
+          const unit = getBelarusianPlural(maxValue, sizing.unit.one, sizing.unit.few, sizing.unit.many);
+          return `\u0417\u0430\u043D\u0430\u0434\u0442\u0430 \u0432\u044F\u043B\u0456\u043A\u0456: \u0447\u0430\u043A\u0430\u043B\u0430\u0441\u044F, \u0448\u0442\u043E ${issue2.origin ?? "\u0437\u043D\u0430\u0447\u044D\u043D\u043D\u0435"} \u043F\u0430\u0432\u0456\u043D\u043D\u0430 ${sizing.verb} ${adj}${issue2.maximum.toString()} ${unit}`;
+        }
+        return `\u0417\u0430\u043D\u0430\u0434\u0442\u0430 \u0432\u044F\u043B\u0456\u043A\u0456: \u0447\u0430\u043A\u0430\u043B\u0430\u0441\u044F, \u0448\u0442\u043E ${issue2.origin ?? "\u0437\u043D\u0430\u0447\u044D\u043D\u043D\u0435"} \u043F\u0430\u0432\u0456\u043D\u043D\u0430 \u0431\u044B\u0446\u044C ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          const minValue = Number(issue2.minimum);
+          const unit = getBelarusianPlural(minValue, sizing.unit.one, sizing.unit.few, sizing.unit.many);
+          return `\u0417\u0430\u043D\u0430\u0434\u0442\u0430 \u043C\u0430\u043B\u044B: \u0447\u0430\u043A\u0430\u043B\u0430\u0441\u044F, \u0448\u0442\u043E ${issue2.origin} \u043F\u0430\u0432\u0456\u043D\u043D\u0430 ${sizing.verb} ${adj}${issue2.minimum.toString()} ${unit}`;
+        }
+        return `\u0417\u0430\u043D\u0430\u0434\u0442\u0430 \u043C\u0430\u043B\u044B: \u0447\u0430\u043A\u0430\u043B\u0430\u0441\u044F, \u0448\u0442\u043E ${issue2.origin} \u043F\u0430\u0432\u0456\u043D\u043D\u0430 \u0431\u044B\u0446\u044C ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u0440\u0430\u0434\u043E\u043A: \u043F\u0430\u0432\u0456\u043D\u0435\u043D \u043F\u0430\u0447\u044B\u043D\u0430\u0446\u0446\u0430 \u0437 "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u0440\u0430\u0434\u043E\u043A: \u043F\u0430\u0432\u0456\u043D\u0435\u043D \u0437\u0430\u043A\u0430\u043D\u0447\u0432\u0430\u0446\u0446\u0430 \u043D\u0430 "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u0440\u0430\u0434\u043E\u043A: \u043F\u0430\u0432\u0456\u043D\u0435\u043D \u0437\u043C\u044F\u0448\u0447\u0430\u0446\u044C "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u0440\u0430\u0434\u043E\u043A: \u043F\u0430\u0432\u0456\u043D\u0435\u043D \u0430\u0434\u043F\u0430\u0432\u044F\u0434\u0430\u0446\u044C \u0448\u0430\u0431\u043B\u043E\u043D\u0443 ${_issue.pattern}`;
+        return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u043B\u0456\u043A: \u043F\u0430\u0432\u0456\u043D\u0435\u043D \u0431\u044B\u0446\u044C \u043A\u0440\u0430\u0442\u043D\u044B\u043C ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `\u041D\u0435\u0440\u0430\u0441\u043F\u0430\u0437\u043D\u0430\u043D\u044B ${issue2.keys.length > 1 ? "\u043A\u043B\u044E\u0447\u044B" : "\u043A\u043B\u044E\u0447"}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u043A\u043B\u044E\u0447 \u0443 ${issue2.origin}`;
+      case "invalid_union":
+        return "\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u045E\u0432\u043E\u0434";
+      case "invalid_element":
+        return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u0430\u0435 \u0437\u043D\u0430\u0447\u044D\u043D\u043D\u0435 \u045E ${issue2.origin}`;
+      default:
+        return `\u041D\u044F\u043F\u0440\u0430\u0432\u0456\u043B\u044C\u043D\u044B \u045E\u0432\u043E\u0434`;
+    }
+  };
+};
+function be_default() {
+  return {
+    localeError: error3()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ca.js
+var error4 = () => {
+  const Sizable = {
+    string: { unit: "car\xE0cters", verb: "contenir" },
+    file: { unit: "bytes", verb: "contenir" },
+    array: { unit: "elements", verb: "contenir" },
+    set: { unit: "elements", verb: "contenir" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "number";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "entrada",
+    email: "adre\xE7a electr\xF2nica",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "data i hora ISO",
+    date: "data ISO",
+    time: "hora ISO",
+    duration: "durada ISO",
+    ipv4: "adre\xE7a IPv4",
+    ipv6: "adre\xE7a IPv6",
+    cidrv4: "rang IPv4",
+    cidrv6: "rang IPv6",
+    base64: "cadena codificada en base64",
+    base64url: "cadena codificada en base64url",
+    json_string: "cadena JSON",
+    e164: "n\xFAmero E.164",
+    jwt: "JWT",
+    template_literal: "entrada"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Tipus inv\xE0lid: s'esperava ${issue2.expected}, s'ha rebut ${parsedType4(issue2.input)}`;
+      // return `Tipus invàlid: s'esperava ${issue.expected}, s'ha rebut ${util.getParsedType(issue.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Valor inv\xE0lid: s'esperava ${stringifyPrimitive(issue2.values[0])}`;
+        return `Opci\xF3 inv\xE0lida: s'esperava una de ${joinValues(issue2.values, " o ")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "com a m\xE0xim" : "menys de";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Massa gran: s'esperava que ${issue2.origin ?? "el valor"} contingu\xE9s ${adj} ${issue2.maximum.toString()} ${sizing.unit ?? "elements"}`;
+        return `Massa gran: s'esperava que ${issue2.origin ?? "el valor"} fos ${adj} ${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? "com a m\xEDnim" : "m\xE9s de";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Massa petit: s'esperava que ${issue2.origin} contingu\xE9s ${adj} ${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Massa petit: s'esperava que ${issue2.origin} fos ${adj} ${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `Format inv\xE0lid: ha de comen\xE7ar amb "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `Format inv\xE0lid: ha d'acabar amb "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Format inv\xE0lid: ha d'incloure "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Format inv\xE0lid: ha de coincidir amb el patr\xF3 ${_issue.pattern}`;
+        return `Format inv\xE0lid per a ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `N\xFAmero inv\xE0lid: ha de ser m\xFAltiple de ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Clau${issue2.keys.length > 1 ? "s" : ""} no reconeguda${issue2.keys.length > 1 ? "s" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Clau inv\xE0lida a ${issue2.origin}`;
+      case "invalid_union":
+        return "Entrada inv\xE0lida";
+      // Could also be "Tipus d'unió invàlid" but "Entrada invàlida" is more general
+      case "invalid_element":
+        return `Element inv\xE0lid a ${issue2.origin}`;
+      default:
+        return `Entrada inv\xE0lida`;
+    }
+  };
+};
+function ca_default() {
+  return {
+    localeError: error4()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/cs.js
+var error5 = () => {
+  const Sizable = {
+    string: { unit: "znak\u016F", verb: "m\xEDt" },
+    file: { unit: "bajt\u016F", verb: "m\xEDt" },
+    array: { unit: "prvk\u016F", verb: "m\xEDt" },
+    set: { unit: "prvk\u016F", verb: "m\xEDt" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "\u010D\xEDslo";
+      }
+      case "string": {
+        return "\u0159et\u011Bzec";
+      }
+      case "boolean": {
+        return "boolean";
+      }
+      case "bigint": {
+        return "bigint";
+      }
+      case "function": {
+        return "funkce";
+      }
+      case "symbol": {
+        return "symbol";
+      }
+      case "undefined": {
+        return "undefined";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "pole";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "regul\xE1rn\xED v\xFDraz",
+    email: "e-mailov\xE1 adresa",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "datum a \u010Das ve form\xE1tu ISO",
+    date: "datum ve form\xE1tu ISO",
+    time: "\u010Das ve form\xE1tu ISO",
+    duration: "doba trv\xE1n\xED ISO",
+    ipv4: "IPv4 adresa",
+    ipv6: "IPv6 adresa",
+    cidrv4: "rozsah IPv4",
+    cidrv6: "rozsah IPv6",
+    base64: "\u0159et\u011Bzec zak\xF3dovan\xFD ve form\xE1tu base64",
+    base64url: "\u0159et\u011Bzec zak\xF3dovan\xFD ve form\xE1tu base64url",
+    json_string: "\u0159et\u011Bzec ve form\xE1tu JSON",
+    e164: "\u010D\xEDslo E.164",
+    jwt: "JWT",
+    template_literal: "vstup"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Neplatn\xFD vstup: o\u010Dek\xE1v\xE1no ${issue2.expected}, obdr\u017Eeno ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Neplatn\xFD vstup: o\u010Dek\xE1v\xE1no ${stringifyPrimitive(issue2.values[0])}`;
+        return `Neplatn\xE1 mo\u017Enost: o\u010Dek\xE1v\xE1na jedna z hodnot ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Hodnota je p\u0159\xEDli\u0161 velk\xE1: ${issue2.origin ?? "hodnota"} mus\xED m\xEDt ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "prvk\u016F"}`;
+        }
+        return `Hodnota je p\u0159\xEDli\u0161 velk\xE1: ${issue2.origin ?? "hodnota"} mus\xED b\xFDt ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Hodnota je p\u0159\xEDli\u0161 mal\xE1: ${issue2.origin ?? "hodnota"} mus\xED m\xEDt ${adj}${issue2.minimum.toString()} ${sizing.unit ?? "prvk\u016F"}`;
+        }
+        return `Hodnota je p\u0159\xEDli\u0161 mal\xE1: ${issue2.origin ?? "hodnota"} mus\xED b\xFDt ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Neplatn\xFD \u0159et\u011Bzec: mus\xED za\u010D\xEDnat na "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Neplatn\xFD \u0159et\u011Bzec: mus\xED kon\u010Dit na "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Neplatn\xFD \u0159et\u011Bzec: mus\xED obsahovat "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Neplatn\xFD \u0159et\u011Bzec: mus\xED odpov\xEDdat vzoru ${_issue.pattern}`;
+        return `Neplatn\xFD form\xE1t ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Neplatn\xE9 \u010D\xEDslo: mus\xED b\xFDt n\xE1sobkem ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Nezn\xE1m\xE9 kl\xED\u010De: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Neplatn\xFD kl\xED\u010D v ${issue2.origin}`;
+      case "invalid_union":
+        return "Neplatn\xFD vstup";
+      case "invalid_element":
+        return `Neplatn\xE1 hodnota v ${issue2.origin}`;
+      default:
+        return `Neplatn\xFD vstup`;
+    }
+  };
+};
+function cs_default() {
+  return {
+    localeError: error5()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/de.js
+var error6 = () => {
+  const Sizable = {
+    string: { unit: "Zeichen", verb: "zu haben" },
+    file: { unit: "Bytes", verb: "zu haben" },
+    array: { unit: "Elemente", verb: "zu haben" },
+    set: { unit: "Elemente", verb: "zu haben" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "Zahl";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "Array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "Eingabe",
+    email: "E-Mail-Adresse",
+    url: "URL",
+    emoji: "Emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO-Datum und -Uhrzeit",
+    date: "ISO-Datum",
+    time: "ISO-Uhrzeit",
+    duration: "ISO-Dauer",
+    ipv4: "IPv4-Adresse",
+    ipv6: "IPv6-Adresse",
+    cidrv4: "IPv4-Bereich",
+    cidrv6: "IPv6-Bereich",
+    base64: "Base64-codierter String",
+    base64url: "Base64-URL-codierter String",
+    json_string: "JSON-String",
+    e164: "E.164-Nummer",
+    jwt: "JWT",
+    template_literal: "Eingabe"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Ung\xFCltige Eingabe: erwartet ${issue2.expected}, erhalten ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Ung\xFCltige Eingabe: erwartet ${stringifyPrimitive(issue2.values[0])}`;
+        return `Ung\xFCltige Option: erwartet eine von ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Zu gro\xDF: erwartet, dass ${issue2.origin ?? "Wert"} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "Elemente"} hat`;
+        return `Zu gro\xDF: erwartet, dass ${issue2.origin ?? "Wert"} ${adj}${issue2.maximum.toString()} ist`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Zu klein: erwartet, dass ${issue2.origin} ${adj}${issue2.minimum.toString()} ${sizing.unit} hat`;
+        }
+        return `Zu klein: erwartet, dass ${issue2.origin} ${adj}${issue2.minimum.toString()} ist`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Ung\xFCltiger String: muss mit "${_issue.prefix}" beginnen`;
+        if (_issue.format === "ends_with")
+          return `Ung\xFCltiger String: muss mit "${_issue.suffix}" enden`;
+        if (_issue.format === "includes")
+          return `Ung\xFCltiger String: muss "${_issue.includes}" enthalten`;
+        if (_issue.format === "regex")
+          return `Ung\xFCltiger String: muss dem Muster ${_issue.pattern} entsprechen`;
+        return `Ung\xFCltig: ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Ung\xFCltige Zahl: muss ein Vielfaches von ${issue2.divisor} sein`;
+      case "unrecognized_keys":
+        return `${issue2.keys.length > 1 ? "Unbekannte Schl\xFCssel" : "Unbekannter Schl\xFCssel"}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Ung\xFCltiger Schl\xFCssel in ${issue2.origin}`;
+      case "invalid_union":
+        return "Ung\xFCltige Eingabe";
+      case "invalid_element":
+        return `Ung\xFCltiger Wert in ${issue2.origin}`;
+      default:
+        return `Ung\xFCltige Eingabe`;
+    }
+  };
+};
+function de_default() {
+  return {
+    localeError: error6()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/en.js
+var parsedType = (data) => {
+  const t = typeof data;
+  switch (t) {
+    case "number": {
+      return Number.isNaN(data) ? "NaN" : "number";
+    }
+    case "object": {
+      if (Array.isArray(data)) {
+        return "array";
+      }
+      if (data === null) {
+        return "null";
+      }
+      if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+        return data.constructor.name;
+      }
+    }
+  }
+  return t;
+};
+var error7 = () => {
+  const Sizable = {
+    string: { unit: "characters", verb: "to have" },
+    file: { unit: "bytes", verb: "to have" },
+    array: { unit: "items", verb: "to have" },
+    set: { unit: "items", verb: "to have" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const Nouns = {
+    regex: "input",
+    email: "email address",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO datetime",
+    date: "ISO date",
+    time: "ISO time",
+    duration: "ISO duration",
+    ipv4: "IPv4 address",
+    ipv6: "IPv6 address",
+    cidrv4: "IPv4 range",
+    cidrv6: "IPv6 range",
+    base64: "base64-encoded string",
+    base64url: "base64url-encoded string",
+    json_string: "JSON string",
+    e164: "E.164 number",
+    jwt: "JWT",
+    template_literal: "input"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Invalid input: expected ${issue2.expected}, received ${parsedType(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Invalid input: expected ${stringifyPrimitive(issue2.values[0])}`;
+        return `Invalid option: expected one of ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Too big: expected ${issue2.origin ?? "value"} to have ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elements"}`;
+        return `Too big: expected ${issue2.origin ?? "value"} to be ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Too small: expected ${issue2.origin} to have ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Too small: expected ${issue2.origin} to be ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `Invalid string: must start with "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `Invalid string: must end with "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Invalid string: must include "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Invalid string: must match pattern ${_issue.pattern}`;
+        return `Invalid ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Invalid number: must be a multiple of ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Unrecognized key${issue2.keys.length > 1 ? "s" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Invalid key in ${issue2.origin}`;
+      case "invalid_union":
+        return "Invalid input";
+      case "invalid_element":
+        return `Invalid value in ${issue2.origin}`;
+      default:
+        return `Invalid input`;
+    }
+  };
+};
+function en_default2() {
+  return {
+    localeError: error7()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/eo.js
+var parsedType2 = (data) => {
+  const t = typeof data;
+  switch (t) {
+    case "number": {
+      return Number.isNaN(data) ? "NaN" : "nombro";
+    }
+    case "object": {
+      if (Array.isArray(data)) {
+        return "tabelo";
+      }
+      if (data === null) {
+        return "senvalora";
+      }
+      if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+        return data.constructor.name;
+      }
+    }
+  }
+  return t;
+};
+var error8 = () => {
+  const Sizable = {
+    string: { unit: "karaktrojn", verb: "havi" },
+    file: { unit: "bajtojn", verb: "havi" },
+    array: { unit: "elementojn", verb: "havi" },
+    set: { unit: "elementojn", verb: "havi" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const Nouns = {
+    regex: "enigo",
+    email: "retadreso",
+    url: "URL",
+    emoji: "emo\u011Dio",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO-datotempo",
+    date: "ISO-dato",
+    time: "ISO-tempo",
+    duration: "ISO-da\u016Dro",
+    ipv4: "IPv4-adreso",
+    ipv6: "IPv6-adreso",
+    cidrv4: "IPv4-rango",
+    cidrv6: "IPv6-rango",
+    base64: "64-ume kodita karaktraro",
+    base64url: "URL-64-ume kodita karaktraro",
+    json_string: "JSON-karaktraro",
+    e164: "E.164-nombro",
+    jwt: "JWT",
+    template_literal: "enigo"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Nevalida enigo: atendi\u011Dis ${issue2.expected}, ricevi\u011Dis ${parsedType2(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Nevalida enigo: atendi\u011Dis ${stringifyPrimitive(issue2.values[0])}`;
+        return `Nevalida opcio: atendi\u011Dis unu el ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Tro granda: atendi\u011Dis ke ${issue2.origin ?? "valoro"} havu ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elementojn"}`;
+        return `Tro granda: atendi\u011Dis ke ${issue2.origin ?? "valoro"} havu ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Tro malgranda: atendi\u011Dis ke ${issue2.origin} havu ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Tro malgranda: atendi\u011Dis ke ${issue2.origin} estu ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Nevalida karaktraro: devas komenci\u011Di per "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Nevalida karaktraro: devas fini\u011Di per "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Nevalida karaktraro: devas inkluzivi "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Nevalida karaktraro: devas kongrui kun la modelo ${_issue.pattern}`;
+        return `Nevalida ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Nevalida nombro: devas esti oblo de ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Nekonata${issue2.keys.length > 1 ? "j" : ""} \u015Dlosilo${issue2.keys.length > 1 ? "j" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Nevalida \u015Dlosilo en ${issue2.origin}`;
+      case "invalid_union":
+        return "Nevalida enigo";
+      case "invalid_element":
+        return `Nevalida valoro en ${issue2.origin}`;
+      default:
+        return `Nevalida enigo`;
+    }
+  };
+};
+function eo_default() {
+  return {
+    localeError: error8()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/es.js
+var error9 = () => {
+  const Sizable = {
+    string: { unit: "caracteres", verb: "tener" },
+    file: { unit: "bytes", verb: "tener" },
+    array: { unit: "elementos", verb: "tener" },
+    set: { unit: "elementos", verb: "tener" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "n\xFAmero";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "arreglo";
+        }
+        if (data === null) {
+          return "nulo";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "entrada",
+    email: "direcci\xF3n de correo electr\xF3nico",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "fecha y hora ISO",
+    date: "fecha ISO",
+    time: "hora ISO",
+    duration: "duraci\xF3n ISO",
+    ipv4: "direcci\xF3n IPv4",
+    ipv6: "direcci\xF3n IPv6",
+    cidrv4: "rango IPv4",
+    cidrv6: "rango IPv6",
+    base64: "cadena codificada en base64",
+    base64url: "URL codificada en base64",
+    json_string: "cadena JSON",
+    e164: "n\xFAmero E.164",
+    jwt: "JWT",
+    template_literal: "entrada"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Entrada inv\xE1lida: se esperaba ${issue2.expected}, recibido ${parsedType4(issue2.input)}`;
+      // return `Entrada inválida: se esperaba ${issue.expected}, recibido ${util.getParsedType(issue.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Entrada inv\xE1lida: se esperaba ${stringifyPrimitive(issue2.values[0])}`;
+        return `Opci\xF3n inv\xE1lida: se esperaba una de ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Demasiado grande: se esperaba que ${issue2.origin ?? "valor"} tuviera ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elementos"}`;
+        return `Demasiado grande: se esperaba que ${issue2.origin ?? "valor"} fuera ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Demasiado peque\xF1o: se esperaba que ${issue2.origin} tuviera ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Demasiado peque\xF1o: se esperaba que ${issue2.origin} fuera ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Cadena inv\xE1lida: debe comenzar con "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Cadena inv\xE1lida: debe terminar en "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Cadena inv\xE1lida: debe incluir "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Cadena inv\xE1lida: debe coincidir con el patr\xF3n ${_issue.pattern}`;
+        return `Inv\xE1lido ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `N\xFAmero inv\xE1lido: debe ser m\xFAltiplo de ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Llave${issue2.keys.length > 1 ? "s" : ""} desconocida${issue2.keys.length > 1 ? "s" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Llave inv\xE1lida en ${issue2.origin}`;
+      case "invalid_union":
+        return "Entrada inv\xE1lida";
+      case "invalid_element":
+        return `Valor inv\xE1lido en ${issue2.origin}`;
+      default:
+        return `Entrada inv\xE1lida`;
+    }
+  };
+};
+function es_default() {
+  return {
+    localeError: error9()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/fa.js
+var error10 = () => {
+  const Sizable = {
+    string: { unit: "\u06A9\u0627\u0631\u0627\u06A9\u062A\u0631", verb: "\u062F\u0627\u0634\u062A\u0647 \u0628\u0627\u0634\u062F" },
+    file: { unit: "\u0628\u0627\u06CC\u062A", verb: "\u062F\u0627\u0634\u062A\u0647 \u0628\u0627\u0634\u062F" },
+    array: { unit: "\u0622\u06CC\u062A\u0645", verb: "\u062F\u0627\u0634\u062A\u0647 \u0628\u0627\u0634\u062F" },
+    set: { unit: "\u0622\u06CC\u062A\u0645", verb: "\u062F\u0627\u0634\u062A\u0647 \u0628\u0627\u0634\u062F" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "\u0639\u062F\u062F";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u0622\u0631\u0627\u06CC\u0647";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0648\u0631\u0648\u062F\u06CC",
+    email: "\u0622\u062F\u0631\u0633 \u0627\u06CC\u0645\u06CC\u0644",
+    url: "URL",
+    emoji: "\u0627\u06CC\u0645\u0648\u062C\u06CC",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "\u062A\u0627\u0631\u06CC\u062E \u0648 \u0632\u0645\u0627\u0646 \u0627\u06CC\u0632\u0648",
+    date: "\u062A\u0627\u0631\u06CC\u062E \u0627\u06CC\u0632\u0648",
+    time: "\u0632\u0645\u0627\u0646 \u0627\u06CC\u0632\u0648",
+    duration: "\u0645\u062F\u062A \u0632\u0645\u0627\u0646 \u0627\u06CC\u0632\u0648",
+    ipv4: "IPv4 \u0622\u062F\u0631\u0633",
+    ipv6: "IPv6 \u0622\u062F\u0631\u0633",
+    cidrv4: "IPv4 \u062F\u0627\u0645\u0646\u0647",
+    cidrv6: "IPv6 \u062F\u0627\u0645\u0646\u0647",
+    base64: "base64-encoded \u0631\u0634\u062A\u0647",
+    base64url: "base64url-encoded \u0631\u0634\u062A\u0647",
+    json_string: "JSON \u0631\u0634\u062A\u0647",
+    e164: "E.164 \u0639\u062F\u062F",
+    jwt: "JWT",
+    template_literal: "\u0648\u0631\u0648\u062F\u06CC"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u0648\u0631\u0648\u062F\u06CC \u0646\u0627\u0645\u0639\u062A\u0628\u0631: \u0645\u06CC\u200C\u0628\u0627\u06CC\u0633\u062A ${issue2.expected} \u0645\u06CC\u200C\u0628\u0648\u062F\u060C ${parsedType4(issue2.input)} \u062F\u0631\u06CC\u0627\u0641\u062A \u0634\u062F`;
+      case "invalid_value":
+        if (issue2.values.length === 1) {
+          return `\u0648\u0631\u0648\u062F\u06CC \u0646\u0627\u0645\u0639\u062A\u0628\u0631: \u0645\u06CC\u200C\u0628\u0627\u06CC\u0633\u062A ${stringifyPrimitive(issue2.values[0])} \u0645\u06CC\u200C\u0628\u0648\u062F`;
+        }
+        return `\u06AF\u0632\u06CC\u0646\u0647 \u0646\u0627\u0645\u0639\u062A\u0628\u0631: \u0645\u06CC\u200C\u0628\u0627\u06CC\u0633\u062A \u06CC\u06A9\u06CC \u0627\u0632 ${joinValues(issue2.values, "|")} \u0645\u06CC\u200C\u0628\u0648\u062F`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u062E\u06CC\u0644\u06CC \u0628\u0632\u0631\u06AF: ${issue2.origin ?? "\u0645\u0642\u062F\u0627\u0631"} \u0628\u0627\u06CC\u062F ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "\u0639\u0646\u0635\u0631"} \u0628\u0627\u0634\u062F`;
+        }
+        return `\u062E\u06CC\u0644\u06CC \u0628\u0632\u0631\u06AF: ${issue2.origin ?? "\u0645\u0642\u062F\u0627\u0631"} \u0628\u0627\u06CC\u062F ${adj}${issue2.maximum.toString()} \u0628\u0627\u0634\u062F`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u062E\u06CC\u0644\u06CC \u06A9\u0648\u0686\u06A9: ${issue2.origin} \u0628\u0627\u06CC\u062F ${adj}${issue2.minimum.toString()} ${sizing.unit} \u0628\u0627\u0634\u062F`;
+        }
+        return `\u062E\u06CC\u0644\u06CC \u06A9\u0648\u0686\u06A9: ${issue2.origin} \u0628\u0627\u06CC\u062F ${adj}${issue2.minimum.toString()} \u0628\u0627\u0634\u062F`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `\u0631\u0634\u062A\u0647 \u0646\u0627\u0645\u0639\u062A\u0628\u0631: \u0628\u0627\u06CC\u062F \u0628\u0627 "${_issue.prefix}" \u0634\u0631\u0648\u0639 \u0634\u0648\u062F`;
+        }
+        if (_issue.format === "ends_with") {
+          return `\u0631\u0634\u062A\u0647 \u0646\u0627\u0645\u0639\u062A\u0628\u0631: \u0628\u0627\u06CC\u062F \u0628\u0627 "${_issue.suffix}" \u062A\u0645\u0627\u0645 \u0634\u0648\u062F`;
+        }
+        if (_issue.format === "includes") {
+          return `\u0631\u0634\u062A\u0647 \u0646\u0627\u0645\u0639\u062A\u0628\u0631: \u0628\u0627\u06CC\u062F \u0634\u0627\u0645\u0644 "${_issue.includes}" \u0628\u0627\u0634\u062F`;
+        }
+        if (_issue.format === "regex") {
+          return `\u0631\u0634\u062A\u0647 \u0646\u0627\u0645\u0639\u062A\u0628\u0631: \u0628\u0627\u06CC\u062F \u0628\u0627 \u0627\u0644\u06AF\u0648\u06CC ${_issue.pattern} \u0645\u0637\u0627\u0628\u0642\u062A \u062F\u0627\u0634\u062A\u0647 \u0628\u0627\u0634\u062F`;
+        }
+        return `${Nouns[_issue.format] ?? issue2.format} \u0646\u0627\u0645\u0639\u062A\u0628\u0631`;
+      }
+      case "not_multiple_of":
+        return `\u0639\u062F\u062F \u0646\u0627\u0645\u0639\u062A\u0628\u0631: \u0628\u0627\u06CC\u062F \u0645\u0636\u0631\u0628 ${issue2.divisor} \u0628\u0627\u0634\u062F`;
+      case "unrecognized_keys":
+        return `\u06A9\u0644\u06CC\u062F${issue2.keys.length > 1 ? "\u0647\u0627\u06CC" : ""} \u0646\u0627\u0634\u0646\u0627\u0633: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\u06A9\u0644\u06CC\u062F \u0646\u0627\u0634\u0646\u0627\u0633 \u062F\u0631 ${issue2.origin}`;
+      case "invalid_union":
+        return `\u0648\u0631\u0648\u062F\u06CC \u0646\u0627\u0645\u0639\u062A\u0628\u0631`;
+      case "invalid_element":
+        return `\u0645\u0642\u062F\u0627\u0631 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u062F\u0631 ${issue2.origin}`;
+      default:
+        return `\u0648\u0631\u0648\u062F\u06CC \u0646\u0627\u0645\u0639\u062A\u0628\u0631`;
+    }
+  };
+};
+function fa_default() {
+  return {
+    localeError: error10()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/fi.js
+var error11 = () => {
+  const Sizable = {
+    string: { unit: "merkki\xE4", subject: "merkkijonon" },
+    file: { unit: "tavua", subject: "tiedoston" },
+    array: { unit: "alkiota", subject: "listan" },
+    set: { unit: "alkiota", subject: "joukon" },
+    number: { unit: "", subject: "luvun" },
+    bigint: { unit: "", subject: "suuren kokonaisluvun" },
+    int: { unit: "", subject: "kokonaisluvun" },
+    date: { unit: "", subject: "p\xE4iv\xE4m\xE4\xE4r\xE4n" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "number";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "s\xE4\xE4nn\xF6llinen lauseke",
+    email: "s\xE4hk\xF6postiosoite",
+    url: "URL-osoite",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO-aikaleima",
+    date: "ISO-p\xE4iv\xE4m\xE4\xE4r\xE4",
+    time: "ISO-aika",
+    duration: "ISO-kesto",
+    ipv4: "IPv4-osoite",
+    ipv6: "IPv6-osoite",
+    cidrv4: "IPv4-alue",
+    cidrv6: "IPv6-alue",
+    base64: "base64-koodattu merkkijono",
+    base64url: "base64url-koodattu merkkijono",
+    json_string: "JSON-merkkijono",
+    e164: "E.164-luku",
+    jwt: "JWT",
+    template_literal: "templaattimerkkijono"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Virheellinen tyyppi: odotettiin ${issue2.expected}, oli ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Virheellinen sy\xF6te: t\xE4ytyy olla ${stringifyPrimitive(issue2.values[0])}`;
+        return `Virheellinen valinta: t\xE4ytyy olla yksi seuraavista: ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Liian suuri: ${sizing.subject} t\xE4ytyy olla ${adj}${issue2.maximum.toString()} ${sizing.unit}`.trim();
+        }
+        return `Liian suuri: arvon t\xE4ytyy olla ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Liian pieni: ${sizing.subject} t\xE4ytyy olla ${adj}${issue2.minimum.toString()} ${sizing.unit}`.trim();
+        }
+        return `Liian pieni: arvon t\xE4ytyy olla ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Virheellinen sy\xF6te: t\xE4ytyy alkaa "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Virheellinen sy\xF6te: t\xE4ytyy loppua "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Virheellinen sy\xF6te: t\xE4ytyy sis\xE4lt\xE4\xE4 "${_issue.includes}"`;
+        if (_issue.format === "regex") {
+          return `Virheellinen sy\xF6te: t\xE4ytyy vastata s\xE4\xE4nn\xF6llist\xE4 lauseketta ${_issue.pattern}`;
+        }
+        return `Virheellinen ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Virheellinen luku: t\xE4ytyy olla luvun ${issue2.divisor} monikerta`;
+      case "unrecognized_keys":
+        return `${issue2.keys.length > 1 ? "Tuntemattomat avaimet" : "Tuntematon avain"}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return "Virheellinen avain tietueessa";
+      case "invalid_union":
+        return "Virheellinen unioni";
+      case "invalid_element":
+        return "Virheellinen arvo joukossa";
+      default:
+        return `Virheellinen sy\xF6te`;
+    }
+  };
+};
+function fi_default() {
+  return {
+    localeError: error11()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/fr.js
+var error12 = () => {
+  const Sizable = {
+    string: { unit: "caract\xE8res", verb: "avoir" },
+    file: { unit: "octets", verb: "avoir" },
+    array: { unit: "\xE9l\xE9ments", verb: "avoir" },
+    set: { unit: "\xE9l\xE9ments", verb: "avoir" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "nombre";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "tableau";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "entr\xE9e",
+    email: "adresse e-mail",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "date et heure ISO",
+    date: "date ISO",
+    time: "heure ISO",
+    duration: "dur\xE9e ISO",
+    ipv4: "adresse IPv4",
+    ipv6: "adresse IPv6",
+    cidrv4: "plage IPv4",
+    cidrv6: "plage IPv6",
+    base64: "cha\xEEne encod\xE9e en base64",
+    base64url: "cha\xEEne encod\xE9e en base64url",
+    json_string: "cha\xEEne JSON",
+    e164: "num\xE9ro E.164",
+    jwt: "JWT",
+    template_literal: "entr\xE9e"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Entr\xE9e invalide : ${issue2.expected} attendu, ${parsedType4(issue2.input)} re\xE7u`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Entr\xE9e invalide : ${stringifyPrimitive(issue2.values[0])} attendu`;
+        return `Option invalide : une valeur parmi ${joinValues(issue2.values, "|")} attendue`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Trop grand : ${issue2.origin ?? "valeur"} doit ${sizing.verb} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "\xE9l\xE9ment(s)"}`;
+        return `Trop grand : ${issue2.origin ?? "valeur"} doit \xEAtre ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Trop petit : ${issue2.origin} doit ${sizing.verb} ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Trop petit : ${issue2.origin} doit \xEAtre ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Cha\xEEne invalide : doit commencer par "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Cha\xEEne invalide : doit se terminer par "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Cha\xEEne invalide : doit inclure "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Cha\xEEne invalide : doit correspondre au mod\xE8le ${_issue.pattern}`;
+        return `${Nouns[_issue.format] ?? issue2.format} invalide`;
+      }
+      case "not_multiple_of":
+        return `Nombre invalide : doit \xEAtre un multiple de ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Cl\xE9${issue2.keys.length > 1 ? "s" : ""} non reconnue${issue2.keys.length > 1 ? "s" : ""} : ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Cl\xE9 invalide dans ${issue2.origin}`;
+      case "invalid_union":
+        return "Entr\xE9e invalide";
+      case "invalid_element":
+        return `Valeur invalide dans ${issue2.origin}`;
+      default:
+        return `Entr\xE9e invalide`;
+    }
+  };
+};
+function fr_default() {
+  return {
+    localeError: error12()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/fr-CA.js
+var error13 = () => {
+  const Sizable = {
+    string: { unit: "caract\xE8res", verb: "avoir" },
+    file: { unit: "octets", verb: "avoir" },
+    array: { unit: "\xE9l\xE9ments", verb: "avoir" },
+    set: { unit: "\xE9l\xE9ments", verb: "avoir" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "number";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "entr\xE9e",
+    email: "adresse courriel",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "date-heure ISO",
+    date: "date ISO",
+    time: "heure ISO",
+    duration: "dur\xE9e ISO",
+    ipv4: "adresse IPv4",
+    ipv6: "adresse IPv6",
+    cidrv4: "plage IPv4",
+    cidrv6: "plage IPv6",
+    base64: "cha\xEEne encod\xE9e en base64",
+    base64url: "cha\xEEne encod\xE9e en base64url",
+    json_string: "cha\xEEne JSON",
+    e164: "num\xE9ro E.164",
+    jwt: "JWT",
+    template_literal: "entr\xE9e"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Entr\xE9e invalide : attendu ${issue2.expected}, re\xE7u ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Entr\xE9e invalide : attendu ${stringifyPrimitive(issue2.values[0])}`;
+        return `Option invalide : attendu l'une des valeurs suivantes ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "\u2264" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Trop grand : attendu que ${issue2.origin ?? "la valeur"} ait ${adj}${issue2.maximum.toString()} ${sizing.unit}`;
+        return `Trop grand : attendu que ${issue2.origin ?? "la valeur"} soit ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? "\u2265" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Trop petit : attendu que ${issue2.origin} ait ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Trop petit : attendu que ${issue2.origin} soit ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `Cha\xEEne invalide : doit commencer par "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `Cha\xEEne invalide : doit se terminer par "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Cha\xEEne invalide : doit inclure "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Cha\xEEne invalide : doit correspondre au motif ${_issue.pattern}`;
+        return `${Nouns[_issue.format] ?? issue2.format} invalide`;
+      }
+      case "not_multiple_of":
+        return `Nombre invalide : doit \xEAtre un multiple de ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Cl\xE9${issue2.keys.length > 1 ? "s" : ""} non reconnue${issue2.keys.length > 1 ? "s" : ""} : ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Cl\xE9 invalide dans ${issue2.origin}`;
+      case "invalid_union":
+        return "Entr\xE9e invalide";
+      case "invalid_element":
+        return `Valeur invalide dans ${issue2.origin}`;
+      default:
+        return `Entr\xE9e invalide`;
+    }
+  };
+};
+function fr_CA_default() {
+  return {
+    localeError: error13()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/he.js
+var error14 = () => {
+  const Sizable = {
+    string: { unit: "\u05D0\u05D5\u05EA\u05D9\u05D5\u05EA", verb: "\u05DC\u05DB\u05DC\u05D5\u05DC" },
+    file: { unit: "\u05D1\u05D9\u05D9\u05D8\u05D9\u05DD", verb: "\u05DC\u05DB\u05DC\u05D5\u05DC" },
+    array: { unit: "\u05E4\u05E8\u05D9\u05D8\u05D9\u05DD", verb: "\u05DC\u05DB\u05DC\u05D5\u05DC" },
+    set: { unit: "\u05E4\u05E8\u05D9\u05D8\u05D9\u05DD", verb: "\u05DC\u05DB\u05DC\u05D5\u05DC" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "number";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u05E7\u05DC\u05D8",
+    email: "\u05DB\u05EA\u05D5\u05D1\u05EA \u05D0\u05D9\u05DE\u05D9\u05D9\u05DC",
+    url: "\u05DB\u05EA\u05D5\u05D1\u05EA \u05E8\u05E9\u05EA",
+    emoji: "\u05D0\u05D9\u05DE\u05D5\u05D2'\u05D9",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "\u05EA\u05D0\u05E8\u05D9\u05DA \u05D5\u05D6\u05DE\u05DF ISO",
+    date: "\u05EA\u05D0\u05E8\u05D9\u05DA ISO",
+    time: "\u05D6\u05DE\u05DF ISO",
+    duration: "\u05DE\u05E9\u05DA \u05D6\u05DE\u05DF ISO",
+    ipv4: "\u05DB\u05EA\u05D5\u05D1\u05EA IPv4",
+    ipv6: "\u05DB\u05EA\u05D5\u05D1\u05EA IPv6",
+    cidrv4: "\u05D8\u05D5\u05D5\u05D7 IPv4",
+    cidrv6: "\u05D8\u05D5\u05D5\u05D7 IPv6",
+    base64: "\u05DE\u05D7\u05E8\u05D5\u05D6\u05EA \u05D1\u05D1\u05E1\u05D9\u05E1 64",
+    base64url: "\u05DE\u05D7\u05E8\u05D5\u05D6\u05EA \u05D1\u05D1\u05E1\u05D9\u05E1 64 \u05DC\u05DB\u05EA\u05D5\u05D1\u05D5\u05EA \u05E8\u05E9\u05EA",
+    json_string: "\u05DE\u05D7\u05E8\u05D5\u05D6\u05EA JSON",
+    e164: "\u05DE\u05E1\u05E4\u05E8 E.164",
+    jwt: "JWT",
+    template_literal: "\u05E7\u05DC\u05D8"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u05E7\u05DC\u05D8 \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF: \u05E6\u05E8\u05D9\u05DA ${issue2.expected}, \u05D4\u05EA\u05E7\u05D1\u05DC ${parsedType4(issue2.input)}`;
+      // return `Invalid input: expected ${issue.expected}, received ${util.getParsedType(issue.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u05E7\u05DC\u05D8 \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF: \u05E6\u05E8\u05D9\u05DA ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u05E7\u05DC\u05D8 \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF: \u05E6\u05E8\u05D9\u05DA \u05D0\u05D7\u05EA \u05DE\u05D4\u05D0\u05E4\u05E9\u05E8\u05D5\u05D9\u05D5\u05EA  ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\u05D2\u05D3\u05D5\u05DC \u05DE\u05D3\u05D9: ${issue2.origin ?? "value"} \u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05D9\u05D5\u05EA ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elements"}`;
+        return `\u05D2\u05D3\u05D5\u05DC \u05DE\u05D3\u05D9: ${issue2.origin ?? "value"} \u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05D9\u05D5\u05EA ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u05E7\u05D8\u05DF \u05DE\u05D3\u05D9: ${issue2.origin} \u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05D9\u05D5\u05EA ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `\u05E7\u05D8\u05DF \u05DE\u05D3\u05D9: ${issue2.origin} \u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05D9\u05D5\u05EA ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `\u05DE\u05D7\u05E8\u05D5\u05D6\u05EA \u05DC\u05D0 \u05EA\u05E7\u05D9\u05E0\u05D4: \u05D7\u05D9\u05D9\u05D1\u05EA \u05DC\u05D4\u05EA\u05D7\u05D9\u05DC \u05D1"${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `\u05DE\u05D7\u05E8\u05D5\u05D6\u05EA \u05DC\u05D0 \u05EA\u05E7\u05D9\u05E0\u05D4: \u05D7\u05D9\u05D9\u05D1\u05EA \u05DC\u05D4\u05E1\u05EA\u05D9\u05D9\u05DD \u05D1 "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `\u05DE\u05D7\u05E8\u05D5\u05D6\u05EA \u05DC\u05D0 \u05EA\u05E7\u05D9\u05E0\u05D4: \u05D7\u05D9\u05D9\u05D1\u05EA \u05DC\u05DB\u05DC\u05D5\u05DC "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u05DE\u05D7\u05E8\u05D5\u05D6\u05EA \u05DC\u05D0 \u05EA\u05E7\u05D9\u05E0\u05D4: \u05D7\u05D9\u05D9\u05D1\u05EA \u05DC\u05D4\u05EA\u05D0\u05D9\u05DD \u05DC\u05EA\u05D1\u05E0\u05D9\u05EA ${_issue.pattern}`;
+        return `${Nouns[_issue.format] ?? issue2.format} \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF`;
+      }
+      case "not_multiple_of":
+        return `\u05DE\u05E1\u05E4\u05E8 \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF: \u05D7\u05D9\u05D9\u05D1 \u05DC\u05D4\u05D9\u05D5\u05EA \u05DE\u05DB\u05E4\u05DC\u05D4 \u05E9\u05DC ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `\u05DE\u05E4\u05EA\u05D7${issue2.keys.length > 1 ? "\u05D5\u05EA" : ""} \u05DC\u05D0 \u05DE\u05D6\u05D5\u05D4${issue2.keys.length > 1 ? "\u05D9\u05DD" : "\u05D4"}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\u05DE\u05E4\u05EA\u05D7 \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF \u05D1${issue2.origin}`;
+      case "invalid_union":
+        return "\u05E7\u05DC\u05D8 \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF";
+      case "invalid_element":
+        return `\u05E2\u05E8\u05DA \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF \u05D1${issue2.origin}`;
+      default:
+        return `\u05E7\u05DC\u05D8 \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF`;
+    }
+  };
+};
+function he_default() {
+  return {
+    localeError: error14()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/hu.js
+var error15 = () => {
+  const Sizable = {
+    string: { unit: "karakter", verb: "legyen" },
+    file: { unit: "byte", verb: "legyen" },
+    array: { unit: "elem", verb: "legyen" },
+    set: { unit: "elem", verb: "legyen" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "sz\xE1m";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "t\xF6mb";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "bemenet",
+    email: "email c\xEDm",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO id\u0151b\xE9lyeg",
+    date: "ISO d\xE1tum",
+    time: "ISO id\u0151",
+    duration: "ISO id\u0151intervallum",
+    ipv4: "IPv4 c\xEDm",
+    ipv6: "IPv6 c\xEDm",
+    cidrv4: "IPv4 tartom\xE1ny",
+    cidrv6: "IPv6 tartom\xE1ny",
+    base64: "base64-k\xF3dolt string",
+    base64url: "base64url-k\xF3dolt string",
+    json_string: "JSON string",
+    e164: "E.164 sz\xE1m",
+    jwt: "JWT",
+    template_literal: "bemenet"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\xC9rv\xE9nytelen bemenet: a v\xE1rt \xE9rt\xE9k ${issue2.expected}, a kapott \xE9rt\xE9k ${parsedType4(issue2.input)}`;
+      // return `Invalid input: expected ${issue.expected}, received ${util.getParsedType(issue.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\xC9rv\xE9nytelen bemenet: a v\xE1rt \xE9rt\xE9k ${stringifyPrimitive(issue2.values[0])}`;
+        return `\xC9rv\xE9nytelen opci\xF3: valamelyik \xE9rt\xE9k v\xE1rt ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `T\xFAl nagy: ${issue2.origin ?? "\xE9rt\xE9k"} m\xE9rete t\xFAl nagy ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elem"}`;
+        return `T\xFAl nagy: a bemeneti \xE9rt\xE9k ${issue2.origin ?? "\xE9rt\xE9k"} t\xFAl nagy: ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `T\xFAl kicsi: a bemeneti \xE9rt\xE9k ${issue2.origin} m\xE9rete t\xFAl kicsi ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `T\xFAl kicsi: a bemeneti \xE9rt\xE9k ${issue2.origin} t\xFAl kicsi ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `\xC9rv\xE9nytelen string: "${_issue.prefix}" \xE9rt\xE9kkel kell kezd\u0151dnie`;
+        if (_issue.format === "ends_with")
+          return `\xC9rv\xE9nytelen string: "${_issue.suffix}" \xE9rt\xE9kkel kell v\xE9gz\u0151dnie`;
+        if (_issue.format === "includes")
+          return `\xC9rv\xE9nytelen string: "${_issue.includes}" \xE9rt\xE9ket kell tartalmaznia`;
+        if (_issue.format === "regex")
+          return `\xC9rv\xE9nytelen string: ${_issue.pattern} mint\xE1nak kell megfelelnie`;
+        return `\xC9rv\xE9nytelen ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\xC9rv\xE9nytelen sz\xE1m: ${issue2.divisor} t\xF6bbsz\xF6r\xF6s\xE9nek kell lennie`;
+      case "unrecognized_keys":
+        return `Ismeretlen kulcs${issue2.keys.length > 1 ? "s" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\xC9rv\xE9nytelen kulcs ${issue2.origin}`;
+      case "invalid_union":
+        return "\xC9rv\xE9nytelen bemenet";
+      case "invalid_element":
+        return `\xC9rv\xE9nytelen \xE9rt\xE9k: ${issue2.origin}`;
+      default:
+        return `\xC9rv\xE9nytelen bemenet`;
+    }
+  };
+};
+function hu_default() {
+  return {
+    localeError: error15()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/id.js
+var error16 = () => {
+  const Sizable = {
+    string: { unit: "karakter", verb: "memiliki" },
+    file: { unit: "byte", verb: "memiliki" },
+    array: { unit: "item", verb: "memiliki" },
+    set: { unit: "item", verb: "memiliki" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "number";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "input",
+    email: "alamat email",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "tanggal dan waktu format ISO",
+    date: "tanggal format ISO",
+    time: "jam format ISO",
+    duration: "durasi format ISO",
+    ipv4: "alamat IPv4",
+    ipv6: "alamat IPv6",
+    cidrv4: "rentang alamat IPv4",
+    cidrv6: "rentang alamat IPv6",
+    base64: "string dengan enkode base64",
+    base64url: "string dengan enkode base64url",
+    json_string: "string JSON",
+    e164: "angka E.164",
+    jwt: "JWT",
+    template_literal: "input"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Input tidak valid: diharapkan ${issue2.expected}, diterima ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Input tidak valid: diharapkan ${stringifyPrimitive(issue2.values[0])}`;
+        return `Pilihan tidak valid: diharapkan salah satu dari ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Terlalu besar: diharapkan ${issue2.origin ?? "value"} memiliki ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elemen"}`;
+        return `Terlalu besar: diharapkan ${issue2.origin ?? "value"} menjadi ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Terlalu kecil: diharapkan ${issue2.origin} memiliki ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Terlalu kecil: diharapkan ${issue2.origin} menjadi ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `String tidak valid: harus dimulai dengan "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `String tidak valid: harus berakhir dengan "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `String tidak valid: harus menyertakan "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `String tidak valid: harus sesuai pola ${_issue.pattern}`;
+        return `${Nouns[_issue.format] ?? issue2.format} tidak valid`;
+      }
+      case "not_multiple_of":
+        return `Angka tidak valid: harus kelipatan dari ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Kunci tidak dikenali ${issue2.keys.length > 1 ? "s" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Kunci tidak valid di ${issue2.origin}`;
+      case "invalid_union":
+        return "Input tidak valid";
+      case "invalid_element":
+        return `Nilai tidak valid di ${issue2.origin}`;
+      default:
+        return `Input tidak valid`;
+    }
+  };
+};
+function id_default() {
+  return {
+    localeError: error16()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/it.js
+var error17 = () => {
+  const Sizable = {
+    string: { unit: "caratteri", verb: "avere" },
+    file: { unit: "byte", verb: "avere" },
+    array: { unit: "elementi", verb: "avere" },
+    set: { unit: "elementi", verb: "avere" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "numero";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "vettore";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "input",
+    email: "indirizzo email",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "data e ora ISO",
+    date: "data ISO",
+    time: "ora ISO",
+    duration: "durata ISO",
+    ipv4: "indirizzo IPv4",
+    ipv6: "indirizzo IPv6",
+    cidrv4: "intervallo IPv4",
+    cidrv6: "intervallo IPv6",
+    base64: "stringa codificata in base64",
+    base64url: "URL codificata in base64",
+    json_string: "stringa JSON",
+    e164: "numero E.164",
+    jwt: "JWT",
+    template_literal: "input"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Input non valido: atteso ${issue2.expected}, ricevuto ${parsedType4(issue2.input)}`;
+      // return `Input non valido: atteso ${issue.expected}, ricevuto ${util.getParsedType(issue.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Input non valido: atteso ${stringifyPrimitive(issue2.values[0])}`;
+        return `Opzione non valida: atteso uno tra ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Troppo grande: ${issue2.origin ?? "valore"} deve avere ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elementi"}`;
+        return `Troppo grande: ${issue2.origin ?? "valore"} deve essere ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Troppo piccolo: ${issue2.origin} deve avere ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Troppo piccolo: ${issue2.origin} deve essere ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Stringa non valida: deve iniziare con "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Stringa non valida: deve terminare con "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Stringa non valida: deve includere "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Stringa non valida: deve corrispondere al pattern ${_issue.pattern}`;
+        return `Invalid ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Numero non valido: deve essere un multiplo di ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Chiav${issue2.keys.length > 1 ? "i" : "e"} non riconosciut${issue2.keys.length > 1 ? "e" : "a"}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Chiave non valida in ${issue2.origin}`;
+      case "invalid_union":
+        return "Input non valido";
+      case "invalid_element":
+        return `Valore non valido in ${issue2.origin}`;
+      default:
+        return `Input non valido`;
+    }
+  };
+};
+function it_default() {
+  return {
+    localeError: error17()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ja.js
+var error18 = () => {
+  const Sizable = {
+    string: { unit: "\u6587\u5B57", verb: "\u3067\u3042\u308B" },
+    file: { unit: "\u30D0\u30A4\u30C8", verb: "\u3067\u3042\u308B" },
+    array: { unit: "\u8981\u7D20", verb: "\u3067\u3042\u308B" },
+    set: { unit: "\u8981\u7D20", verb: "\u3067\u3042\u308B" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "\u6570\u5024";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u914D\u5217";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u5165\u529B\u5024",
+    email: "\u30E1\u30FC\u30EB\u30A2\u30C9\u30EC\u30B9",
+    url: "URL",
+    emoji: "\u7D75\u6587\u5B57",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO\u65E5\u6642",
+    date: "ISO\u65E5\u4ED8",
+    time: "ISO\u6642\u523B",
+    duration: "ISO\u671F\u9593",
+    ipv4: "IPv4\u30A2\u30C9\u30EC\u30B9",
+    ipv6: "IPv6\u30A2\u30C9\u30EC\u30B9",
+    cidrv4: "IPv4\u7BC4\u56F2",
+    cidrv6: "IPv6\u7BC4\u56F2",
+    base64: "base64\u30A8\u30F3\u30B3\u30FC\u30C9\u6587\u5B57\u5217",
+    base64url: "base64url\u30A8\u30F3\u30B3\u30FC\u30C9\u6587\u5B57\u5217",
+    json_string: "JSON\u6587\u5B57\u5217",
+    e164: "E.164\u756A\u53F7",
+    jwt: "JWT",
+    template_literal: "\u5165\u529B\u5024"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u7121\u52B9\u306A\u5165\u529B: ${issue2.expected}\u304C\u671F\u5F85\u3055\u308C\u307E\u3057\u305F\u304C\u3001${parsedType4(issue2.input)}\u304C\u5165\u529B\u3055\u308C\u307E\u3057\u305F`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u7121\u52B9\u306A\u5165\u529B: ${stringifyPrimitive(issue2.values[0])}\u304C\u671F\u5F85\u3055\u308C\u307E\u3057\u305F`;
+        return `\u7121\u52B9\u306A\u9078\u629E: ${joinValues(issue2.values, "\u3001")}\u306E\u3044\u305A\u308C\u304B\u3067\u3042\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "\u4EE5\u4E0B\u3067\u3042\u308B" : "\u3088\u308A\u5C0F\u3055\u3044";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\u5927\u304D\u3059\u304E\u308B\u5024: ${issue2.origin ?? "\u5024"}\u306F${issue2.maximum.toString()}${sizing.unit ?? "\u8981\u7D20"}${adj}\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059`;
+        return `\u5927\u304D\u3059\u304E\u308B\u5024: ${issue2.origin ?? "\u5024"}\u306F${issue2.maximum.toString()}${adj}\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? "\u4EE5\u4E0A\u3067\u3042\u308B" : "\u3088\u308A\u5927\u304D\u3044";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\u5C0F\u3055\u3059\u304E\u308B\u5024: ${issue2.origin}\u306F${issue2.minimum.toString()}${sizing.unit}${adj}\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059`;
+        return `\u5C0F\u3055\u3059\u304E\u308B\u5024: ${issue2.origin}\u306F${issue2.minimum.toString()}${adj}\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `\u7121\u52B9\u306A\u6587\u5B57\u5217: "${_issue.prefix}"\u3067\u59CB\u307E\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059`;
+        if (_issue.format === "ends_with")
+          return `\u7121\u52B9\u306A\u6587\u5B57\u5217: "${_issue.suffix}"\u3067\u7D42\u308F\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059`;
+        if (_issue.format === "includes")
+          return `\u7121\u52B9\u306A\u6587\u5B57\u5217: "${_issue.includes}"\u3092\u542B\u3080\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059`;
+        if (_issue.format === "regex")
+          return `\u7121\u52B9\u306A\u6587\u5B57\u5217: \u30D1\u30BF\u30FC\u30F3${_issue.pattern}\u306B\u4E00\u81F4\u3059\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059`;
+        return `\u7121\u52B9\u306A${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u7121\u52B9\u306A\u6570\u5024: ${issue2.divisor}\u306E\u500D\u6570\u3067\u3042\u308B\u5FC5\u8981\u304C\u3042\u308A\u307E\u3059`;
+      case "unrecognized_keys":
+        return `\u8A8D\u8B58\u3055\u308C\u3066\u3044\u306A\u3044\u30AD\u30FC${issue2.keys.length > 1 ? "\u7FA4" : ""}: ${joinValues(issue2.keys, "\u3001")}`;
+      case "invalid_key":
+        return `${issue2.origin}\u5185\u306E\u7121\u52B9\u306A\u30AD\u30FC`;
+      case "invalid_union":
+        return "\u7121\u52B9\u306A\u5165\u529B";
+      case "invalid_element":
+        return `${issue2.origin}\u5185\u306E\u7121\u52B9\u306A\u5024`;
+      default:
+        return `\u7121\u52B9\u306A\u5165\u529B`;
+    }
+  };
+};
+function ja_default() {
+  return {
+    localeError: error18()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/kh.js
+var error19 = () => {
+  const Sizable = {
+    string: { unit: "\u178F\u17BD\u17A2\u1780\u17D2\u179F\u179A", verb: "\u1782\u17BD\u179A\u1798\u17B6\u1793" },
+    file: { unit: "\u1794\u17C3", verb: "\u1782\u17BD\u179A\u1798\u17B6\u1793" },
+    array: { unit: "\u1792\u17B6\u178F\u17BB", verb: "\u1782\u17BD\u179A\u1798\u17B6\u1793" },
+    set: { unit: "\u1792\u17B6\u178F\u17BB", verb: "\u1782\u17BD\u179A\u1798\u17B6\u1793" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "\u1798\u17B7\u1793\u1798\u17C2\u1793\u1787\u17B6\u179B\u17C1\u1781 (NaN)" : "\u179B\u17C1\u1781";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u17A2\u17B6\u179A\u17C1 (Array)";
+        }
+        if (data === null) {
+          return "\u1782\u17D2\u1798\u17B6\u1793\u178F\u1798\u17D2\u179B\u17C3 (null)";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u1791\u17B7\u1793\u17D2\u1793\u1793\u17D0\u1799\u1794\u1789\u17D2\u1785\u17BC\u179B",
+    email: "\u17A2\u17B6\u179F\u1799\u178A\u17D2\u178B\u17B6\u1793\u17A2\u17CA\u17B8\u1798\u17C2\u179B",
+    url: "URL",
+    emoji: "\u179F\u1789\u17D2\u1789\u17B6\u17A2\u17B6\u179A\u1798\u17D2\u1798\u178E\u17CD",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "\u1780\u17B6\u179B\u1794\u179A\u17B7\u1785\u17D2\u1786\u17C1\u1791 \u1793\u17B7\u1784\u1798\u17C9\u17C4\u1784 ISO",
+    date: "\u1780\u17B6\u179B\u1794\u179A\u17B7\u1785\u17D2\u1786\u17C1\u1791 ISO",
+    time: "\u1798\u17C9\u17C4\u1784 ISO",
+    duration: "\u179A\u1799\u17C8\u1796\u17C1\u179B ISO",
+    ipv4: "\u17A2\u17B6\u179F\u1799\u178A\u17D2\u178B\u17B6\u1793 IPv4",
+    ipv6: "\u17A2\u17B6\u179F\u1799\u178A\u17D2\u178B\u17B6\u1793 IPv6",
+    cidrv4: "\u178A\u17C2\u1793\u17A2\u17B6\u179F\u1799\u178A\u17D2\u178B\u17B6\u1793 IPv4",
+    cidrv6: "\u178A\u17C2\u1793\u17A2\u17B6\u179F\u1799\u178A\u17D2\u178B\u17B6\u1793 IPv6",
+    base64: "\u1781\u17D2\u179F\u17C2\u17A2\u1780\u17D2\u179F\u179A\u17A2\u17CA\u17B7\u1780\u17BC\u178A base64",
+    base64url: "\u1781\u17D2\u179F\u17C2\u17A2\u1780\u17D2\u179F\u179A\u17A2\u17CA\u17B7\u1780\u17BC\u178A base64url",
+    json_string: "\u1781\u17D2\u179F\u17C2\u17A2\u1780\u17D2\u179F\u179A JSON",
+    e164: "\u179B\u17C1\u1781 E.164",
+    jwt: "JWT",
+    template_literal: "\u1791\u17B7\u1793\u17D2\u1793\u1793\u17D0\u1799\u1794\u1789\u17D2\u1785\u17BC\u179B"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u1791\u17B7\u1793\u17D2\u1793\u1793\u17D0\u1799\u1794\u1789\u17D2\u1785\u17BC\u179B\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u1780\u17B6\u179A ${issue2.expected} \u1794\u17C9\u17BB\u1793\u17D2\u178F\u17C2\u1791\u1791\u17BD\u179B\u1794\u17B6\u1793 ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u1791\u17B7\u1793\u17D2\u1793\u1793\u17D0\u1799\u1794\u1789\u17D2\u1785\u17BC\u179B\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u1780\u17B6\u179A ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u1787\u1798\u17D2\u179A\u17BE\u179F\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u1787\u17B6\u1798\u17BD\u1799\u1780\u17D2\u1793\u17BB\u1784\u1785\u17C6\u178E\u17C4\u1798 ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\u1792\u17C6\u1796\u17C1\u1780\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u1780\u17B6\u179A ${issue2.origin ?? "\u178F\u1798\u17D2\u179B\u17C3"} ${adj} ${issue2.maximum.toString()} ${sizing.unit ?? "\u1792\u17B6\u178F\u17BB"}`;
+        return `\u1792\u17C6\u1796\u17C1\u1780\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u1780\u17B6\u179A ${issue2.origin ?? "\u178F\u1798\u17D2\u179B\u17C3"} ${adj} ${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u178F\u17BC\u1785\u1796\u17C1\u1780\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u1780\u17B6\u179A ${issue2.origin} ${adj} ${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `\u178F\u17BC\u1785\u1796\u17C1\u1780\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u1780\u17B6\u179A ${issue2.origin} ${adj} ${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `\u1781\u17D2\u179F\u17C2\u17A2\u1780\u17D2\u179F\u179A\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u1785\u17B6\u1794\u17CB\u1795\u17D2\u178F\u17BE\u1798\u178A\u17C4\u1799 "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `\u1781\u17D2\u179F\u17C2\u17A2\u1780\u17D2\u179F\u179A\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u1794\u1789\u17D2\u1785\u1794\u17CB\u178A\u17C4\u1799 "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `\u1781\u17D2\u179F\u17C2\u17A2\u1780\u17D2\u179F\u179A\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u1798\u17B6\u1793 "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u1781\u17D2\u179F\u17C2\u17A2\u1780\u17D2\u179F\u179A\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u178F\u17C2\u1795\u17D2\u1782\u17BC\u1795\u17D2\u1782\u1784\u1793\u17B9\u1784\u1791\u1798\u17D2\u179A\u1784\u17CB\u178A\u17C2\u179B\u1794\u17B6\u1793\u1780\u17C6\u178E\u178F\u17CB ${_issue.pattern}`;
+        return `\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u17D6 ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u179B\u17C1\u1781\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u17D6 \u178F\u17D2\u179A\u17BC\u179C\u178F\u17C2\u1787\u17B6\u1796\u17A0\u17BB\u1782\u17BB\u178E\u1793\u17C3 ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `\u179A\u1780\u1783\u17BE\u1789\u179F\u17C4\u1798\u17B7\u1793\u179F\u17D2\u1782\u17B6\u179B\u17CB\u17D6 ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\u179F\u17C4\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u1793\u17C5\u1780\u17D2\u1793\u17BB\u1784 ${issue2.origin}`;
+      case "invalid_union":
+        return `\u1791\u17B7\u1793\u17D2\u1793\u1793\u17D0\u1799\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C`;
+      case "invalid_element":
+        return `\u1791\u17B7\u1793\u17D2\u1793\u1793\u17D0\u1799\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C\u1793\u17C5\u1780\u17D2\u1793\u17BB\u1784 ${issue2.origin}`;
+      default:
+        return `\u1791\u17B7\u1793\u17D2\u1793\u1793\u17D0\u1799\u1798\u17B7\u1793\u178F\u17D2\u179A\u17B9\u1798\u178F\u17D2\u179A\u17BC\u179C`;
+    }
+  };
+};
+function kh_default() {
+  return {
+    localeError: error19()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ko.js
+var error20 = () => {
+  const Sizable = {
+    string: { unit: "\uBB38\uC790", verb: "to have" },
+    file: { unit: "\uBC14\uC774\uD2B8", verb: "to have" },
+    array: { unit: "\uAC1C", verb: "to have" },
+    set: { unit: "\uAC1C", verb: "to have" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "number";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\uC785\uB825",
+    email: "\uC774\uBA54\uC77C \uC8FC\uC18C",
+    url: "URL",
+    emoji: "\uC774\uBAA8\uC9C0",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO \uB0A0\uC9DC\uC2DC\uAC04",
+    date: "ISO \uB0A0\uC9DC",
+    time: "ISO \uC2DC\uAC04",
+    duration: "ISO \uAE30\uAC04",
+    ipv4: "IPv4 \uC8FC\uC18C",
+    ipv6: "IPv6 \uC8FC\uC18C",
+    cidrv4: "IPv4 \uBC94\uC704",
+    cidrv6: "IPv6 \uBC94\uC704",
+    base64: "base64 \uC778\uCF54\uB529 \uBB38\uC790\uC5F4",
+    base64url: "base64url \uC778\uCF54\uB529 \uBB38\uC790\uC5F4",
+    json_string: "JSON \uBB38\uC790\uC5F4",
+    e164: "E.164 \uBC88\uD638",
+    jwt: "JWT",
+    template_literal: "\uC785\uB825"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\uC798\uBABB\uB41C \uC785\uB825: \uC608\uC0C1 \uD0C0\uC785\uC740 ${issue2.expected}, \uBC1B\uC740 \uD0C0\uC785\uC740 ${parsedType4(issue2.input)}\uC785\uB2C8\uB2E4`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\uC798\uBABB\uB41C \uC785\uB825: \uAC12\uC740 ${stringifyPrimitive(issue2.values[0])} \uC774\uC5B4\uC57C \uD569\uB2C8\uB2E4`;
+        return `\uC798\uBABB\uB41C \uC635\uC158: ${joinValues(issue2.values, "\uB610\uB294 ")} \uC911 \uD558\uB098\uC5EC\uC57C \uD569\uB2C8\uB2E4`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "\uC774\uD558" : "\uBBF8\uB9CC";
+        const suffix = adj === "\uBBF8\uB9CC" ? "\uC774\uC5B4\uC57C \uD569\uB2C8\uB2E4" : "\uC5EC\uC57C \uD569\uB2C8\uB2E4";
+        const sizing = getSizing(issue2.origin);
+        const unit = sizing?.unit ?? "\uC694\uC18C";
+        if (sizing)
+          return `${issue2.origin ?? "\uAC12"}\uC774 \uB108\uBB34 \uD07D\uB2C8\uB2E4: ${issue2.maximum.toString()}${unit} ${adj}${suffix}`;
+        return `${issue2.origin ?? "\uAC12"}\uC774 \uB108\uBB34 \uD07D\uB2C8\uB2E4: ${issue2.maximum.toString()} ${adj}${suffix}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? "\uC774\uC0C1" : "\uCD08\uACFC";
+        const suffix = adj === "\uC774\uC0C1" ? "\uC774\uC5B4\uC57C \uD569\uB2C8\uB2E4" : "\uC5EC\uC57C \uD569\uB2C8\uB2E4";
+        const sizing = getSizing(issue2.origin);
+        const unit = sizing?.unit ?? "\uC694\uC18C";
+        if (sizing) {
+          return `${issue2.origin ?? "\uAC12"}\uC774 \uB108\uBB34 \uC791\uC2B5\uB2C8\uB2E4: ${issue2.minimum.toString()}${unit} ${adj}${suffix}`;
+        }
+        return `${issue2.origin ?? "\uAC12"}\uC774 \uB108\uBB34 \uC791\uC2B5\uB2C8\uB2E4: ${issue2.minimum.toString()} ${adj}${suffix}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `\uC798\uBABB\uB41C \uBB38\uC790\uC5F4: "${_issue.prefix}"(\uC73C)\uB85C \uC2DC\uC791\uD574\uC57C \uD569\uB2C8\uB2E4`;
+        }
+        if (_issue.format === "ends_with")
+          return `\uC798\uBABB\uB41C \uBB38\uC790\uC5F4: "${_issue.suffix}"(\uC73C)\uB85C \uB05D\uB098\uC57C \uD569\uB2C8\uB2E4`;
+        if (_issue.format === "includes")
+          return `\uC798\uBABB\uB41C \uBB38\uC790\uC5F4: "${_issue.includes}"\uC744(\uB97C) \uD3EC\uD568\uD574\uC57C \uD569\uB2C8\uB2E4`;
+        if (_issue.format === "regex")
+          return `\uC798\uBABB\uB41C \uBB38\uC790\uC5F4: \uC815\uADDC\uC2DD ${_issue.pattern} \uD328\uD134\uACFC \uC77C\uCE58\uD574\uC57C \uD569\uB2C8\uB2E4`;
+        return `\uC798\uBABB\uB41C ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\uC798\uBABB\uB41C \uC22B\uC790: ${issue2.divisor}\uC758 \uBC30\uC218\uC5EC\uC57C \uD569\uB2C8\uB2E4`;
+      case "unrecognized_keys":
+        return `\uC778\uC2DD\uD560 \uC218 \uC5C6\uB294 \uD0A4: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\uC798\uBABB\uB41C \uD0A4: ${issue2.origin}`;
+      case "invalid_union":
+        return `\uC798\uBABB\uB41C \uC785\uB825`;
+      case "invalid_element":
+        return `\uC798\uBABB\uB41C \uAC12: ${issue2.origin}`;
+      default:
+        return `\uC798\uBABB\uB41C \uC785\uB825`;
+    }
+  };
+};
+function ko_default() {
+  return {
+    localeError: error20()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/mk.js
+var error21 = () => {
+  const Sizable = {
+    string: { unit: "\u0437\u043D\u0430\u0446\u0438", verb: "\u0434\u0430 \u0438\u043C\u0430\u0430\u0442" },
+    file: { unit: "\u0431\u0430\u0458\u0442\u0438", verb: "\u0434\u0430 \u0438\u043C\u0430\u0430\u0442" },
+    array: { unit: "\u0441\u0442\u0430\u0432\u043A\u0438", verb: "\u0434\u0430 \u0438\u043C\u0430\u0430\u0442" },
+    set: { unit: "\u0441\u0442\u0430\u0432\u043A\u0438", verb: "\u0434\u0430 \u0438\u043C\u0430\u0430\u0442" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "\u0431\u0440\u043E\u0458";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u043D\u0438\u0437\u0430";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0432\u043D\u0435\u0441",
+    email: "\u0430\u0434\u0440\u0435\u0441\u0430 \u043D\u0430 \u0435-\u043F\u043E\u0448\u0442\u0430",
+    url: "URL",
+    emoji: "\u0435\u043C\u043E\u045F\u0438",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO \u0434\u0430\u0442\u0443\u043C \u0438 \u0432\u0440\u0435\u043C\u0435",
+    date: "ISO \u0434\u0430\u0442\u0443\u043C",
+    time: "ISO \u0432\u0440\u0435\u043C\u0435",
+    duration: "ISO \u0432\u0440\u0435\u043C\u0435\u0442\u0440\u0430\u0435\u045A\u0435",
+    ipv4: "IPv4 \u0430\u0434\u0440\u0435\u0441\u0430",
+    ipv6: "IPv6 \u0430\u0434\u0440\u0435\u0441\u0430",
+    cidrv4: "IPv4 \u043E\u043F\u0441\u0435\u0433",
+    cidrv6: "IPv6 \u043E\u043F\u0441\u0435\u0433",
+    base64: "base64-\u0435\u043D\u043A\u043E\u0434\u0438\u0440\u0430\u043D\u0430 \u043D\u0438\u0437\u0430",
+    base64url: "base64url-\u0435\u043D\u043A\u043E\u0434\u0438\u0440\u0430\u043D\u0430 \u043D\u0438\u0437\u0430",
+    json_string: "JSON \u043D\u0438\u0437\u0430",
+    e164: "E.164 \u0431\u0440\u043E\u0458",
+    jwt: "JWT",
+    template_literal: "\u0432\u043D\u0435\u0441"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u0413\u0440\u0435\u0448\u0435\u043D \u0432\u043D\u0435\u0441: \u0441\u0435 \u043E\u0447\u0435\u043A\u0443\u0432\u0430 ${issue2.expected}, \u043F\u0440\u0438\u043C\u0435\u043D\u043E ${parsedType4(issue2.input)}`;
+      // return `Invalid input: expected ${issue.expected}, received ${util.getParsedType(issue.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Invalid input: expected ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u0413\u0440\u0435\u0448\u0430\u043D\u0430 \u043E\u043F\u0446\u0438\u0458\u0430: \u0441\u0435 \u043E\u0447\u0435\u043A\u0443\u0432\u0430 \u0435\u0434\u043D\u0430 ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\u041F\u0440\u0435\u043C\u043D\u043E\u0433\u0443 \u0433\u043E\u043B\u0435\u043C: \u0441\u0435 \u043E\u0447\u0435\u043A\u0443\u0432\u0430 ${issue2.origin ?? "\u0432\u0440\u0435\u0434\u043D\u043E\u0441\u0442\u0430"} \u0434\u0430 \u0438\u043C\u0430 ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "\u0435\u043B\u0435\u043C\u0435\u043D\u0442\u0438"}`;
+        return `\u041F\u0440\u0435\u043C\u043D\u043E\u0433\u0443 \u0433\u043E\u043B\u0435\u043C: \u0441\u0435 \u043E\u0447\u0435\u043A\u0443\u0432\u0430 ${issue2.origin ?? "\u0432\u0440\u0435\u0434\u043D\u043E\u0441\u0442\u0430"} \u0434\u0430 \u0431\u0438\u0434\u0435 ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u041F\u0440\u0435\u043C\u043D\u043E\u0433\u0443 \u043C\u0430\u043B: \u0441\u0435 \u043E\u0447\u0435\u043A\u0443\u0432\u0430 ${issue2.origin} \u0434\u0430 \u0438\u043C\u0430 ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `\u041F\u0440\u0435\u043C\u043D\u043E\u0433\u0443 \u043C\u0430\u043B: \u0441\u0435 \u043E\u0447\u0435\u043A\u0443\u0432\u0430 ${issue2.origin} \u0434\u0430 \u0431\u0438\u0434\u0435 ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `\u041D\u0435\u0432\u0430\u0436\u0435\u0447\u043A\u0430 \u043D\u0438\u0437\u0430: \u043C\u043E\u0440\u0430 \u0434\u0430 \u0437\u0430\u043F\u043E\u0447\u043D\u0443\u0432\u0430 \u0441\u043E "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `\u041D\u0435\u0432\u0430\u0436\u0435\u0447\u043A\u0430 \u043D\u0438\u0437\u0430: \u043C\u043E\u0440\u0430 \u0434\u0430 \u0437\u0430\u0432\u0440\u0448\u0443\u0432\u0430 \u0441\u043E "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `\u041D\u0435\u0432\u0430\u0436\u0435\u0447\u043A\u0430 \u043D\u0438\u0437\u0430: \u043C\u043E\u0440\u0430 \u0434\u0430 \u0432\u043A\u043B\u0443\u0447\u0443\u0432\u0430 "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u041D\u0435\u0432\u0430\u0436\u0435\u0447\u043A\u0430 \u043D\u0438\u0437\u0430: \u043C\u043E\u0440\u0430 \u0434\u0430 \u043E\u0434\u0433\u043E\u0430\u0440\u0430 \u043D\u0430 \u043F\u0430\u0442\u0435\u0440\u043D\u043E\u0442 ${_issue.pattern}`;
+        return `Invalid ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u0413\u0440\u0435\u0448\u0435\u043D \u0431\u0440\u043E\u0458: \u043C\u043E\u0440\u0430 \u0434\u0430 \u0431\u0438\u0434\u0435 \u0434\u0435\u043B\u0438\u0432 \u0441\u043E ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `${issue2.keys.length > 1 ? "\u041D\u0435\u043F\u0440\u0435\u043F\u043E\u0437\u043D\u0430\u0435\u043D\u0438 \u043A\u043B\u0443\u0447\u0435\u0432\u0438" : "\u041D\u0435\u043F\u0440\u0435\u043F\u043E\u0437\u043D\u0430\u0435\u043D \u043A\u043B\u0443\u0447"}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\u0413\u0440\u0435\u0448\u0435\u043D \u043A\u043B\u0443\u0447 \u0432\u043E ${issue2.origin}`;
+      case "invalid_union":
+        return "\u0413\u0440\u0435\u0448\u0435\u043D \u0432\u043D\u0435\u0441";
+      case "invalid_element":
+        return `\u0413\u0440\u0435\u0448\u043D\u0430 \u0432\u0440\u0435\u0434\u043D\u043E\u0441\u0442 \u0432\u043E ${issue2.origin}`;
+      default:
+        return `\u0413\u0440\u0435\u0448\u0435\u043D \u0432\u043D\u0435\u0441`;
+    }
+  };
+};
+function mk_default() {
+  return {
+    localeError: error21()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ms.js
+var error22 = () => {
+  const Sizable = {
+    string: { unit: "aksara", verb: "mempunyai" },
+    file: { unit: "bait", verb: "mempunyai" },
+    array: { unit: "elemen", verb: "mempunyai" },
+    set: { unit: "elemen", verb: "mempunyai" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "nombor";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "input",
+    email: "alamat e-mel",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "tarikh masa ISO",
+    date: "tarikh ISO",
+    time: "masa ISO",
+    duration: "tempoh ISO",
+    ipv4: "alamat IPv4",
+    ipv6: "alamat IPv6",
+    cidrv4: "julat IPv4",
+    cidrv6: "julat IPv6",
+    base64: "string dikodkan base64",
+    base64url: "string dikodkan base64url",
+    json_string: "string JSON",
+    e164: "nombor E.164",
+    jwt: "JWT",
+    template_literal: "input"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Input tidak sah: dijangka ${issue2.expected}, diterima ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Input tidak sah: dijangka ${stringifyPrimitive(issue2.values[0])}`;
+        return `Pilihan tidak sah: dijangka salah satu daripada ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Terlalu besar: dijangka ${issue2.origin ?? "nilai"} ${sizing.verb} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elemen"}`;
+        return `Terlalu besar: dijangka ${issue2.origin ?? "nilai"} adalah ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Terlalu kecil: dijangka ${issue2.origin} ${sizing.verb} ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Terlalu kecil: dijangka ${issue2.origin} adalah ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `String tidak sah: mesti bermula dengan "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `String tidak sah: mesti berakhir dengan "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `String tidak sah: mesti mengandungi "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `String tidak sah: mesti sepadan dengan corak ${_issue.pattern}`;
+        return `${Nouns[_issue.format] ?? issue2.format} tidak sah`;
+      }
+      case "not_multiple_of":
+        return `Nombor tidak sah: perlu gandaan ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Kunci tidak dikenali: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Kunci tidak sah dalam ${issue2.origin}`;
+      case "invalid_union":
+        return "Input tidak sah";
+      case "invalid_element":
+        return `Nilai tidak sah dalam ${issue2.origin}`;
+      default:
+        return `Input tidak sah`;
+    }
+  };
+};
+function ms_default() {
+  return {
+    localeError: error22()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/nl.js
+var error23 = () => {
+  const Sizable = {
+    string: { unit: "tekens" },
+    file: { unit: "bytes" },
+    array: { unit: "elementen" },
+    set: { unit: "elementen" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "getal";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "invoer",
+    email: "emailadres",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO datum en tijd",
+    date: "ISO datum",
+    time: "ISO tijd",
+    duration: "ISO duur",
+    ipv4: "IPv4-adres",
+    ipv6: "IPv6-adres",
+    cidrv4: "IPv4-bereik",
+    cidrv6: "IPv6-bereik",
+    base64: "base64-gecodeerde tekst",
+    base64url: "base64 URL-gecodeerde tekst",
+    json_string: "JSON string",
+    e164: "E.164-nummer",
+    jwt: "JWT",
+    template_literal: "invoer"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Ongeldige invoer: verwacht ${issue2.expected}, ontving ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Ongeldige invoer: verwacht ${stringifyPrimitive(issue2.values[0])}`;
+        return `Ongeldige optie: verwacht \xE9\xE9n van ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Te lang: verwacht dat ${issue2.origin ?? "waarde"} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elementen"} bevat`;
+        return `Te lang: verwacht dat ${issue2.origin ?? "waarde"} ${adj}${issue2.maximum.toString()} is`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Te kort: verwacht dat ${issue2.origin} ${adj}${issue2.minimum.toString()} ${sizing.unit} bevat`;
+        }
+        return `Te kort: verwacht dat ${issue2.origin} ${adj}${issue2.minimum.toString()} is`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `Ongeldige tekst: moet met "${_issue.prefix}" beginnen`;
+        }
+        if (_issue.format === "ends_with")
+          return `Ongeldige tekst: moet op "${_issue.suffix}" eindigen`;
+        if (_issue.format === "includes")
+          return `Ongeldige tekst: moet "${_issue.includes}" bevatten`;
+        if (_issue.format === "regex")
+          return `Ongeldige tekst: moet overeenkomen met patroon ${_issue.pattern}`;
+        return `Ongeldig: ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Ongeldig getal: moet een veelvoud van ${issue2.divisor} zijn`;
+      case "unrecognized_keys":
+        return `Onbekende key${issue2.keys.length > 1 ? "s" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Ongeldige key in ${issue2.origin}`;
+      case "invalid_union":
+        return "Ongeldige invoer";
+      case "invalid_element":
+        return `Ongeldige waarde in ${issue2.origin}`;
+      default:
+        return `Ongeldige invoer`;
+    }
+  };
+};
+function nl_default() {
+  return {
+    localeError: error23()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/no.js
+var error24 = () => {
+  const Sizable = {
+    string: { unit: "tegn", verb: "\xE5 ha" },
+    file: { unit: "bytes", verb: "\xE5 ha" },
+    array: { unit: "elementer", verb: "\xE5 inneholde" },
+    set: { unit: "elementer", verb: "\xE5 inneholde" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "tall";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "liste";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "input",
+    email: "e-postadresse",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO dato- og klokkeslett",
+    date: "ISO-dato",
+    time: "ISO-klokkeslett",
+    duration: "ISO-varighet",
+    ipv4: "IPv4-omr\xE5de",
+    ipv6: "IPv6-omr\xE5de",
+    cidrv4: "IPv4-spekter",
+    cidrv6: "IPv6-spekter",
+    base64: "base64-enkodet streng",
+    base64url: "base64url-enkodet streng",
+    json_string: "JSON-streng",
+    e164: "E.164-nummer",
+    jwt: "JWT",
+    template_literal: "input"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Ugyldig input: forventet ${issue2.expected}, fikk ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Ugyldig verdi: forventet ${stringifyPrimitive(issue2.values[0])}`;
+        return `Ugyldig valg: forventet en av ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `For stor(t): forventet ${issue2.origin ?? "value"} til \xE5 ha ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elementer"}`;
+        return `For stor(t): forventet ${issue2.origin ?? "value"} til \xE5 ha ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `For lite(n): forventet ${issue2.origin} til \xE5 ha ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `For lite(n): forventet ${issue2.origin} til \xE5 ha ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Ugyldig streng: m\xE5 starte med "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Ugyldig streng: m\xE5 ende med "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Ugyldig streng: m\xE5 inneholde "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Ugyldig streng: m\xE5 matche m\xF8nsteret ${_issue.pattern}`;
+        return `Ugyldig ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Ugyldig tall: m\xE5 v\xE6re et multiplum av ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `${issue2.keys.length > 1 ? "Ukjente n\xF8kler" : "Ukjent n\xF8kkel"}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Ugyldig n\xF8kkel i ${issue2.origin}`;
+      case "invalid_union":
+        return "Ugyldig input";
+      case "invalid_element":
+        return `Ugyldig verdi i ${issue2.origin}`;
+      default:
+        return `Ugyldig input`;
+    }
+  };
+};
+function no_default() {
+  return {
+    localeError: error24()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ota.js
+var error25 = () => {
+  const Sizable = {
+    string: { unit: "harf", verb: "olmal\u0131d\u0131r" },
+    file: { unit: "bayt", verb: "olmal\u0131d\u0131r" },
+    array: { unit: "unsur", verb: "olmal\u0131d\u0131r" },
+    set: { unit: "unsur", verb: "olmal\u0131d\u0131r" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "numara";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "saf";
+        }
+        if (data === null) {
+          return "gayb";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "giren",
+    email: "epostag\xE2h",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO heng\xE2m\u0131",
+    date: "ISO tarihi",
+    time: "ISO zaman\u0131",
+    duration: "ISO m\xFCddeti",
+    ipv4: "IPv4 ni\u015F\xE2n\u0131",
+    ipv6: "IPv6 ni\u015F\xE2n\u0131",
+    cidrv4: "IPv4 menzili",
+    cidrv6: "IPv6 menzili",
+    base64: "base64-\u015Fifreli metin",
+    base64url: "base64url-\u015Fifreli metin",
+    json_string: "JSON metin",
+    e164: "E.164 say\u0131s\u0131",
+    jwt: "JWT",
+    template_literal: "giren"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `F\xE2sit giren: umulan ${issue2.expected}, al\u0131nan ${parsedType4(issue2.input)}`;
+      // return `Fâsit giren: umulan ${issue.expected}, alınan ${util.getParsedType(issue.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `F\xE2sit giren: umulan ${stringifyPrimitive(issue2.values[0])}`;
+        return `F\xE2sit tercih: m\xFBteberler ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Fazla b\xFCy\xFCk: ${issue2.origin ?? "value"}, ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elements"} sahip olmal\u0131yd\u0131.`;
+        return `Fazla b\xFCy\xFCk: ${issue2.origin ?? "value"}, ${adj}${issue2.maximum.toString()} olmal\u0131yd\u0131.`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Fazla k\xFC\xE7\xFCk: ${issue2.origin}, ${adj}${issue2.minimum.toString()} ${sizing.unit} sahip olmal\u0131yd\u0131.`;
+        }
+        return `Fazla k\xFC\xE7\xFCk: ${issue2.origin}, ${adj}${issue2.minimum.toString()} olmal\u0131yd\u0131.`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `F\xE2sit metin: "${_issue.prefix}" ile ba\u015Flamal\u0131.`;
+        if (_issue.format === "ends_with")
+          return `F\xE2sit metin: "${_issue.suffix}" ile bitmeli.`;
+        if (_issue.format === "includes")
+          return `F\xE2sit metin: "${_issue.includes}" ihtiv\xE2 etmeli.`;
+        if (_issue.format === "regex")
+          return `F\xE2sit metin: ${_issue.pattern} nak\u015F\u0131na uymal\u0131.`;
+        return `F\xE2sit ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `F\xE2sit say\u0131: ${issue2.divisor} kat\u0131 olmal\u0131yd\u0131.`;
+      case "unrecognized_keys":
+        return `Tan\u0131nmayan anahtar ${issue2.keys.length > 1 ? "s" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `${issue2.origin} i\xE7in tan\u0131nmayan anahtar var.`;
+      case "invalid_union":
+        return "Giren tan\u0131namad\u0131.";
+      case "invalid_element":
+        return `${issue2.origin} i\xE7in tan\u0131nmayan k\u0131ymet var.`;
+      default:
+        return `K\u0131ymet tan\u0131namad\u0131.`;
+    }
+  };
+};
+function ota_default() {
+  return {
+    localeError: error25()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ps.js
+var error26 = () => {
+  const Sizable = {
+    string: { unit: "\u062A\u0648\u06A9\u064A", verb: "\u0648\u0644\u0631\u064A" },
+    file: { unit: "\u0628\u0627\u06CC\u067C\u0633", verb: "\u0648\u0644\u0631\u064A" },
+    array: { unit: "\u062A\u0648\u06A9\u064A", verb: "\u0648\u0644\u0631\u064A" },
+    set: { unit: "\u062A\u0648\u06A9\u064A", verb: "\u0648\u0644\u0631\u064A" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "\u0639\u062F\u062F";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u0627\u0631\u06D0";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0648\u0631\u0648\u062F\u064A",
+    email: "\u0628\u0631\u06CC\u069A\u0646\u0627\u0644\u06CC\u06A9",
+    url: "\u06CC\u0648 \u0622\u0631 \u0627\u0644",
+    emoji: "\u0627\u06CC\u0645\u0648\u062C\u064A",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "\u0646\u06CC\u067C\u0647 \u0627\u0648 \u0648\u062E\u062A",
+    date: "\u0646\u06D0\u067C\u0647",
+    time: "\u0648\u062E\u062A",
+    duration: "\u0645\u0648\u062F\u0647",
+    ipv4: "\u062F IPv4 \u067E\u062A\u0647",
+    ipv6: "\u062F IPv6 \u067E\u062A\u0647",
+    cidrv4: "\u062F IPv4 \u0633\u0627\u062D\u0647",
+    cidrv6: "\u062F IPv6 \u0633\u0627\u062D\u0647",
+    base64: "base64-encoded \u0645\u062A\u0646",
+    base64url: "base64url-encoded \u0645\u062A\u0646",
+    json_string: "JSON \u0645\u062A\u0646",
+    e164: "\u062F E.164 \u0634\u0645\u06D0\u0631\u0647",
+    jwt: "JWT",
+    template_literal: "\u0648\u0631\u0648\u062F\u064A"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u0646\u0627\u0633\u0645 \u0648\u0631\u0648\u062F\u064A: \u0628\u0627\u06CC\u062F ${issue2.expected} \u0648\u0627\u06CC, \u0645\u06AB\u0631 ${parsedType4(issue2.input)} \u062A\u0631\u0644\u0627\u0633\u0647 \u0634\u0648`;
+      case "invalid_value":
+        if (issue2.values.length === 1) {
+          return `\u0646\u0627\u0633\u0645 \u0648\u0631\u0648\u062F\u064A: \u0628\u0627\u06CC\u062F ${stringifyPrimitive(issue2.values[0])} \u0648\u0627\u06CC`;
+        }
+        return `\u0646\u0627\u0633\u0645 \u0627\u0646\u062A\u062E\u0627\u0628: \u0628\u0627\u06CC\u062F \u06CC\u0648 \u0644\u0647 ${joinValues(issue2.values, "|")} \u0685\u062E\u0647 \u0648\u0627\u06CC`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u0689\u06CC\u0631 \u0644\u0648\u06CC: ${issue2.origin ?? "\u0627\u0631\u0632\u069A\u062A"} \u0628\u0627\u06CC\u062F ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "\u0639\u0646\u0635\u0631\u0648\u0646\u0647"} \u0648\u0644\u0631\u064A`;
+        }
+        return `\u0689\u06CC\u0631 \u0644\u0648\u06CC: ${issue2.origin ?? "\u0627\u0631\u0632\u069A\u062A"} \u0628\u0627\u06CC\u062F ${adj}${issue2.maximum.toString()} \u0648\u064A`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u0689\u06CC\u0631 \u06A9\u0648\u0686\u0646\u06CC: ${issue2.origin} \u0628\u0627\u06CC\u062F ${adj}${issue2.minimum.toString()} ${sizing.unit} \u0648\u0644\u0631\u064A`;
+        }
+        return `\u0689\u06CC\u0631 \u06A9\u0648\u0686\u0646\u06CC: ${issue2.origin} \u0628\u0627\u06CC\u062F ${adj}${issue2.minimum.toString()} \u0648\u064A`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `\u0646\u0627\u0633\u0645 \u0645\u062A\u0646: \u0628\u0627\u06CC\u062F \u062F "${_issue.prefix}" \u0633\u0631\u0647 \u067E\u06CC\u0644 \u0634\u064A`;
+        }
+        if (_issue.format === "ends_with") {
+          return `\u0646\u0627\u0633\u0645 \u0645\u062A\u0646: \u0628\u0627\u06CC\u062F \u062F "${_issue.suffix}" \u0633\u0631\u0647 \u067E\u0627\u06CC \u062A\u0647 \u0648\u0631\u0633\u064A\u0696\u064A`;
+        }
+        if (_issue.format === "includes") {
+          return `\u0646\u0627\u0633\u0645 \u0645\u062A\u0646: \u0628\u0627\u06CC\u062F "${_issue.includes}" \u0648\u0644\u0631\u064A`;
+        }
+        if (_issue.format === "regex") {
+          return `\u0646\u0627\u0633\u0645 \u0645\u062A\u0646: \u0628\u0627\u06CC\u062F \u062F ${_issue.pattern} \u0633\u0631\u0647 \u0645\u0637\u0627\u0628\u0642\u062A \u0648\u0644\u0631\u064A`;
+        }
+        return `${Nouns[_issue.format] ?? issue2.format} \u0646\u0627\u0633\u0645 \u062F\u06CC`;
+      }
+      case "not_multiple_of":
+        return `\u0646\u0627\u0633\u0645 \u0639\u062F\u062F: \u0628\u0627\u06CC\u062F \u062F ${issue2.divisor} \u0645\u0636\u0631\u0628 \u0648\u064A`;
+      case "unrecognized_keys":
+        return `\u0646\u0627\u0633\u0645 ${issue2.keys.length > 1 ? "\u06A9\u0644\u06CC\u0689\u0648\u0646\u0647" : "\u06A9\u0644\u06CC\u0689"}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\u0646\u0627\u0633\u0645 \u06A9\u0644\u06CC\u0689 \u067E\u0647 ${issue2.origin} \u06A9\u06D0`;
+      case "invalid_union":
+        return `\u0646\u0627\u0633\u0645\u0647 \u0648\u0631\u0648\u062F\u064A`;
+      case "invalid_element":
+        return `\u0646\u0627\u0633\u0645 \u0639\u0646\u0635\u0631 \u067E\u0647 ${issue2.origin} \u06A9\u06D0`;
+      default:
+        return `\u0646\u0627\u0633\u0645\u0647 \u0648\u0631\u0648\u062F\u064A`;
+    }
+  };
+};
+function ps_default() {
+  return {
+    localeError: error26()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/pl.js
+var error27 = () => {
+  const Sizable = {
+    string: { unit: "znak\xF3w", verb: "mie\u0107" },
+    file: { unit: "bajt\xF3w", verb: "mie\u0107" },
+    array: { unit: "element\xF3w", verb: "mie\u0107" },
+    set: { unit: "element\xF3w", verb: "mie\u0107" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "liczba";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "tablica";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "wyra\u017Cenie",
+    email: "adres email",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "data i godzina w formacie ISO",
+    date: "data w formacie ISO",
+    time: "godzina w formacie ISO",
+    duration: "czas trwania ISO",
+    ipv4: "adres IPv4",
+    ipv6: "adres IPv6",
+    cidrv4: "zakres IPv4",
+    cidrv6: "zakres IPv6",
+    base64: "ci\u0105g znak\xF3w zakodowany w formacie base64",
+    base64url: "ci\u0105g znak\xF3w zakodowany w formacie base64url",
+    json_string: "ci\u0105g znak\xF3w w formacie JSON",
+    e164: "liczba E.164",
+    jwt: "JWT",
+    template_literal: "wej\u015Bcie"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Nieprawid\u0142owe dane wej\u015Bciowe: oczekiwano ${issue2.expected}, otrzymano ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Nieprawid\u0142owe dane wej\u015Bciowe: oczekiwano ${stringifyPrimitive(issue2.values[0])}`;
+        return `Nieprawid\u0142owa opcja: oczekiwano jednej z warto\u015Bci ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Za du\u017Ca warto\u015B\u0107: oczekiwano, \u017Ce ${issue2.origin ?? "warto\u015B\u0107"} b\u0119dzie mie\u0107 ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "element\xF3w"}`;
+        }
+        return `Zbyt du\u017C(y/a/e): oczekiwano, \u017Ce ${issue2.origin ?? "warto\u015B\u0107"} b\u0119dzie wynosi\u0107 ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Za ma\u0142a warto\u015B\u0107: oczekiwano, \u017Ce ${issue2.origin ?? "warto\u015B\u0107"} b\u0119dzie mie\u0107 ${adj}${issue2.minimum.toString()} ${sizing.unit ?? "element\xF3w"}`;
+        }
+        return `Zbyt ma\u0142(y/a/e): oczekiwano, \u017Ce ${issue2.origin ?? "warto\u015B\u0107"} b\u0119dzie wynosi\u0107 ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Nieprawid\u0142owy ci\u0105g znak\xF3w: musi zaczyna\u0107 si\u0119 od "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Nieprawid\u0142owy ci\u0105g znak\xF3w: musi ko\u0144czy\u0107 si\u0119 na "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Nieprawid\u0142owy ci\u0105g znak\xF3w: musi zawiera\u0107 "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Nieprawid\u0142owy ci\u0105g znak\xF3w: musi odpowiada\u0107 wzorcowi ${_issue.pattern}`;
+        return `Nieprawid\u0142ow(y/a/e) ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Nieprawid\u0142owa liczba: musi by\u0107 wielokrotno\u015Bci\u0105 ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Nierozpoznane klucze${issue2.keys.length > 1 ? "s" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Nieprawid\u0142owy klucz w ${issue2.origin}`;
+      case "invalid_union":
+        return "Nieprawid\u0142owe dane wej\u015Bciowe";
+      case "invalid_element":
+        return `Nieprawid\u0142owa warto\u015B\u0107 w ${issue2.origin}`;
+      default:
+        return `Nieprawid\u0142owe dane wej\u015Bciowe`;
+    }
+  };
+};
+function pl_default() {
+  return {
+    localeError: error27()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/pt.js
+var error28 = () => {
+  const Sizable = {
+    string: { unit: "caracteres", verb: "ter" },
+    file: { unit: "bytes", verb: "ter" },
+    array: { unit: "itens", verb: "ter" },
+    set: { unit: "itens", verb: "ter" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "n\xFAmero";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "nulo";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "padr\xE3o",
+    email: "endere\xE7o de e-mail",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "data e hora ISO",
+    date: "data ISO",
+    time: "hora ISO",
+    duration: "dura\xE7\xE3o ISO",
+    ipv4: "endere\xE7o IPv4",
+    ipv6: "endere\xE7o IPv6",
+    cidrv4: "faixa de IPv4",
+    cidrv6: "faixa de IPv6",
+    base64: "texto codificado em base64",
+    base64url: "URL codificada em base64",
+    json_string: "texto JSON",
+    e164: "n\xFAmero E.164",
+    jwt: "JWT",
+    template_literal: "entrada"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Tipo inv\xE1lido: esperado ${issue2.expected}, recebido ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Entrada inv\xE1lida: esperado ${stringifyPrimitive(issue2.values[0])}`;
+        return `Op\xE7\xE3o inv\xE1lida: esperada uma das ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Muito grande: esperado que ${issue2.origin ?? "valor"} tivesse ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elementos"}`;
+        return `Muito grande: esperado que ${issue2.origin ?? "valor"} fosse ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Muito pequeno: esperado que ${issue2.origin} tivesse ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Muito pequeno: esperado que ${issue2.origin} fosse ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Texto inv\xE1lido: deve come\xE7ar com "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Texto inv\xE1lido: deve terminar com "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Texto inv\xE1lido: deve incluir "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Texto inv\xE1lido: deve corresponder ao padr\xE3o ${_issue.pattern}`;
+        return `${Nouns[_issue.format] ?? issue2.format} inv\xE1lido`;
+      }
+      case "not_multiple_of":
+        return `N\xFAmero inv\xE1lido: deve ser m\xFAltiplo de ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Chave${issue2.keys.length > 1 ? "s" : ""} desconhecida${issue2.keys.length > 1 ? "s" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Chave inv\xE1lida em ${issue2.origin}`;
+      case "invalid_union":
+        return "Entrada inv\xE1lida";
+      case "invalid_element":
+        return `Valor inv\xE1lido em ${issue2.origin}`;
+      default:
+        return `Campo inv\xE1lido`;
+    }
+  };
+};
+function pt_default() {
+  return {
+    localeError: error28()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ru.js
+function getRussianPlural(count2, one, few, many) {
+  const absCount = Math.abs(count2);
+  const lastDigit = absCount % 10;
+  const lastTwoDigits = absCount % 100;
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
+    return many;
+  }
+  if (lastDigit === 1) {
+    return one;
+  }
+  if (lastDigit >= 2 && lastDigit <= 4) {
+    return few;
+  }
+  return many;
+}
+var error29 = () => {
+  const Sizable = {
+    string: {
+      unit: {
+        one: "\u0441\u0438\u043C\u0432\u043E\u043B",
+        few: "\u0441\u0438\u043C\u0432\u043E\u043B\u0430",
+        many: "\u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432"
+      },
+      verb: "\u0438\u043C\u0435\u0442\u044C"
+    },
+    file: {
+      unit: {
+        one: "\u0431\u0430\u0439\u0442",
+        few: "\u0431\u0430\u0439\u0442\u0430",
+        many: "\u0431\u0430\u0439\u0442"
+      },
+      verb: "\u0438\u043C\u0435\u0442\u044C"
+    },
+    array: {
+      unit: {
+        one: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442",
+        few: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430",
+        many: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u043E\u0432"
+      },
+      verb: "\u0438\u043C\u0435\u0442\u044C"
+    },
+    set: {
+      unit: {
+        one: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442",
+        few: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430",
+        many: "\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u043E\u0432"
+      },
+      verb: "\u0438\u043C\u0435\u0442\u044C"
+    }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "\u0447\u0438\u0441\u043B\u043E";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u043C\u0430\u0441\u0441\u0438\u0432";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0432\u0432\u043E\u0434",
+    email: "email \u0430\u0434\u0440\u0435\u0441",
+    url: "URL",
+    emoji: "\u044D\u043C\u043E\u0434\u0437\u0438",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO \u0434\u0430\u0442\u0430 \u0438 \u0432\u0440\u0435\u043C\u044F",
+    date: "ISO \u0434\u0430\u0442\u0430",
+    time: "ISO \u0432\u0440\u0435\u043C\u044F",
+    duration: "ISO \u0434\u043B\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C",
+    ipv4: "IPv4 \u0430\u0434\u0440\u0435\u0441",
+    ipv6: "IPv6 \u0430\u0434\u0440\u0435\u0441",
+    cidrv4: "IPv4 \u0434\u0438\u0430\u043F\u0430\u0437\u043E\u043D",
+    cidrv6: "IPv6 \u0434\u0438\u0430\u043F\u0430\u0437\u043E\u043D",
+    base64: "\u0441\u0442\u0440\u043E\u043A\u0430 \u0432 \u0444\u043E\u0440\u043C\u0430\u0442\u0435 base64",
+    base64url: "\u0441\u0442\u0440\u043E\u043A\u0430 \u0432 \u0444\u043E\u0440\u043C\u0430\u0442\u0435 base64url",
+    json_string: "JSON \u0441\u0442\u0440\u043E\u043A\u0430",
+    e164: "\u043D\u043E\u043C\u0435\u0440 E.164",
+    jwt: "JWT",
+    template_literal: "\u0432\u0432\u043E\u0434"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u041D\u0435\u0432\u0435\u0440\u043D\u044B\u0439 \u0432\u0432\u043E\u0434: \u043E\u0436\u0438\u0434\u0430\u043B\u043E\u0441\u044C ${issue2.expected}, \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u043E ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u041D\u0435\u0432\u0435\u0440\u043D\u044B\u0439 \u0432\u0432\u043E\u0434: \u043E\u0436\u0438\u0434\u0430\u043B\u043E\u0441\u044C ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u041D\u0435\u0432\u0435\u0440\u043D\u044B\u0439 \u0432\u0430\u0440\u0438\u0430\u043D\u0442: \u043E\u0436\u0438\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0434\u043D\u043E \u0438\u0437 ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          const maxValue = Number(issue2.maximum);
+          const unit = getRussianPlural(maxValue, sizing.unit.one, sizing.unit.few, sizing.unit.many);
+          return `\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u0431\u043E\u043B\u044C\u0448\u043E\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435: \u043E\u0436\u0438\u0434\u0430\u043B\u043E\u0441\u044C, \u0447\u0442\u043E ${issue2.origin ?? "\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435"} \u0431\u0443\u0434\u0435\u0442 \u0438\u043C\u0435\u0442\u044C ${adj}${issue2.maximum.toString()} ${unit}`;
+        }
+        return `\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u0431\u043E\u043B\u044C\u0448\u043E\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435: \u043E\u0436\u0438\u0434\u0430\u043B\u043E\u0441\u044C, \u0447\u0442\u043E ${issue2.origin ?? "\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435"} \u0431\u0443\u0434\u0435\u0442 ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          const minValue = Number(issue2.minimum);
+          const unit = getRussianPlural(minValue, sizing.unit.one, sizing.unit.few, sizing.unit.many);
+          return `\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u043E\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435: \u043E\u0436\u0438\u0434\u0430\u043B\u043E\u0441\u044C, \u0447\u0442\u043E ${issue2.origin} \u0431\u0443\u0434\u0435\u0442 \u0438\u043C\u0435\u0442\u044C ${adj}${issue2.minimum.toString()} ${unit}`;
+        }
+        return `\u0421\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u0430\u043B\u0435\u043D\u044C\u043A\u043E\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435: \u043E\u0436\u0438\u0434\u0430\u043B\u043E\u0441\u044C, \u0447\u0442\u043E ${issue2.origin} \u0431\u0443\u0434\u0435\u0442 ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `\u041D\u0435\u0432\u0435\u0440\u043D\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430: \u0434\u043E\u043B\u0436\u043D\u0430 \u043D\u0430\u0447\u0438\u043D\u0430\u0442\u044C\u0441\u044F \u0441 "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `\u041D\u0435\u0432\u0435\u0440\u043D\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430: \u0434\u043E\u043B\u0436\u043D\u0430 \u0437\u0430\u043A\u0430\u043D\u0447\u0438\u0432\u0430\u0442\u044C\u0441\u044F \u043D\u0430 "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `\u041D\u0435\u0432\u0435\u0440\u043D\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430: \u0434\u043E\u043B\u0436\u043D\u0430 \u0441\u043E\u0434\u0435\u0440\u0436\u0430\u0442\u044C "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u041D\u0435\u0432\u0435\u0440\u043D\u0430\u044F \u0441\u0442\u0440\u043E\u043A\u0430: \u0434\u043E\u043B\u0436\u043D\u0430 \u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u043E\u0432\u0430\u0442\u044C \u0448\u0430\u0431\u043B\u043E\u043D\u0443 ${_issue.pattern}`;
+        return `\u041D\u0435\u0432\u0435\u0440\u043D\u044B\u0439 ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u041D\u0435\u0432\u0435\u0440\u043D\u043E\u0435 \u0447\u0438\u0441\u043B\u043E: \u0434\u043E\u043B\u0436\u043D\u043E \u0431\u044B\u0442\u044C \u043A\u0440\u0430\u0442\u043D\u044B\u043C ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `\u041D\u0435\u0440\u0430\u0441\u043F\u043E\u0437\u043D\u0430\u043D\u043D${issue2.keys.length > 1 ? "\u044B\u0435" : "\u044B\u0439"} \u043A\u043B\u044E\u0447${issue2.keys.length > 1 ? "\u0438" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\u041D\u0435\u0432\u0435\u0440\u043D\u044B\u0439 \u043A\u043B\u044E\u0447 \u0432 ${issue2.origin}`;
+      case "invalid_union":
+        return "\u041D\u0435\u0432\u0435\u0440\u043D\u044B\u0435 \u0432\u0445\u043E\u0434\u043D\u044B\u0435 \u0434\u0430\u043D\u043D\u044B\u0435";
+      case "invalid_element":
+        return `\u041D\u0435\u0432\u0435\u0440\u043D\u043E\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0432 ${issue2.origin}`;
+      default:
+        return `\u041D\u0435\u0432\u0435\u0440\u043D\u044B\u0435 \u0432\u0445\u043E\u0434\u043D\u044B\u0435 \u0434\u0430\u043D\u043D\u044B\u0435`;
+    }
+  };
+};
+function ru_default() {
+  return {
+    localeError: error29()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/sl.js
+var error30 = () => {
+  const Sizable = {
+    string: { unit: "znakov", verb: "imeti" },
+    file: { unit: "bajtov", verb: "imeti" },
+    array: { unit: "elementov", verb: "imeti" },
+    set: { unit: "elementov", verb: "imeti" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "\u0161tevilo";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "tabela";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "vnos",
+    email: "e-po\u0161tni naslov",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO datum in \u010Das",
+    date: "ISO datum",
+    time: "ISO \u010Das",
+    duration: "ISO trajanje",
+    ipv4: "IPv4 naslov",
+    ipv6: "IPv6 naslov",
+    cidrv4: "obseg IPv4",
+    cidrv6: "obseg IPv6",
+    base64: "base64 kodiran niz",
+    base64url: "base64url kodiran niz",
+    json_string: "JSON niz",
+    e164: "E.164 \u0161tevilka",
+    jwt: "JWT",
+    template_literal: "vnos"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Neveljaven vnos: pri\u010Dakovano ${issue2.expected}, prejeto ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Neveljaven vnos: pri\u010Dakovano ${stringifyPrimitive(issue2.values[0])}`;
+        return `Neveljavna mo\u017Enost: pri\u010Dakovano eno izmed ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Preveliko: pri\u010Dakovano, da bo ${issue2.origin ?? "vrednost"} imelo ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elementov"}`;
+        return `Preveliko: pri\u010Dakovano, da bo ${issue2.origin ?? "vrednost"} ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Premajhno: pri\u010Dakovano, da bo ${issue2.origin} imelo ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Premajhno: pri\u010Dakovano, da bo ${issue2.origin} ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `Neveljaven niz: mora se za\u010Deti z "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `Neveljaven niz: mora se kon\u010Dati z "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Neveljaven niz: mora vsebovati "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Neveljaven niz: mora ustrezati vzorcu ${_issue.pattern}`;
+        return `Neveljaven ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Neveljavno \u0161tevilo: mora biti ve\u010Dkratnik ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Neprepoznan${issue2.keys.length > 1 ? "i klju\u010Di" : " klju\u010D"}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Neveljaven klju\u010D v ${issue2.origin}`;
+      case "invalid_union":
+        return "Neveljaven vnos";
+      case "invalid_element":
+        return `Neveljavna vrednost v ${issue2.origin}`;
+      default:
+        return "Neveljaven vnos";
+    }
+  };
+};
+function sl_default() {
+  return {
+    localeError: error30()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/sv.js
+var error31 = () => {
+  const Sizable = {
+    string: { unit: "tecken", verb: "att ha" },
+    file: { unit: "bytes", verb: "att ha" },
+    array: { unit: "objekt", verb: "att inneh\xE5lla" },
+    set: { unit: "objekt", verb: "att inneh\xE5lla" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "antal";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "lista";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "regulj\xE4rt uttryck",
+    email: "e-postadress",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO-datum och tid",
+    date: "ISO-datum",
+    time: "ISO-tid",
+    duration: "ISO-varaktighet",
+    ipv4: "IPv4-intervall",
+    ipv6: "IPv6-intervall",
+    cidrv4: "IPv4-spektrum",
+    cidrv6: "IPv6-spektrum",
+    base64: "base64-kodad str\xE4ng",
+    base64url: "base64url-kodad str\xE4ng",
+    json_string: "JSON-str\xE4ng",
+    e164: "E.164-nummer",
+    jwt: "JWT",
+    template_literal: "mall-literal"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Ogiltig inmatning: f\xF6rv\xE4ntat ${issue2.expected}, fick ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Ogiltig inmatning: f\xF6rv\xE4ntat ${stringifyPrimitive(issue2.values[0])}`;
+        return `Ogiltigt val: f\xF6rv\xE4ntade en av ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `F\xF6r stor(t): f\xF6rv\xE4ntade ${issue2.origin ?? "v\xE4rdet"} att ha ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "element"}`;
+        }
+        return `F\xF6r stor(t): f\xF6rv\xE4ntat ${issue2.origin ?? "v\xE4rdet"} att ha ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `F\xF6r lite(t): f\xF6rv\xE4ntade ${issue2.origin ?? "v\xE4rdet"} att ha ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `F\xF6r lite(t): f\xF6rv\xE4ntade ${issue2.origin ?? "v\xE4rdet"} att ha ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `Ogiltig str\xE4ng: m\xE5ste b\xF6rja med "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `Ogiltig str\xE4ng: m\xE5ste sluta med "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Ogiltig str\xE4ng: m\xE5ste inneh\xE5lla "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Ogiltig str\xE4ng: m\xE5ste matcha m\xF6nstret "${_issue.pattern}"`;
+        return `Ogiltig(t) ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Ogiltigt tal: m\xE5ste vara en multipel av ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `${issue2.keys.length > 1 ? "Ok\xE4nda nycklar" : "Ok\xE4nd nyckel"}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Ogiltig nyckel i ${issue2.origin ?? "v\xE4rdet"}`;
+      case "invalid_union":
+        return "Ogiltig input";
+      case "invalid_element":
+        return `Ogiltigt v\xE4rde i ${issue2.origin ?? "v\xE4rdet"}`;
+      default:
+        return `Ogiltig input`;
+    }
+  };
+};
+function sv_default() {
+  return {
+    localeError: error31()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ta.js
+var error32 = () => {
+  const Sizable = {
+    string: { unit: "\u0B8E\u0BB4\u0BC1\u0BA4\u0BCD\u0BA4\u0BC1\u0B95\u0BCD\u0B95\u0BB3\u0BCD", verb: "\u0B95\u0BCA\u0BA3\u0BCD\u0B9F\u0BBF\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD" },
+    file: { unit: "\u0BAA\u0BC8\u0B9F\u0BCD\u0B9F\u0BC1\u0B95\u0BB3\u0BCD", verb: "\u0B95\u0BCA\u0BA3\u0BCD\u0B9F\u0BBF\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD" },
+    array: { unit: "\u0B89\u0BB1\u0BC1\u0BAA\u0BCD\u0BAA\u0BC1\u0B95\u0BB3\u0BCD", verb: "\u0B95\u0BCA\u0BA3\u0BCD\u0B9F\u0BBF\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD" },
+    set: { unit: "\u0B89\u0BB1\u0BC1\u0BAA\u0BCD\u0BAA\u0BC1\u0B95\u0BB3\u0BCD", verb: "\u0B95\u0BCA\u0BA3\u0BCD\u0B9F\u0BBF\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "\u0B8E\u0BA3\u0BCD \u0B85\u0BB2\u0BCD\u0BB2\u0BBE\u0BA4\u0BA4\u0BC1" : "\u0B8E\u0BA3\u0BCD";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u0B85\u0BA3\u0BBF";
+        }
+        if (data === null) {
+          return "\u0BB5\u0BC6\u0BB1\u0BC1\u0BAE\u0BC8";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0B89\u0BB3\u0BCD\u0BB3\u0BC0\u0B9F\u0BC1",
+    email: "\u0BAE\u0BBF\u0BA9\u0BCD\u0BA9\u0B9E\u0BCD\u0B9A\u0BB2\u0BCD \u0BAE\u0BC1\u0B95\u0BB5\u0BB0\u0BBF",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO \u0BA4\u0BC7\u0BA4\u0BBF \u0BA8\u0BC7\u0BB0\u0BAE\u0BCD",
+    date: "ISO \u0BA4\u0BC7\u0BA4\u0BBF",
+    time: "ISO \u0BA8\u0BC7\u0BB0\u0BAE\u0BCD",
+    duration: "ISO \u0B95\u0BBE\u0BB2 \u0B85\u0BB3\u0BB5\u0BC1",
+    ipv4: "IPv4 \u0BAE\u0BC1\u0B95\u0BB5\u0BB0\u0BBF",
+    ipv6: "IPv6 \u0BAE\u0BC1\u0B95\u0BB5\u0BB0\u0BBF",
+    cidrv4: "IPv4 \u0BB5\u0BB0\u0BAE\u0BCD\u0BAA\u0BC1",
+    cidrv6: "IPv6 \u0BB5\u0BB0\u0BAE\u0BCD\u0BAA\u0BC1",
+    base64: "base64-encoded \u0B9A\u0BB0\u0BAE\u0BCD",
+    base64url: "base64url-encoded \u0B9A\u0BB0\u0BAE\u0BCD",
+    json_string: "JSON \u0B9A\u0BB0\u0BAE\u0BCD",
+    e164: "E.164 \u0B8E\u0BA3\u0BCD",
+    jwt: "JWT",
+    template_literal: "input"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0B89\u0BB3\u0BCD\u0BB3\u0BC0\u0B9F\u0BC1: \u0B8E\u0BA4\u0BBF\u0BB0\u0BCD\u0BAA\u0BBE\u0BB0\u0BCD\u0B95\u0BCD\u0B95\u0BAA\u0BCD\u0BAA\u0B9F\u0BCD\u0B9F\u0BA4\u0BC1 ${issue2.expected}, \u0BAA\u0BC6\u0BB1\u0BAA\u0BCD\u0BAA\u0B9F\u0BCD\u0B9F\u0BA4\u0BC1 ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0B89\u0BB3\u0BCD\u0BB3\u0BC0\u0B9F\u0BC1: \u0B8E\u0BA4\u0BBF\u0BB0\u0BCD\u0BAA\u0BBE\u0BB0\u0BCD\u0B95\u0BCD\u0B95\u0BAA\u0BCD\u0BAA\u0B9F\u0BCD\u0B9F\u0BA4\u0BC1 ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0BB5\u0BBF\u0BB0\u0BC1\u0BAA\u0BCD\u0BAA\u0BAE\u0BCD: \u0B8E\u0BA4\u0BBF\u0BB0\u0BCD\u0BAA\u0BBE\u0BB0\u0BCD\u0B95\u0BCD\u0B95\u0BAA\u0BCD\u0BAA\u0B9F\u0BCD\u0B9F\u0BA4\u0BC1 ${joinValues(issue2.values, "|")} \u0B87\u0BB2\u0BCD \u0B92\u0BA9\u0BCD\u0BB1\u0BC1`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u0BAE\u0BBF\u0B95 \u0BAA\u0BC6\u0BB0\u0BBF\u0BAF\u0BA4\u0BC1: \u0B8E\u0BA4\u0BBF\u0BB0\u0BCD\u0BAA\u0BBE\u0BB0\u0BCD\u0B95\u0BCD\u0B95\u0BAA\u0BCD\u0BAA\u0B9F\u0BCD\u0B9F\u0BA4\u0BC1 ${issue2.origin ?? "\u0BAE\u0BA4\u0BBF\u0BAA\u0BCD\u0BAA\u0BC1"} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "\u0B89\u0BB1\u0BC1\u0BAA\u0BCD\u0BAA\u0BC1\u0B95\u0BB3\u0BCD"} \u0B86\u0B95 \u0B87\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD`;
+        }
+        return `\u0BAE\u0BBF\u0B95 \u0BAA\u0BC6\u0BB0\u0BBF\u0BAF\u0BA4\u0BC1: \u0B8E\u0BA4\u0BBF\u0BB0\u0BCD\u0BAA\u0BBE\u0BB0\u0BCD\u0B95\u0BCD\u0B95\u0BAA\u0BCD\u0BAA\u0B9F\u0BCD\u0B9F\u0BA4\u0BC1 ${issue2.origin ?? "\u0BAE\u0BA4\u0BBF\u0BAA\u0BCD\u0BAA\u0BC1"} ${adj}${issue2.maximum.toString()} \u0B86\u0B95 \u0B87\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u0BAE\u0BBF\u0B95\u0B9A\u0BCD \u0B9A\u0BBF\u0BB1\u0BBF\u0BAF\u0BA4\u0BC1: \u0B8E\u0BA4\u0BBF\u0BB0\u0BCD\u0BAA\u0BBE\u0BB0\u0BCD\u0B95\u0BCD\u0B95\u0BAA\u0BCD\u0BAA\u0B9F\u0BCD\u0B9F\u0BA4\u0BC1 ${issue2.origin} ${adj}${issue2.minimum.toString()} ${sizing.unit} \u0B86\u0B95 \u0B87\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD`;
+        }
+        return `\u0BAE\u0BBF\u0B95\u0B9A\u0BCD \u0B9A\u0BBF\u0BB1\u0BBF\u0BAF\u0BA4\u0BC1: \u0B8E\u0BA4\u0BBF\u0BB0\u0BCD\u0BAA\u0BBE\u0BB0\u0BCD\u0B95\u0BCD\u0B95\u0BAA\u0BCD\u0BAA\u0B9F\u0BCD\u0B9F\u0BA4\u0BC1 ${issue2.origin} ${adj}${issue2.minimum.toString()} \u0B86\u0B95 \u0B87\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0B9A\u0BB0\u0BAE\u0BCD: "${_issue.prefix}" \u0B87\u0BB2\u0BCD \u0BA4\u0BCA\u0B9F\u0B99\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD`;
+        if (_issue.format === "ends_with")
+          return `\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0B9A\u0BB0\u0BAE\u0BCD: "${_issue.suffix}" \u0B87\u0BB2\u0BCD \u0BAE\u0BC1\u0B9F\u0BBF\u0BB5\u0B9F\u0BC8\u0BAF \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD`;
+        if (_issue.format === "includes")
+          return `\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0B9A\u0BB0\u0BAE\u0BCD: "${_issue.includes}" \u0B90 \u0B89\u0BB3\u0BCD\u0BB3\u0B9F\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD`;
+        if (_issue.format === "regex")
+          return `\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0B9A\u0BB0\u0BAE\u0BCD: ${_issue.pattern} \u0BAE\u0BC1\u0BB1\u0BC8\u0BAA\u0BBE\u0B9F\u0BCD\u0B9F\u0BC1\u0B9F\u0BA9\u0BCD \u0BAA\u0BCA\u0BB0\u0BC1\u0BA8\u0BCD\u0BA4 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD`;
+        return `\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0B8E\u0BA3\u0BCD: ${issue2.divisor} \u0B87\u0BA9\u0BCD \u0BAA\u0BB2\u0BAE\u0BBE\u0B95 \u0B87\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD`;
+      case "unrecognized_keys":
+        return `\u0B85\u0B9F\u0BC8\u0BAF\u0BBE\u0BB3\u0BAE\u0BCD \u0BA4\u0BC6\u0BB0\u0BBF\u0BAF\u0BBE\u0BA4 \u0BB5\u0BBF\u0B9A\u0BC8${issue2.keys.length > 1 ? "\u0B95\u0BB3\u0BCD" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `${issue2.origin} \u0B87\u0BB2\u0BCD \u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0BB5\u0BBF\u0B9A\u0BC8`;
+      case "invalid_union":
+        return "\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0B89\u0BB3\u0BCD\u0BB3\u0BC0\u0B9F\u0BC1";
+      case "invalid_element":
+        return `${issue2.origin} \u0B87\u0BB2\u0BCD \u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0BAE\u0BA4\u0BBF\u0BAA\u0BCD\u0BAA\u0BC1`;
+      default:
+        return `\u0BA4\u0BB5\u0BB1\u0BBE\u0BA9 \u0B89\u0BB3\u0BCD\u0BB3\u0BC0\u0B9F\u0BC1`;
+    }
+  };
+};
+function ta_default() {
+  return {
+    localeError: error32()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/th.js
+var error33 = () => {
+  const Sizable = {
+    string: { unit: "\u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23", verb: "\u0E04\u0E27\u0E23\u0E21\u0E35" },
+    file: { unit: "\u0E44\u0E1A\u0E15\u0E4C", verb: "\u0E04\u0E27\u0E23\u0E21\u0E35" },
+    array: { unit: "\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23", verb: "\u0E04\u0E27\u0E23\u0E21\u0E35" },
+    set: { unit: "\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23", verb: "\u0E04\u0E27\u0E23\u0E21\u0E35" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "\u0E44\u0E21\u0E48\u0E43\u0E0A\u0E48\u0E15\u0E31\u0E27\u0E40\u0E25\u0E02 (NaN)" : "\u0E15\u0E31\u0E27\u0E40\u0E25\u0E02";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u0E2D\u0E32\u0E23\u0E4C\u0E40\u0E23\u0E22\u0E4C (Array)";
+        }
+        if (data === null) {
+          return "\u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E48\u0E32 (null)";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E17\u0E35\u0E48\u0E1B\u0E49\u0E2D\u0E19",
+    email: "\u0E17\u0E35\u0E48\u0E2D\u0E22\u0E39\u0E48\u0E2D\u0E35\u0E40\u0E21\u0E25",
+    url: "URL",
+    emoji: "\u0E2D\u0E34\u0E42\u0E21\u0E08\u0E34",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48\u0E40\u0E27\u0E25\u0E32\u0E41\u0E1A\u0E1A ISO",
+    date: "\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48\u0E41\u0E1A\u0E1A ISO",
+    time: "\u0E40\u0E27\u0E25\u0E32\u0E41\u0E1A\u0E1A ISO",
+    duration: "\u0E0A\u0E48\u0E27\u0E07\u0E40\u0E27\u0E25\u0E32\u0E41\u0E1A\u0E1A ISO",
+    ipv4: "\u0E17\u0E35\u0E48\u0E2D\u0E22\u0E39\u0E48 IPv4",
+    ipv6: "\u0E17\u0E35\u0E48\u0E2D\u0E22\u0E39\u0E48 IPv6",
+    cidrv4: "\u0E0A\u0E48\u0E27\u0E07 IP \u0E41\u0E1A\u0E1A IPv4",
+    cidrv6: "\u0E0A\u0E48\u0E27\u0E07 IP \u0E41\u0E1A\u0E1A IPv6",
+    base64: "\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E41\u0E1A\u0E1A Base64",
+    base64url: "\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E41\u0E1A\u0E1A Base64 \u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A URL",
+    json_string: "\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E41\u0E1A\u0E1A JSON",
+    e164: "\u0E40\u0E1A\u0E2D\u0E23\u0E4C\u0E42\u0E17\u0E23\u0E28\u0E31\u0E1E\u0E17\u0E4C\u0E23\u0E30\u0E2B\u0E27\u0E48\u0E32\u0E07\u0E1B\u0E23\u0E30\u0E40\u0E17\u0E28 (E.164)",
+    jwt: "\u0E42\u0E17\u0E40\u0E04\u0E19 JWT",
+    template_literal: "\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E17\u0E35\u0E48\u0E1B\u0E49\u0E2D\u0E19"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u0E1B\u0E23\u0E30\u0E40\u0E20\u0E17\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07: \u0E04\u0E27\u0E23\u0E40\u0E1B\u0E47\u0E19 ${issue2.expected} \u0E41\u0E15\u0E48\u0E44\u0E14\u0E49\u0E23\u0E31\u0E1A ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u0E04\u0E48\u0E32\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07: \u0E04\u0E27\u0E23\u0E40\u0E1B\u0E47\u0E19 ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u0E15\u0E31\u0E27\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07: \u0E04\u0E27\u0E23\u0E40\u0E1B\u0E47\u0E19\u0E2B\u0E19\u0E36\u0E48\u0E07\u0E43\u0E19 ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "\u0E44\u0E21\u0E48\u0E40\u0E01\u0E34\u0E19" : "\u0E19\u0E49\u0E2D\u0E22\u0E01\u0E27\u0E48\u0E32";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\u0E40\u0E01\u0E34\u0E19\u0E01\u0E33\u0E2B\u0E19\u0E14: ${issue2.origin ?? "\u0E04\u0E48\u0E32"} \u0E04\u0E27\u0E23\u0E21\u0E35${adj} ${issue2.maximum.toString()} ${sizing.unit ?? "\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23"}`;
+        return `\u0E40\u0E01\u0E34\u0E19\u0E01\u0E33\u0E2B\u0E19\u0E14: ${issue2.origin ?? "\u0E04\u0E48\u0E32"} \u0E04\u0E27\u0E23\u0E21\u0E35${adj} ${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? "\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22" : "\u0E21\u0E32\u0E01\u0E01\u0E27\u0E48\u0E32";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u0E19\u0E49\u0E2D\u0E22\u0E01\u0E27\u0E48\u0E32\u0E01\u0E33\u0E2B\u0E19\u0E14: ${issue2.origin} \u0E04\u0E27\u0E23\u0E21\u0E35${adj} ${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `\u0E19\u0E49\u0E2D\u0E22\u0E01\u0E27\u0E48\u0E32\u0E01\u0E33\u0E2B\u0E19\u0E14: ${issue2.origin} \u0E04\u0E27\u0E23\u0E21\u0E35${adj} ${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07: \u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E15\u0E49\u0E2D\u0E07\u0E02\u0E36\u0E49\u0E19\u0E15\u0E49\u0E19\u0E14\u0E49\u0E27\u0E22 "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07: \u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E15\u0E49\u0E2D\u0E07\u0E25\u0E07\u0E17\u0E49\u0E32\u0E22\u0E14\u0E49\u0E27\u0E22 "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07: \u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21\u0E15\u0E49\u0E2D\u0E07\u0E21\u0E35 "${_issue.includes}" \u0E2D\u0E22\u0E39\u0E48\u0E43\u0E19\u0E02\u0E49\u0E2D\u0E04\u0E27\u0E32\u0E21`;
+        if (_issue.format === "regex")
+          return `\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07: \u0E15\u0E49\u0E2D\u0E07\u0E15\u0E23\u0E07\u0E01\u0E31\u0E1A\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A\u0E17\u0E35\u0E48\u0E01\u0E33\u0E2B\u0E19\u0E14 ${_issue.pattern}`;
+        return `\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07: ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u0E15\u0E31\u0E27\u0E40\u0E25\u0E02\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07: \u0E15\u0E49\u0E2D\u0E07\u0E40\u0E1B\u0E47\u0E19\u0E08\u0E33\u0E19\u0E27\u0E19\u0E17\u0E35\u0E48\u0E2B\u0E32\u0E23\u0E14\u0E49\u0E27\u0E22 ${issue2.divisor} \u0E44\u0E14\u0E49\u0E25\u0E07\u0E15\u0E31\u0E27`;
+      case "unrecognized_keys":
+        return `\u0E1E\u0E1A\u0E04\u0E35\u0E22\u0E4C\u0E17\u0E35\u0E48\u0E44\u0E21\u0E48\u0E23\u0E39\u0E49\u0E08\u0E31\u0E01: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\u0E04\u0E35\u0E22\u0E4C\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07\u0E43\u0E19 ${issue2.origin}`;
+      case "invalid_union":
+        return "\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07: \u0E44\u0E21\u0E48\u0E15\u0E23\u0E07\u0E01\u0E31\u0E1A\u0E23\u0E39\u0E1B\u0E41\u0E1A\u0E1A\u0E22\u0E39\u0E40\u0E19\u0E35\u0E22\u0E19\u0E17\u0E35\u0E48\u0E01\u0E33\u0E2B\u0E19\u0E14\u0E44\u0E27\u0E49";
+      case "invalid_element":
+        return `\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07\u0E43\u0E19 ${issue2.origin}`;
+      default:
+        return `\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E44\u0E21\u0E48\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07`;
+    }
+  };
+};
+function th_default() {
+  return {
+    localeError: error33()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/tr.js
+var parsedType3 = (data) => {
+  const t = typeof data;
+  switch (t) {
+    case "number": {
+      return Number.isNaN(data) ? "NaN" : "number";
+    }
+    case "object": {
+      if (Array.isArray(data)) {
+        return "array";
+      }
+      if (data === null) {
+        return "null";
+      }
+      if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+        return data.constructor.name;
+      }
+    }
+  }
+  return t;
+};
+var error34 = () => {
+  const Sizable = {
+    string: { unit: "karakter", verb: "olmal\u0131" },
+    file: { unit: "bayt", verb: "olmal\u0131" },
+    array: { unit: "\xF6\u011Fe", verb: "olmal\u0131" },
+    set: { unit: "\xF6\u011Fe", verb: "olmal\u0131" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const Nouns = {
+    regex: "girdi",
+    email: "e-posta adresi",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO tarih ve saat",
+    date: "ISO tarih",
+    time: "ISO saat",
+    duration: "ISO s\xFCre",
+    ipv4: "IPv4 adresi",
+    ipv6: "IPv6 adresi",
+    cidrv4: "IPv4 aral\u0131\u011F\u0131",
+    cidrv6: "IPv6 aral\u0131\u011F\u0131",
+    base64: "base64 ile \u015Fifrelenmi\u015F metin",
+    base64url: "base64url ile \u015Fifrelenmi\u015F metin",
+    json_string: "JSON dizesi",
+    e164: "E.164 say\u0131s\u0131",
+    jwt: "JWT",
+    template_literal: "\u015Eablon dizesi"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `Ge\xE7ersiz de\u011Fer: beklenen ${issue2.expected}, al\u0131nan ${parsedType3(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `Ge\xE7ersiz de\u011Fer: beklenen ${stringifyPrimitive(issue2.values[0])}`;
+        return `Ge\xE7ersiz se\xE7enek: a\u015Fa\u011F\u0131dakilerden biri olmal\u0131: ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\xC7ok b\xFCy\xFCk: beklenen ${issue2.origin ?? "de\u011Fer"} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "\xF6\u011Fe"}`;
+        return `\xC7ok b\xFCy\xFCk: beklenen ${issue2.origin ?? "de\u011Fer"} ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\xC7ok k\xFC\xE7\xFCk: beklenen ${issue2.origin} ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        return `\xC7ok k\xFC\xE7\xFCk: beklenen ${issue2.origin} ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Ge\xE7ersiz metin: "${_issue.prefix}" ile ba\u015Flamal\u0131`;
+        if (_issue.format === "ends_with")
+          return `Ge\xE7ersiz metin: "${_issue.suffix}" ile bitmeli`;
+        if (_issue.format === "includes")
+          return `Ge\xE7ersiz metin: "${_issue.includes}" i\xE7ermeli`;
+        if (_issue.format === "regex")
+          return `Ge\xE7ersiz metin: ${_issue.pattern} desenine uymal\u0131`;
+        return `Ge\xE7ersiz ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `Ge\xE7ersiz say\u0131: ${issue2.divisor} ile tam b\xF6l\xFCnebilmeli`;
+      case "unrecognized_keys":
+        return `Tan\u0131nmayan anahtar${issue2.keys.length > 1 ? "lar" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `${issue2.origin} i\xE7inde ge\xE7ersiz anahtar`;
+      case "invalid_union":
+        return "Ge\xE7ersiz de\u011Fer";
+      case "invalid_element":
+        return `${issue2.origin} i\xE7inde ge\xE7ersiz de\u011Fer`;
+      default:
+        return `Ge\xE7ersiz de\u011Fer`;
+    }
+  };
+};
+function tr_default() {
+  return {
+    localeError: error34()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ua.js
+var error35 = () => {
+  const Sizable = {
+    string: { unit: "\u0441\u0438\u043C\u0432\u043E\u043B\u0456\u0432", verb: "\u043C\u0430\u0442\u0438\u043C\u0435" },
+    file: { unit: "\u0431\u0430\u0439\u0442\u0456\u0432", verb: "\u043C\u0430\u0442\u0438\u043C\u0435" },
+    array: { unit: "\u0435\u043B\u0435\u043C\u0435\u043D\u0442\u0456\u0432", verb: "\u043C\u0430\u0442\u0438\u043C\u0435" },
+    set: { unit: "\u0435\u043B\u0435\u043C\u0435\u043D\u0442\u0456\u0432", verb: "\u043C\u0430\u0442\u0438\u043C\u0435" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "\u0447\u0438\u0441\u043B\u043E";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u043C\u0430\u0441\u0438\u0432";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0432\u0445\u0456\u0434\u043D\u0456 \u0434\u0430\u043D\u0456",
+    email: "\u0430\u0434\u0440\u0435\u0441\u0430 \u0435\u043B\u0435\u043A\u0442\u0440\u043E\u043D\u043D\u043E\u0457 \u043F\u043E\u0448\u0442\u0438",
+    url: "URL",
+    emoji: "\u0435\u043C\u043E\u0434\u0437\u0456",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "\u0434\u0430\u0442\u0430 \u0442\u0430 \u0447\u0430\u0441 ISO",
+    date: "\u0434\u0430\u0442\u0430 ISO",
+    time: "\u0447\u0430\u0441 ISO",
+    duration: "\u0442\u0440\u0438\u0432\u0430\u043B\u0456\u0441\u0442\u044C ISO",
+    ipv4: "\u0430\u0434\u0440\u0435\u0441\u0430 IPv4",
+    ipv6: "\u0430\u0434\u0440\u0435\u0441\u0430 IPv6",
+    cidrv4: "\u0434\u0456\u0430\u043F\u0430\u0437\u043E\u043D IPv4",
+    cidrv6: "\u0434\u0456\u0430\u043F\u0430\u0437\u043E\u043D IPv6",
+    base64: "\u0440\u044F\u0434\u043E\u043A \u0443 \u043A\u043E\u0434\u0443\u0432\u0430\u043D\u043D\u0456 base64",
+    base64url: "\u0440\u044F\u0434\u043E\u043A \u0443 \u043A\u043E\u0434\u0443\u0432\u0430\u043D\u043D\u0456 base64url",
+    json_string: "\u0440\u044F\u0434\u043E\u043A JSON",
+    e164: "\u043D\u043E\u043C\u0435\u0440 E.164",
+    jwt: "JWT",
+    template_literal: "\u0432\u0445\u0456\u0434\u043D\u0456 \u0434\u0430\u043D\u0456"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0456 \u0432\u0445\u0456\u0434\u043D\u0456 \u0434\u0430\u043D\u0456: \u043E\u0447\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F ${issue2.expected}, \u043E\u0442\u0440\u0438\u043C\u0430\u043D\u043E ${parsedType4(issue2.input)}`;
+      // return `Неправильні вхідні дані: очікується ${issue.expected}, отримано ${util.getParsedType(issue.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0456 \u0432\u0445\u0456\u0434\u043D\u0456 \u0434\u0430\u043D\u0456: \u043E\u0447\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0430 \u043E\u043F\u0446\u0456\u044F: \u043E\u0447\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F \u043E\u0434\u043D\u0435 \u0437 ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\u0417\u0430\u043D\u0430\u0434\u0442\u043E \u0432\u0435\u043B\u0438\u043A\u0435: \u043E\u0447\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F, \u0449\u043E ${issue2.origin ?? "\u0437\u043D\u0430\u0447\u0435\u043D\u043D\u044F"} ${sizing.verb} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "\u0435\u043B\u0435\u043C\u0435\u043D\u0442\u0456\u0432"}`;
+        return `\u0417\u0430\u043D\u0430\u0434\u0442\u043E \u0432\u0435\u043B\u0438\u043A\u0435: \u043E\u0447\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F, \u0449\u043E ${issue2.origin ?? "\u0437\u043D\u0430\u0447\u0435\u043D\u043D\u044F"} \u0431\u0443\u0434\u0435 ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u0417\u0430\u043D\u0430\u0434\u0442\u043E \u043C\u0430\u043B\u0435: \u043E\u0447\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F, \u0449\u043E ${issue2.origin} ${sizing.verb} ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `\u0417\u0430\u043D\u0430\u0434\u0442\u043E \u043C\u0430\u043B\u0435: \u043E\u0447\u0456\u043A\u0443\u0454\u0442\u044C\u0441\u044F, \u0449\u043E ${issue2.origin} \u0431\u0443\u0434\u0435 ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0438\u0439 \u0440\u044F\u0434\u043E\u043A: \u043F\u043E\u0432\u0438\u043D\u0435\u043D \u043F\u043E\u0447\u0438\u043D\u0430\u0442\u0438\u0441\u044F \u0437 "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0438\u0439 \u0440\u044F\u0434\u043E\u043A: \u043F\u043E\u0432\u0438\u043D\u0435\u043D \u0437\u0430\u043A\u0456\u043D\u0447\u0443\u0432\u0430\u0442\u0438\u0441\u044F \u043D\u0430 "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0438\u0439 \u0440\u044F\u0434\u043E\u043A: \u043F\u043E\u0432\u0438\u043D\u0435\u043D \u043C\u0456\u0441\u0442\u0438\u0442\u0438 "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0438\u0439 \u0440\u044F\u0434\u043E\u043A: \u043F\u043E\u0432\u0438\u043D\u0435\u043D \u0432\u0456\u0434\u043F\u043E\u0432\u0456\u0434\u0430\u0442\u0438 \u0448\u0430\u0431\u043B\u043E\u043D\u0443 ${_issue.pattern}`;
+        return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0438\u0439 ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0435 \u0447\u0438\u0441\u043B\u043E: \u043F\u043E\u0432\u0438\u043D\u043D\u043E \u0431\u0443\u0442\u0438 \u043A\u0440\u0430\u0442\u043D\u0438\u043C ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `\u041D\u0435\u0440\u043E\u0437\u043F\u0456\u0437\u043D\u0430\u043D\u0438\u0439 \u043A\u043B\u044E\u0447${issue2.keys.length > 1 ? "\u0456" : ""}: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0438\u0439 \u043A\u043B\u044E\u0447 \u0443 ${issue2.origin}`;
+      case "invalid_union":
+        return "\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0456 \u0432\u0445\u0456\u0434\u043D\u0456 \u0434\u0430\u043D\u0456";
+      case "invalid_element":
+        return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0435 \u0437\u043D\u0430\u0447\u0435\u043D\u043D\u044F \u0443 ${issue2.origin}`;
+      default:
+        return `\u041D\u0435\u043F\u0440\u0430\u0432\u0438\u043B\u044C\u043D\u0456 \u0432\u0445\u0456\u0434\u043D\u0456 \u0434\u0430\u043D\u0456`;
+    }
+  };
+};
+function ua_default() {
+  return {
+    localeError: error35()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ur.js
+var error36 = () => {
+  const Sizable = {
+    string: { unit: "\u062D\u0631\u0648\u0641", verb: "\u06C1\u0648\u0646\u0627" },
+    file: { unit: "\u0628\u0627\u0626\u0679\u0633", verb: "\u06C1\u0648\u0646\u0627" },
+    array: { unit: "\u0622\u0626\u0679\u0645\u0632", verb: "\u06C1\u0648\u0646\u0627" },
+    set: { unit: "\u0622\u0626\u0679\u0645\u0632", verb: "\u06C1\u0648\u0646\u0627" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "\u0646\u0645\u0628\u0631";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u0622\u0631\u06D2";
+        }
+        if (data === null) {
+          return "\u0646\u0644";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0627\u0646 \u067E\u0679",
+    email: "\u0627\u06CC \u0645\u06CC\u0644 \u0627\u06CC\u0688\u0631\u06CC\u0633",
+    url: "\u06CC\u0648 \u0622\u0631 \u0627\u06CC\u0644",
+    emoji: "\u0627\u06CC\u0645\u0648\u062C\u06CC",
+    uuid: "\u06CC\u0648 \u06CC\u0648 \u0622\u0626\u06CC \u0688\u06CC",
+    uuidv4: "\u06CC\u0648 \u06CC\u0648 \u0622\u0626\u06CC \u0688\u06CC \u0648\u06CC 4",
+    uuidv6: "\u06CC\u0648 \u06CC\u0648 \u0622\u0626\u06CC \u0688\u06CC \u0648\u06CC 6",
+    nanoid: "\u0646\u06CC\u0646\u0648 \u0622\u0626\u06CC \u0688\u06CC",
+    guid: "\u062C\u06CC \u06CC\u0648 \u0622\u0626\u06CC \u0688\u06CC",
+    cuid: "\u0633\u06CC \u06CC\u0648 \u0622\u0626\u06CC \u0688\u06CC",
+    cuid2: "\u0633\u06CC \u06CC\u0648 \u0622\u0626\u06CC \u0688\u06CC 2",
+    ulid: "\u06CC\u0648 \u0627\u06CC\u0644 \u0622\u0626\u06CC \u0688\u06CC",
+    xid: "\u0627\u06CC\u06A9\u0633 \u0622\u0626\u06CC \u0688\u06CC",
+    ksuid: "\u06A9\u06D2 \u0627\u06CC\u0633 \u06CC\u0648 \u0622\u0626\u06CC \u0688\u06CC",
+    datetime: "\u0622\u0626\u06CC \u0627\u06CC\u0633 \u0627\u0648 \u0688\u06CC\u0679 \u0679\u0627\u0626\u0645",
+    date: "\u0622\u0626\u06CC \u0627\u06CC\u0633 \u0627\u0648 \u062A\u0627\u0631\u06CC\u062E",
+    time: "\u0622\u0626\u06CC \u0627\u06CC\u0633 \u0627\u0648 \u0648\u0642\u062A",
+    duration: "\u0622\u0626\u06CC \u0627\u06CC\u0633 \u0627\u0648 \u0645\u062F\u062A",
+    ipv4: "\u0622\u0626\u06CC \u067E\u06CC \u0648\u06CC 4 \u0627\u06CC\u0688\u0631\u06CC\u0633",
+    ipv6: "\u0622\u0626\u06CC \u067E\u06CC \u0648\u06CC 6 \u0627\u06CC\u0688\u0631\u06CC\u0633",
+    cidrv4: "\u0622\u0626\u06CC \u067E\u06CC \u0648\u06CC 4 \u0631\u06CC\u0646\u062C",
+    cidrv6: "\u0622\u0626\u06CC \u067E\u06CC \u0648\u06CC 6 \u0631\u06CC\u0646\u062C",
+    base64: "\u0628\u06CC\u0633 64 \u0627\u0646 \u06A9\u0648\u0688\u0688 \u0633\u0679\u0631\u0646\u06AF",
+    base64url: "\u0628\u06CC\u0633 64 \u06CC\u0648 \u0622\u0631 \u0627\u06CC\u0644 \u0627\u0646 \u06A9\u0648\u0688\u0688 \u0633\u0679\u0631\u0646\u06AF",
+    json_string: "\u062C\u06D2 \u0627\u06CC\u0633 \u0627\u0648 \u0627\u06CC\u0646 \u0633\u0679\u0631\u0646\u06AF",
+    e164: "\u0627\u06CC 164 \u0646\u0645\u0628\u0631",
+    jwt: "\u062C\u06D2 \u0688\u0628\u0644\u06CC\u0648 \u0679\u06CC",
+    template_literal: "\u0627\u0646 \u067E\u0679"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u063A\u0644\u0637 \u0627\u0646 \u067E\u0679: ${issue2.expected} \u0645\u062A\u0648\u0642\u0639 \u062A\u06BE\u0627\u060C ${parsedType4(issue2.input)} \u0645\u0648\u0635\u0648\u0644 \u06C1\u0648\u0627`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u063A\u0644\u0637 \u0627\u0646 \u067E\u0679: ${stringifyPrimitive(issue2.values[0])} \u0645\u062A\u0648\u0642\u0639 \u062A\u06BE\u0627`;
+        return `\u063A\u0644\u0637 \u0622\u067E\u0634\u0646: ${joinValues(issue2.values, "|")} \u0645\u06CC\u06BA \u0633\u06D2 \u0627\u06CC\u06A9 \u0645\u062A\u0648\u0642\u0639 \u062A\u06BE\u0627`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\u0628\u06C1\u062A \u0628\u0691\u0627: ${issue2.origin ?? "\u0648\u06CC\u0644\u06CC\u0648"} \u06A9\u06D2 ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "\u0639\u0646\u0627\u0635\u0631"} \u06C1\u0648\u0646\u06D2 \u0645\u062A\u0648\u0642\u0639 \u062A\u06BE\u06D2`;
+        return `\u0628\u06C1\u062A \u0628\u0691\u0627: ${issue2.origin ?? "\u0648\u06CC\u0644\u06CC\u0648"} \u06A9\u0627 ${adj}${issue2.maximum.toString()} \u06C1\u0648\u0646\u0627 \u0645\u062A\u0648\u0642\u0639 \u062A\u06BE\u0627`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u0628\u06C1\u062A \u0686\u06BE\u0648\u0679\u0627: ${issue2.origin} \u06A9\u06D2 ${adj}${issue2.minimum.toString()} ${sizing.unit} \u06C1\u0648\u0646\u06D2 \u0645\u062A\u0648\u0642\u0639 \u062A\u06BE\u06D2`;
+        }
+        return `\u0628\u06C1\u062A \u0686\u06BE\u0648\u0679\u0627: ${issue2.origin} \u06A9\u0627 ${adj}${issue2.minimum.toString()} \u06C1\u0648\u0646\u0627 \u0645\u062A\u0648\u0642\u0639 \u062A\u06BE\u0627`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `\u063A\u0644\u0637 \u0633\u0679\u0631\u0646\u06AF: "${_issue.prefix}" \u0633\u06D2 \u0634\u0631\u0648\u0639 \u06C1\u0648\u0646\u0627 \u0686\u0627\u06C1\u06CC\u06D2`;
+        }
+        if (_issue.format === "ends_with")
+          return `\u063A\u0644\u0637 \u0633\u0679\u0631\u0646\u06AF: "${_issue.suffix}" \u067E\u0631 \u062E\u062A\u0645 \u06C1\u0648\u0646\u0627 \u0686\u0627\u06C1\u06CC\u06D2`;
+        if (_issue.format === "includes")
+          return `\u063A\u0644\u0637 \u0633\u0679\u0631\u0646\u06AF: "${_issue.includes}" \u0634\u0627\u0645\u0644 \u06C1\u0648\u0646\u0627 \u0686\u0627\u06C1\u06CC\u06D2`;
+        if (_issue.format === "regex")
+          return `\u063A\u0644\u0637 \u0633\u0679\u0631\u0646\u06AF: \u067E\u06CC\u0679\u0631\u0646 ${_issue.pattern} \u0633\u06D2 \u0645\u06CC\u0686 \u06C1\u0648\u0646\u0627 \u0686\u0627\u06C1\u06CC\u06D2`;
+        return `\u063A\u0644\u0637 ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u063A\u0644\u0637 \u0646\u0645\u0628\u0631: ${issue2.divisor} \u06A9\u0627 \u0645\u0636\u0627\u0639\u0641 \u06C1\u0648\u0646\u0627 \u0686\u0627\u06C1\u06CC\u06D2`;
+      case "unrecognized_keys":
+        return `\u063A\u06CC\u0631 \u062A\u0633\u0644\u06CC\u0645 \u0634\u062F\u06C1 \u06A9\u06CC${issue2.keys.length > 1 ? "\u0632" : ""}: ${joinValues(issue2.keys, "\u060C ")}`;
+      case "invalid_key":
+        return `${issue2.origin} \u0645\u06CC\u06BA \u063A\u0644\u0637 \u06A9\u06CC`;
+      case "invalid_union":
+        return "\u063A\u0644\u0637 \u0627\u0646 \u067E\u0679";
+      case "invalid_element":
+        return `${issue2.origin} \u0645\u06CC\u06BA \u063A\u0644\u0637 \u0648\u06CC\u0644\u06CC\u0648`;
+      default:
+        return `\u063A\u0644\u0637 \u0627\u0646 \u067E\u0679`;
+    }
+  };
+};
+function ur_default() {
+  return {
+    localeError: error36()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/vi.js
+var error37 = () => {
+  const Sizable = {
+    string: { unit: "k\xFD t\u1EF1", verb: "c\xF3" },
+    file: { unit: "byte", verb: "c\xF3" },
+    array: { unit: "ph\u1EA7n t\u1EED", verb: "c\xF3" },
+    set: { unit: "ph\u1EA7n t\u1EED", verb: "c\xF3" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "s\u1ED1";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "m\u1EA3ng";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u0111\u1EA7u v\xE0o",
+    email: "\u0111\u1ECBa ch\u1EC9 email",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ng\xE0y gi\u1EDD ISO",
+    date: "ng\xE0y ISO",
+    time: "gi\u1EDD ISO",
+    duration: "kho\u1EA3ng th\u1EDDi gian ISO",
+    ipv4: "\u0111\u1ECBa ch\u1EC9 IPv4",
+    ipv6: "\u0111\u1ECBa ch\u1EC9 IPv6",
+    cidrv4: "d\u1EA3i IPv4",
+    cidrv6: "d\u1EA3i IPv6",
+    base64: "chu\u1ED7i m\xE3 h\xF3a base64",
+    base64url: "chu\u1ED7i m\xE3 h\xF3a base64url",
+    json_string: "chu\u1ED7i JSON",
+    e164: "s\u1ED1 E.164",
+    jwt: "JWT",
+    template_literal: "\u0111\u1EA7u v\xE0o"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u0110\u1EA7u v\xE0o kh\xF4ng h\u1EE3p l\u1EC7: mong \u0111\u1EE3i ${issue2.expected}, nh\u1EADn \u0111\u01B0\u1EE3c ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u0110\u1EA7u v\xE0o kh\xF4ng h\u1EE3p l\u1EC7: mong \u0111\u1EE3i ${stringifyPrimitive(issue2.values[0])}`;
+        return `T\xF9y ch\u1ECDn kh\xF4ng h\u1EE3p l\u1EC7: mong \u0111\u1EE3i m\u1ED9t trong c\xE1c gi\xE1 tr\u1ECB ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `Qu\xE1 l\u1EDBn: mong \u0111\u1EE3i ${issue2.origin ?? "gi\xE1 tr\u1ECB"} ${sizing.verb} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "ph\u1EA7n t\u1EED"}`;
+        return `Qu\xE1 l\u1EDBn: mong \u0111\u1EE3i ${issue2.origin ?? "gi\xE1 tr\u1ECB"} ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `Qu\xE1 nh\u1ECF: mong \u0111\u1EE3i ${issue2.origin} ${sizing.verb} ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Qu\xE1 nh\u1ECF: mong \u0111\u1EE3i ${issue2.origin} ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `Chu\u1ED7i kh\xF4ng h\u1EE3p l\u1EC7: ph\u1EA3i b\u1EAFt \u0111\u1EA7u b\u1EB1ng "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Chu\u1ED7i kh\xF4ng h\u1EE3p l\u1EC7: ph\u1EA3i k\u1EBFt th\xFAc b\u1EB1ng "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Chu\u1ED7i kh\xF4ng h\u1EE3p l\u1EC7: ph\u1EA3i bao g\u1ED3m "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Chu\u1ED7i kh\xF4ng h\u1EE3p l\u1EC7: ph\u1EA3i kh\u1EDBp v\u1EDBi m\u1EABu ${_issue.pattern}`;
+        return `${Nouns[_issue.format] ?? issue2.format} kh\xF4ng h\u1EE3p l\u1EC7`;
+      }
+      case "not_multiple_of":
+        return `S\u1ED1 kh\xF4ng h\u1EE3p l\u1EC7: ph\u1EA3i l\xE0 b\u1ED9i s\u1ED1 c\u1EE7a ${issue2.divisor}`;
+      case "unrecognized_keys":
+        return `Kh\xF3a kh\xF4ng \u0111\u01B0\u1EE3c nh\u1EADn d\u1EA1ng: ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `Kh\xF3a kh\xF4ng h\u1EE3p l\u1EC7 trong ${issue2.origin}`;
+      case "invalid_union":
+        return "\u0110\u1EA7u v\xE0o kh\xF4ng h\u1EE3p l\u1EC7";
+      case "invalid_element":
+        return `Gi\xE1 tr\u1ECB kh\xF4ng h\u1EE3p l\u1EC7 trong ${issue2.origin}`;
+      default:
+        return `\u0110\u1EA7u v\xE0o kh\xF4ng h\u1EE3p l\u1EC7`;
+    }
+  };
+};
+function vi_default() {
+  return {
+    localeError: error37()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/zh-CN.js
+var error38 = () => {
+  const Sizable = {
+    string: { unit: "\u5B57\u7B26", verb: "\u5305\u542B" },
+    file: { unit: "\u5B57\u8282", verb: "\u5305\u542B" },
+    array: { unit: "\u9879", verb: "\u5305\u542B" },
+    set: { unit: "\u9879", verb: "\u5305\u542B" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "\u975E\u6570\u5B57(NaN)" : "\u6570\u5B57";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "\u6570\u7EC4";
+        }
+        if (data === null) {
+          return "\u7A7A\u503C(null)";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u8F93\u5165",
+    email: "\u7535\u5B50\u90AE\u4EF6",
+    url: "URL",
+    emoji: "\u8868\u60C5\u7B26\u53F7",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO\u65E5\u671F\u65F6\u95F4",
+    date: "ISO\u65E5\u671F",
+    time: "ISO\u65F6\u95F4",
+    duration: "ISO\u65F6\u957F",
+    ipv4: "IPv4\u5730\u5740",
+    ipv6: "IPv6\u5730\u5740",
+    cidrv4: "IPv4\u7F51\u6BB5",
+    cidrv6: "IPv6\u7F51\u6BB5",
+    base64: "base64\u7F16\u7801\u5B57\u7B26\u4E32",
+    base64url: "base64url\u7F16\u7801\u5B57\u7B26\u4E32",
+    json_string: "JSON\u5B57\u7B26\u4E32",
+    e164: "E.164\u53F7\u7801",
+    jwt: "JWT",
+    template_literal: "\u8F93\u5165"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u65E0\u6548\u8F93\u5165\uFF1A\u671F\u671B ${issue2.expected}\uFF0C\u5B9E\u9645\u63A5\u6536 ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u65E0\u6548\u8F93\u5165\uFF1A\u671F\u671B ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u65E0\u6548\u9009\u9879\uFF1A\u671F\u671B\u4EE5\u4E0B\u4E4B\u4E00 ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\u6570\u503C\u8FC7\u5927\uFF1A\u671F\u671B ${issue2.origin ?? "\u503C"} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "\u4E2A\u5143\u7D20"}`;
+        return `\u6570\u503C\u8FC7\u5927\uFF1A\u671F\u671B ${issue2.origin ?? "\u503C"} ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u6570\u503C\u8FC7\u5C0F\uFF1A\u671F\u671B ${issue2.origin} ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `\u6570\u503C\u8FC7\u5C0F\uFF1A\u671F\u671B ${issue2.origin} ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with")
+          return `\u65E0\u6548\u5B57\u7B26\u4E32\uFF1A\u5FC5\u987B\u4EE5 "${_issue.prefix}" \u5F00\u5934`;
+        if (_issue.format === "ends_with")
+          return `\u65E0\u6548\u5B57\u7B26\u4E32\uFF1A\u5FC5\u987B\u4EE5 "${_issue.suffix}" \u7ED3\u5C3E`;
+        if (_issue.format === "includes")
+          return `\u65E0\u6548\u5B57\u7B26\u4E32\uFF1A\u5FC5\u987B\u5305\u542B "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u65E0\u6548\u5B57\u7B26\u4E32\uFF1A\u5FC5\u987B\u6EE1\u8DB3\u6B63\u5219\u8868\u8FBE\u5F0F ${_issue.pattern}`;
+        return `\u65E0\u6548${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u65E0\u6548\u6570\u5B57\uFF1A\u5FC5\u987B\u662F ${issue2.divisor} \u7684\u500D\u6570`;
+      case "unrecognized_keys":
+        return `\u51FA\u73B0\u672A\u77E5\u7684\u952E(key): ${joinValues(issue2.keys, ", ")}`;
+      case "invalid_key":
+        return `${issue2.origin} \u4E2D\u7684\u952E(key)\u65E0\u6548`;
+      case "invalid_union":
+        return "\u65E0\u6548\u8F93\u5165";
+      case "invalid_element":
+        return `${issue2.origin} \u4E2D\u5305\u542B\u65E0\u6548\u503C(value)`;
+      default:
+        return `\u65E0\u6548\u8F93\u5165`;
+    }
+  };
+};
+function zh_CN_default() {
+  return {
+    localeError: error38()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/zh-TW.js
+var error39 = () => {
+  const Sizable = {
+    string: { unit: "\u5B57\u5143", verb: "\u64C1\u6709" },
+    file: { unit: "\u4F4D\u5143\u7D44", verb: "\u64C1\u6709" },
+    array: { unit: "\u9805\u76EE", verb: "\u64C1\u6709" },
+    set: { unit: "\u9805\u76EE", verb: "\u64C1\u6709" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const parsedType4 = (data) => {
+    const t = typeof data;
+    switch (t) {
+      case "number": {
+        return Number.isNaN(data) ? "NaN" : "number";
+      }
+      case "object": {
+        if (Array.isArray(data)) {
+          return "array";
+        }
+        if (data === null) {
+          return "null";
+        }
+        if (Object.getPrototypeOf(data) !== Object.prototype && data.constructor) {
+          return data.constructor.name;
+        }
+      }
+    }
+    return t;
+  };
+  const Nouns = {
+    regex: "\u8F38\u5165",
+    email: "\u90F5\u4EF6\u5730\u5740",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO \u65E5\u671F\u6642\u9593",
+    date: "ISO \u65E5\u671F",
+    time: "ISO \u6642\u9593",
+    duration: "ISO \u671F\u9593",
+    ipv4: "IPv4 \u4F4D\u5740",
+    ipv6: "IPv6 \u4F4D\u5740",
+    cidrv4: "IPv4 \u7BC4\u570D",
+    cidrv6: "IPv6 \u7BC4\u570D",
+    base64: "base64 \u7DE8\u78BC\u5B57\u4E32",
+    base64url: "base64url \u7DE8\u78BC\u5B57\u4E32",
+    json_string: "JSON \u5B57\u4E32",
+    e164: "E.164 \u6578\u503C",
+    jwt: "JWT",
+    template_literal: "\u8F38\u5165"
+  };
+  return (issue2) => {
+    switch (issue2.code) {
+      case "invalid_type":
+        return `\u7121\u6548\u7684\u8F38\u5165\u503C\uFF1A\u9810\u671F\u70BA ${issue2.expected}\uFF0C\u4F46\u6536\u5230 ${parsedType4(issue2.input)}`;
+      case "invalid_value":
+        if (issue2.values.length === 1)
+          return `\u7121\u6548\u7684\u8F38\u5165\u503C\uFF1A\u9810\u671F\u70BA ${stringifyPrimitive(issue2.values[0])}`;
+        return `\u7121\u6548\u7684\u9078\u9805\uFF1A\u9810\u671F\u70BA\u4EE5\u4E0B\u5176\u4E2D\u4E4B\u4E00 ${joinValues(issue2.values, "|")}`;
+      case "too_big": {
+        const adj = issue2.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue2.origin);
+        if (sizing)
+          return `\u6578\u503C\u904E\u5927\uFF1A\u9810\u671F ${issue2.origin ?? "\u503C"} \u61C9\u70BA ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "\u500B\u5143\u7D20"}`;
+        return `\u6578\u503C\u904E\u5927\uFF1A\u9810\u671F ${issue2.origin ?? "\u503C"} \u61C9\u70BA ${adj}${issue2.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue2.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue2.origin);
+        if (sizing) {
+          return `\u6578\u503C\u904E\u5C0F\uFF1A\u9810\u671F ${issue2.origin} \u61C9\u70BA ${adj}${issue2.minimum.toString()} ${sizing.unit}`;
+        }
+        return `\u6578\u503C\u904E\u5C0F\uFF1A\u9810\u671F ${issue2.origin} \u61C9\u70BA ${adj}${issue2.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue2;
+        if (_issue.format === "starts_with") {
+          return `\u7121\u6548\u7684\u5B57\u4E32\uFF1A\u5FC5\u9808\u4EE5 "${_issue.prefix}" \u958B\u982D`;
+        }
+        if (_issue.format === "ends_with")
+          return `\u7121\u6548\u7684\u5B57\u4E32\uFF1A\u5FC5\u9808\u4EE5 "${_issue.suffix}" \u7D50\u5C3E`;
+        if (_issue.format === "includes")
+          return `\u7121\u6548\u7684\u5B57\u4E32\uFF1A\u5FC5\u9808\u5305\u542B "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u7121\u6548\u7684\u5B57\u4E32\uFF1A\u5FC5\u9808\u7B26\u5408\u683C\u5F0F ${_issue.pattern}`;
+        return `\u7121\u6548\u7684 ${Nouns[_issue.format] ?? issue2.format}`;
+      }
+      case "not_multiple_of":
+        return `\u7121\u6548\u7684\u6578\u5B57\uFF1A\u5FC5\u9808\u70BA ${issue2.divisor} \u7684\u500D\u6578`;
+      case "unrecognized_keys":
+        return `\u7121\u6CD5\u8B58\u5225\u7684\u9375\u503C${issue2.keys.length > 1 ? "\u5011" : ""}\uFF1A${joinValues(issue2.keys, "\u3001")}`;
+      case "invalid_key":
+        return `${issue2.origin} \u4E2D\u6709\u7121\u6548\u7684\u9375\u503C`;
+      case "invalid_union":
+        return "\u7121\u6548\u7684\u8F38\u5165\u503C";
+      case "invalid_element":
+        return `${issue2.origin} \u4E2D\u6709\u7121\u6548\u7684\u503C`;
+      default:
+        return `\u7121\u6548\u7684\u8F38\u5165\u503C`;
+    }
+  };
+};
+function zh_TW_default() {
+  return {
+    localeError: error39()
+  };
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/registries.js
+var $output = /* @__PURE__ */ Symbol("ZodOutput");
+var $input = /* @__PURE__ */ Symbol("ZodInput");
+var $ZodRegistry = class {
+  constructor() {
+    this._map = /* @__PURE__ */ new Map();
+    this._idmap = /* @__PURE__ */ new Map();
+  }
+  add(schema, ..._meta) {
+    const meta = _meta[0];
+    this._map.set(schema, meta);
+    if (meta && typeof meta === "object" && "id" in meta) {
+      if (this._idmap.has(meta.id)) {
+        throw new Error(`ID ${meta.id} already exists in the registry`);
+      }
+      this._idmap.set(meta.id, schema);
+    }
+    return this;
+  }
+  clear() {
+    this._map = /* @__PURE__ */ new Map();
+    this._idmap = /* @__PURE__ */ new Map();
+    return this;
+  }
+  remove(schema) {
+    const meta = this._map.get(schema);
+    if (meta && typeof meta === "object" && "id" in meta) {
+      this._idmap.delete(meta.id);
+    }
+    this._map.delete(schema);
+    return this;
+  }
+  get(schema) {
+    const p = schema._zod.parent;
+    if (p) {
+      const pm = { ...this.get(p) ?? {} };
+      delete pm.id;
+      return { ...pm, ...this._map.get(schema) };
+    }
+    return this._map.get(schema);
+  }
+  has(schema) {
+    return this._map.has(schema);
+  }
+};
+function registry() {
+  return new $ZodRegistry();
+}
+var globalRegistry = /* @__PURE__ */ registry();
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/api.js
+function _string(Class2, params) {
+  return new Class2({
+    type: "string",
+    ...normalizeParams(params)
+  });
+}
+function _coercedString(Class2, params) {
+  return new Class2({
+    type: "string",
+    coerce: true,
+    ...normalizeParams(params)
+  });
+}
+function _email(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "email",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _guid(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "guid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _uuid(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "uuid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _uuidv4(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "uuid",
+    check: "string_format",
+    abort: false,
+    version: "v4",
+    ...normalizeParams(params)
+  });
+}
+function _uuidv6(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "uuid",
+    check: "string_format",
+    abort: false,
+    version: "v6",
+    ...normalizeParams(params)
+  });
+}
+function _uuidv7(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "uuid",
+    check: "string_format",
+    abort: false,
+    version: "v7",
+    ...normalizeParams(params)
+  });
+}
+function _url(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "url",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _emoji2(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "emoji",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _nanoid(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "nanoid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _cuid(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "cuid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _cuid2(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "cuid2",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _ulid(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "ulid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _xid(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "xid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _ksuid(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "ksuid",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _ipv4(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "ipv4",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _ipv6(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "ipv6",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _cidrv4(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "cidrv4",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _cidrv6(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "cidrv6",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _base64(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "base64",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _base64url(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "base64url",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _e164(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "e164",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+function _jwt(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "jwt",
+    check: "string_format",
+    abort: false,
+    ...normalizeParams(params)
+  });
+}
+var TimePrecision = {
+  Any: null,
+  Minute: -1,
+  Second: 0,
+  Millisecond: 3,
+  Microsecond: 6
+};
+function _isoDateTime(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "datetime",
+    check: "string_format",
+    offset: false,
+    local: false,
+    precision: null,
+    ...normalizeParams(params)
+  });
+}
+function _isoDate(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "date",
+    check: "string_format",
+    ...normalizeParams(params)
+  });
+}
+function _isoTime(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "time",
+    check: "string_format",
+    precision: null,
+    ...normalizeParams(params)
+  });
+}
+function _isoDuration(Class2, params) {
+  return new Class2({
+    type: "string",
+    format: "duration",
+    check: "string_format",
+    ...normalizeParams(params)
+  });
+}
+function _number(Class2, params) {
+  return new Class2({
+    type: "number",
+    checks: [],
+    ...normalizeParams(params)
+  });
+}
+function _coercedNumber(Class2, params) {
+  return new Class2({
+    type: "number",
+    coerce: true,
+    checks: [],
+    ...normalizeParams(params)
+  });
+}
+function _int(Class2, params) {
+  return new Class2({
+    type: "number",
+    check: "number_format",
+    abort: false,
+    format: "safeint",
+    ...normalizeParams(params)
+  });
+}
+function _float32(Class2, params) {
+  return new Class2({
+    type: "number",
+    check: "number_format",
+    abort: false,
+    format: "float32",
+    ...normalizeParams(params)
+  });
+}
+function _float64(Class2, params) {
+  return new Class2({
+    type: "number",
+    check: "number_format",
+    abort: false,
+    format: "float64",
+    ...normalizeParams(params)
+  });
+}
+function _int32(Class2, params) {
+  return new Class2({
+    type: "number",
+    check: "number_format",
+    abort: false,
+    format: "int32",
+    ...normalizeParams(params)
+  });
+}
+function _uint32(Class2, params) {
+  return new Class2({
+    type: "number",
+    check: "number_format",
+    abort: false,
+    format: "uint32",
+    ...normalizeParams(params)
+  });
+}
+function _boolean(Class2, params) {
+  return new Class2({
+    type: "boolean",
+    ...normalizeParams(params)
+  });
+}
+function _coercedBoolean(Class2, params) {
+  return new Class2({
+    type: "boolean",
+    coerce: true,
+    ...normalizeParams(params)
+  });
+}
+function _bigint(Class2, params) {
+  return new Class2({
+    type: "bigint",
+    ...normalizeParams(params)
+  });
+}
+function _coercedBigint(Class2, params) {
+  return new Class2({
+    type: "bigint",
+    coerce: true,
+    ...normalizeParams(params)
+  });
+}
+function _int64(Class2, params) {
+  return new Class2({
+    type: "bigint",
+    check: "bigint_format",
+    abort: false,
+    format: "int64",
+    ...normalizeParams(params)
+  });
+}
+function _uint64(Class2, params) {
+  return new Class2({
+    type: "bigint",
+    check: "bigint_format",
+    abort: false,
+    format: "uint64",
+    ...normalizeParams(params)
+  });
+}
+function _symbol(Class2, params) {
+  return new Class2({
+    type: "symbol",
+    ...normalizeParams(params)
+  });
+}
+function _undefined2(Class2, params) {
+  return new Class2({
+    type: "undefined",
+    ...normalizeParams(params)
+  });
+}
+function _null2(Class2, params) {
+  return new Class2({
+    type: "null",
+    ...normalizeParams(params)
+  });
+}
+function _any(Class2) {
+  return new Class2({
+    type: "any"
+  });
+}
+function _unknown(Class2) {
+  return new Class2({
+    type: "unknown"
+  });
+}
+function _never(Class2, params) {
+  return new Class2({
+    type: "never",
+    ...normalizeParams(params)
+  });
+}
+function _void(Class2, params) {
+  return new Class2({
+    type: "void",
+    ...normalizeParams(params)
+  });
+}
+function _date(Class2, params) {
+  return new Class2({
+    type: "date",
+    ...normalizeParams(params)
+  });
+}
+function _coercedDate(Class2, params) {
+  return new Class2({
+    type: "date",
+    coerce: true,
+    ...normalizeParams(params)
+  });
+}
+function _nan(Class2, params) {
+  return new Class2({
+    type: "nan",
+    ...normalizeParams(params)
+  });
+}
+function _lt(value, params) {
+  return new $ZodCheckLessThan({
+    check: "less_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: false
+  });
+}
+function _lte(value, params) {
+  return new $ZodCheckLessThan({
+    check: "less_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: true
+  });
+}
+function _gt(value, params) {
+  return new $ZodCheckGreaterThan({
+    check: "greater_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: false
+  });
+}
+function _gte(value, params) {
+  return new $ZodCheckGreaterThan({
+    check: "greater_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: true
+  });
+}
+function _positive(params) {
+  return _gt(0, params);
+}
+function _negative(params) {
+  return _lt(0, params);
+}
+function _nonpositive(params) {
+  return _lte(0, params);
+}
+function _nonnegative(params) {
+  return _gte(0, params);
+}
+function _multipleOf(value, params) {
+  return new $ZodCheckMultipleOf({
+    check: "multiple_of",
+    ...normalizeParams(params),
+    value
+  });
+}
+function _maxSize(maximum, params) {
+  return new $ZodCheckMaxSize({
+    check: "max_size",
+    ...normalizeParams(params),
+    maximum
+  });
+}
+function _minSize(minimum, params) {
+  return new $ZodCheckMinSize({
+    check: "min_size",
+    ...normalizeParams(params),
+    minimum
+  });
+}
+function _size(size, params) {
+  return new $ZodCheckSizeEquals({
+    check: "size_equals",
+    ...normalizeParams(params),
+    size
+  });
+}
+function _maxLength(maximum, params) {
+  const ch = new $ZodCheckMaxLength({
+    check: "max_length",
+    ...normalizeParams(params),
+    maximum
+  });
+  return ch;
+}
+function _minLength(minimum, params) {
+  return new $ZodCheckMinLength({
+    check: "min_length",
+    ...normalizeParams(params),
+    minimum
+  });
+}
+function _length(length, params) {
+  return new $ZodCheckLengthEquals({
+    check: "length_equals",
+    ...normalizeParams(params),
+    length
+  });
+}
+function _regex(pattern, params) {
+  return new $ZodCheckRegex({
+    check: "string_format",
+    format: "regex",
+    ...normalizeParams(params),
+    pattern
+  });
+}
+function _lowercase(params) {
+  return new $ZodCheckLowerCase({
+    check: "string_format",
+    format: "lowercase",
+    ...normalizeParams(params)
+  });
+}
+function _uppercase(params) {
+  return new $ZodCheckUpperCase({
+    check: "string_format",
+    format: "uppercase",
+    ...normalizeParams(params)
+  });
+}
+function _includes(includes, params) {
+  return new $ZodCheckIncludes({
+    check: "string_format",
+    format: "includes",
+    ...normalizeParams(params),
+    includes
+  });
+}
+function _startsWith(prefix, params) {
+  return new $ZodCheckStartsWith({
+    check: "string_format",
+    format: "starts_with",
+    ...normalizeParams(params),
+    prefix
+  });
+}
+function _endsWith(suffix, params) {
+  return new $ZodCheckEndsWith({
+    check: "string_format",
+    format: "ends_with",
+    ...normalizeParams(params),
+    suffix
+  });
+}
+function _property(property, schema, params) {
+  return new $ZodCheckProperty({
+    check: "property",
+    property,
+    schema,
+    ...normalizeParams(params)
+  });
+}
+function _mime(types, params) {
+  return new $ZodCheckMimeType({
+    check: "mime_type",
+    mime: types,
+    ...normalizeParams(params)
+  });
+}
+function _overwrite(tx) {
+  return new $ZodCheckOverwrite({
+    check: "overwrite",
+    tx
+  });
+}
+function _normalize(form) {
+  return _overwrite((input) => input.normalize(form));
+}
+function _trim() {
+  return _overwrite((input) => input.trim());
+}
+function _toLowerCase() {
+  return _overwrite((input) => input.toLowerCase());
+}
+function _toUpperCase() {
+  return _overwrite((input) => input.toUpperCase());
+}
+function _array(Class2, element, params) {
+  return new Class2({
+    type: "array",
+    element,
+    // get element() {
+    //   return element;
+    // },
+    ...normalizeParams(params)
+  });
+}
+function _union(Class2, options2, params) {
+  return new Class2({
+    type: "union",
+    options: options2,
+    ...normalizeParams(params)
+  });
+}
+function _discriminatedUnion(Class2, discriminator, options2, params) {
+  return new Class2({
+    type: "union",
+    options: options2,
+    discriminator,
+    ...normalizeParams(params)
+  });
+}
+function _intersection(Class2, left, right) {
+  return new Class2({
+    type: "intersection",
+    left,
+    right
+  });
+}
+function _tuple(Class2, items, _paramsOrRest, _params) {
+  const hasRest = _paramsOrRest instanceof $ZodType;
+  const params = hasRest ? _params : _paramsOrRest;
+  const rest = hasRest ? _paramsOrRest : null;
+  return new Class2({
+    type: "tuple",
+    items,
+    rest,
+    ...normalizeParams(params)
+  });
+}
+function _record(Class2, keyType, valueType, params) {
+  return new Class2({
+    type: "record",
+    keyType,
+    valueType,
+    ...normalizeParams(params)
+  });
+}
+function _map(Class2, keyType, valueType, params) {
+  return new Class2({
+    type: "map",
+    keyType,
+    valueType,
+    ...normalizeParams(params)
+  });
+}
+function _set(Class2, valueType, params) {
+  return new Class2({
+    type: "set",
+    valueType,
+    ...normalizeParams(params)
+  });
+}
+function _enum(Class2, values, params) {
+  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v) => [v, v])) : values;
+  return new Class2({
+    type: "enum",
+    entries,
+    ...normalizeParams(params)
+  });
+}
+function _nativeEnum(Class2, entries, params) {
+  return new Class2({
+    type: "enum",
+    entries,
+    ...normalizeParams(params)
+  });
+}
+function _literal(Class2, value, params) {
+  return new Class2({
+    type: "literal",
+    values: Array.isArray(value) ? value : [value],
+    ...normalizeParams(params)
+  });
+}
+function _file(Class2, params) {
+  return new Class2({
+    type: "file",
+    ...normalizeParams(params)
+  });
+}
+function _transform(Class2, fn) {
+  return new Class2({
+    type: "transform",
+    transform: fn
+  });
+}
+function _optional(Class2, innerType) {
+  return new Class2({
+    type: "optional",
+    innerType
+  });
+}
+function _nullable(Class2, innerType) {
+  return new Class2({
+    type: "nullable",
+    innerType
+  });
+}
+function _default(Class2, innerType, defaultValue) {
+  return new Class2({
+    type: "default",
+    innerType,
+    get defaultValue() {
+      return typeof defaultValue === "function" ? defaultValue() : defaultValue;
+    }
+  });
+}
+function _nonoptional(Class2, innerType, params) {
+  return new Class2({
+    type: "nonoptional",
+    innerType,
+    ...normalizeParams(params)
+  });
+}
+function _success(Class2, innerType) {
+  return new Class2({
+    type: "success",
+    innerType
+  });
+}
+function _catch(Class2, innerType, catchValue) {
+  return new Class2({
+    type: "catch",
+    innerType,
+    catchValue: typeof catchValue === "function" ? catchValue : () => catchValue
+  });
+}
+function _pipe(Class2, in_, out) {
+  return new Class2({
+    type: "pipe",
+    in: in_,
+    out
+  });
+}
+function _readonly(Class2, innerType) {
+  return new Class2({
+    type: "readonly",
+    innerType
+  });
+}
+function _templateLiteral(Class2, parts, params) {
+  return new Class2({
+    type: "template_literal",
+    parts,
+    ...normalizeParams(params)
+  });
+}
+function _lazy(Class2, getter) {
+  return new Class2({
+    type: "lazy",
+    getter
+  });
+}
+function _promise(Class2, innerType) {
+  return new Class2({
+    type: "promise",
+    innerType
+  });
+}
+function _custom(Class2, fn, _params) {
+  const norm = normalizeParams(_params);
+  norm.abort ?? (norm.abort = true);
+  const schema = new Class2({
+    type: "custom",
+    check: "custom",
+    fn,
+    ...norm
+  });
+  return schema;
+}
+function _refine(Class2, fn, _params) {
+  const schema = new Class2({
+    type: "custom",
+    check: "custom",
+    fn,
+    ...normalizeParams(_params)
+  });
+  return schema;
+}
+function _stringbool(Classes, _params) {
+  const params = normalizeParams(_params);
+  let truthyArray = params.truthy ?? ["true", "1", "yes", "on", "y", "enabled"];
+  let falsyArray = params.falsy ?? ["false", "0", "no", "off", "n", "disabled"];
+  if (params.case !== "sensitive") {
+    truthyArray = truthyArray.map((v) => typeof v === "string" ? v.toLowerCase() : v);
+    falsyArray = falsyArray.map((v) => typeof v === "string" ? v.toLowerCase() : v);
+  }
+  const truthySet = new Set(truthyArray);
+  const falsySet = new Set(falsyArray);
+  const _Pipe = Classes.Pipe ?? $ZodPipe;
+  const _Boolean = Classes.Boolean ?? $ZodBoolean;
+  const _String = Classes.String ?? $ZodString;
+  const _Transform = Classes.Transform ?? $ZodTransform;
+  const tx = new _Transform({
+    type: "transform",
+    transform: (input, payload) => {
+      let data = input;
+      if (params.case !== "sensitive")
+        data = data.toLowerCase();
+      if (truthySet.has(data)) {
+        return true;
+      } else if (falsySet.has(data)) {
+        return false;
+      } else {
+        payload.issues.push({
+          code: "invalid_value",
+          expected: "stringbool",
+          values: [...truthySet, ...falsySet],
+          input: payload.value,
+          inst: tx
+        });
+        return {};
+      }
+    },
+    error: params.error
+  });
+  const innerPipe = new _Pipe({
+    type: "pipe",
+    in: new _String({ type: "string", error: params.error }),
+    out: tx,
+    error: params.error
+  });
+  const outerPipe = new _Pipe({
+    type: "pipe",
+    in: innerPipe,
+    out: new _Boolean({
+      type: "boolean",
+      error: params.error
+    }),
+    error: params.error
+  });
+  return outerPipe;
+}
+function _stringFormat(Class2, format, fnOrRegex, _params = {}) {
+  const params = normalizeParams(_params);
+  const def = {
+    ...normalizeParams(_params),
+    check: "string_format",
+    type: "string",
+    format,
+    fn: typeof fnOrRegex === "function" ? fnOrRegex : (val) => fnOrRegex.test(val),
+    ...params
+  };
+  if (fnOrRegex instanceof RegExp) {
+    def.pattern = fnOrRegex;
+  }
+  const inst = new Class2(def);
+  return inst;
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/function.js
+var $ZodFunction = class {
+  constructor(def) {
+    this._def = def;
+    this.def = def;
+  }
+  implement(func) {
+    if (typeof func !== "function") {
+      throw new Error("implement() must be called with a function");
+    }
+    const impl = ((...args) => {
+      const parsedArgs = this._def.input ? parse2(this._def.input, args, void 0, { callee: impl }) : args;
+      if (!Array.isArray(parsedArgs)) {
+        throw new Error("Invalid arguments schema: not an array or tuple schema.");
+      }
+      const output = func(...parsedArgs);
+      return this._def.output ? parse2(this._def.output, output, void 0, { callee: impl }) : output;
+    });
+    return impl;
+  }
+  implementAsync(func) {
+    if (typeof func !== "function") {
+      throw new Error("implement() must be called with a function");
+    }
+    const impl = (async (...args) => {
+      const parsedArgs = this._def.input ? await parseAsync(this._def.input, args, void 0, { callee: impl }) : args;
+      if (!Array.isArray(parsedArgs)) {
+        throw new Error("Invalid arguments schema: not an array or tuple schema.");
+      }
+      const output = await func(...parsedArgs);
+      return this._def.output ? parseAsync(this._def.output, output, void 0, { callee: impl }) : output;
+    });
+    return impl;
+  }
+  input(...args) {
+    const F = this.constructor;
+    if (Array.isArray(args[0])) {
+      return new F({
+        type: "function",
+        input: new $ZodTuple({
+          type: "tuple",
+          items: args[0],
+          rest: args[1]
+        }),
+        output: this._def.output
+      });
+    }
+    return new F({
+      type: "function",
+      input: args[0],
+      output: this._def.output
+    });
+  }
+  output(output) {
+    const F = this.constructor;
+    return new F({
+      type: "function",
+      input: this._def.input,
+      output
+    });
+  }
+};
+function _function(params) {
+  return new $ZodFunction({
+    type: "function",
+    input: Array.isArray(params?.input) ? _tuple($ZodTuple, params?.input) : params?.input ?? _array($ZodArray, _unknown($ZodUnknown)),
+    output: params?.output ?? _unknown($ZodUnknown)
+  });
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/to-json-schema.js
+var JSONSchemaGenerator = class {
+  constructor(params) {
+    this.counter = 0;
+    this.metadataRegistry = params?.metadata ?? globalRegistry;
+    this.target = params?.target ?? "draft-2020-12";
+    this.unrepresentable = params?.unrepresentable ?? "throw";
+    this.override = params?.override ?? (() => {
+    });
+    this.io = params?.io ?? "output";
+    this.seen = /* @__PURE__ */ new Map();
+  }
+  process(schema, _params = { path: [], schemaPath: [] }) {
+    var _a;
+    const def = schema._zod.def;
+    const formatMap = {
+      guid: "uuid",
+      url: "uri",
+      datetime: "date-time",
+      json_string: "json-string",
+      regex: ""
+      // do not set
+    };
+    const seen = this.seen.get(schema);
+    if (seen) {
+      seen.count++;
+      const isCycle = _params.schemaPath.includes(schema);
+      if (isCycle) {
+        seen.cycle = _params.path;
+      }
+      return seen.schema;
+    }
+    const result = { schema: {}, count: 1, cycle: void 0, path: _params.path };
+    this.seen.set(schema, result);
+    const overrideSchema = schema._zod.toJSONSchema?.();
+    if (overrideSchema) {
+      result.schema = overrideSchema;
+    } else {
+      const params = {
+        ..._params,
+        schemaPath: [..._params.schemaPath, schema],
+        path: _params.path
+      };
+      const parent = schema._zod.parent;
+      if (parent) {
+        result.ref = parent;
+        this.process(parent, params);
+        this.seen.get(parent).isParent = true;
+      } else {
+        const _json = result.schema;
+        switch (def.type) {
+          case "string": {
+            const json2 = _json;
+            json2.type = "string";
+            const { minimum, maximum, format, patterns, contentEncoding } = schema._zod.bag;
+            if (typeof minimum === "number")
+              json2.minLength = minimum;
+            if (typeof maximum === "number")
+              json2.maxLength = maximum;
+            if (format) {
+              json2.format = formatMap[format] ?? format;
+              if (json2.format === "")
+                delete json2.format;
+            }
+            if (contentEncoding)
+              json2.contentEncoding = contentEncoding;
+            if (patterns && patterns.size > 0) {
+              const regexes = [...patterns];
+              if (regexes.length === 1)
+                json2.pattern = regexes[0].source;
+              else if (regexes.length > 1) {
+                result.schema.allOf = [
+                  ...regexes.map((regex) => ({
+                    ...this.target === "draft-7" ? { type: "string" } : {},
+                    pattern: regex.source
+                  }))
+                ];
+              }
+            }
+            break;
+          }
+          case "number": {
+            const json2 = _json;
+            const { minimum, maximum, format, multipleOf, exclusiveMaximum, exclusiveMinimum } = schema._zod.bag;
+            if (typeof format === "string" && format.includes("int"))
+              json2.type = "integer";
+            else
+              json2.type = "number";
+            if (typeof exclusiveMinimum === "number")
+              json2.exclusiveMinimum = exclusiveMinimum;
+            if (typeof minimum === "number") {
+              json2.minimum = minimum;
+              if (typeof exclusiveMinimum === "number") {
+                if (exclusiveMinimum >= minimum)
+                  delete json2.minimum;
+                else
+                  delete json2.exclusiveMinimum;
+              }
+            }
+            if (typeof exclusiveMaximum === "number")
+              json2.exclusiveMaximum = exclusiveMaximum;
+            if (typeof maximum === "number") {
+              json2.maximum = maximum;
+              if (typeof exclusiveMaximum === "number") {
+                if (exclusiveMaximum <= maximum)
+                  delete json2.maximum;
+                else
+                  delete json2.exclusiveMaximum;
+              }
+            }
+            if (typeof multipleOf === "number")
+              json2.multipleOf = multipleOf;
+            break;
+          }
+          case "boolean": {
+            const json2 = _json;
+            json2.type = "boolean";
+            break;
+          }
+          case "bigint": {
+            if (this.unrepresentable === "throw") {
+              throw new Error("BigInt cannot be represented in JSON Schema");
+            }
+            break;
+          }
+          case "symbol": {
+            if (this.unrepresentable === "throw") {
+              throw new Error("Symbols cannot be represented in JSON Schema");
+            }
+            break;
+          }
+          case "null": {
+            _json.type = "null";
+            break;
+          }
+          case "any": {
+            break;
+          }
+          case "unknown": {
+            break;
+          }
+          case "undefined": {
+            if (this.unrepresentable === "throw") {
+              throw new Error("Undefined cannot be represented in JSON Schema");
+            }
+            break;
+          }
+          case "void": {
+            if (this.unrepresentable === "throw") {
+              throw new Error("Void cannot be represented in JSON Schema");
+            }
+            break;
+          }
+          case "never": {
+            _json.not = {};
+            break;
+          }
+          case "date": {
+            if (this.unrepresentable === "throw") {
+              throw new Error("Date cannot be represented in JSON Schema");
+            }
+            break;
+          }
+          case "array": {
+            const json2 = _json;
+            const { minimum, maximum } = schema._zod.bag;
+            if (typeof minimum === "number")
+              json2.minItems = minimum;
+            if (typeof maximum === "number")
+              json2.maxItems = maximum;
+            json2.type = "array";
+            json2.items = this.process(def.element, { ...params, path: [...params.path, "items"] });
+            break;
+          }
+          case "object": {
+            const json2 = _json;
+            json2.type = "object";
+            json2.properties = {};
+            const shape = def.shape;
+            for (const key in shape) {
+              json2.properties[key] = this.process(shape[key], {
+                ...params,
+                path: [...params.path, "properties", key]
+              });
+            }
+            const allKeys = new Set(Object.keys(shape));
+            const requiredKeys = new Set([...allKeys].filter((key) => {
+              const v = def.shape[key]._zod;
+              if (this.io === "input") {
+                return v.optin === void 0;
+              } else {
+                return v.optout === void 0;
+              }
+            }));
+            if (requiredKeys.size > 0) {
+              json2.required = Array.from(requiredKeys);
+            }
+            if (def.catchall?._zod.def.type === "never") {
+              json2.additionalProperties = false;
+            } else if (!def.catchall) {
+              if (this.io === "output")
+                json2.additionalProperties = false;
+            } else if (def.catchall) {
+              json2.additionalProperties = this.process(def.catchall, {
+                ...params,
+                path: [...params.path, "additionalProperties"]
+              });
+            }
+            break;
+          }
+          case "union": {
+            const json2 = _json;
+            json2.anyOf = def.options.map((x, i) => this.process(x, {
+              ...params,
+              path: [...params.path, "anyOf", i]
+            }));
+            break;
+          }
+          case "intersection": {
+            const json2 = _json;
+            const a = this.process(def.left, {
+              ...params,
+              path: [...params.path, "allOf", 0]
+            });
+            const b = this.process(def.right, {
+              ...params,
+              path: [...params.path, "allOf", 1]
+            });
+            const isSimpleIntersection = (val) => "allOf" in val && Object.keys(val).length === 1;
+            const allOf = [
+              ...isSimpleIntersection(a) ? a.allOf : [a],
+              ...isSimpleIntersection(b) ? b.allOf : [b]
+            ];
+            json2.allOf = allOf;
+            break;
+          }
+          case "tuple": {
+            const json2 = _json;
+            json2.type = "array";
+            const prefixItems = def.items.map((x, i) => this.process(x, { ...params, path: [...params.path, "prefixItems", i] }));
+            if (this.target === "draft-2020-12") {
+              json2.prefixItems = prefixItems;
+            } else {
+              json2.items = prefixItems;
+            }
+            if (def.rest) {
+              const rest = this.process(def.rest, {
+                ...params,
+                path: [...params.path, "items"]
+              });
+              if (this.target === "draft-2020-12") {
+                json2.items = rest;
+              } else {
+                json2.additionalItems = rest;
+              }
+            }
+            if (def.rest) {
+              json2.items = this.process(def.rest, {
+                ...params,
+                path: [...params.path, "items"]
+              });
+            }
+            const { minimum, maximum } = schema._zod.bag;
+            if (typeof minimum === "number")
+              json2.minItems = minimum;
+            if (typeof maximum === "number")
+              json2.maxItems = maximum;
+            break;
+          }
+          case "record": {
+            const json2 = _json;
+            json2.type = "object";
+            json2.propertyNames = this.process(def.keyType, { ...params, path: [...params.path, "propertyNames"] });
+            json2.additionalProperties = this.process(def.valueType, {
+              ...params,
+              path: [...params.path, "additionalProperties"]
+            });
+            break;
+          }
+          case "map": {
+            if (this.unrepresentable === "throw") {
+              throw new Error("Map cannot be represented in JSON Schema");
+            }
+            break;
+          }
+          case "set": {
+            if (this.unrepresentable === "throw") {
+              throw new Error("Set cannot be represented in JSON Schema");
+            }
+            break;
+          }
+          case "enum": {
+            const json2 = _json;
+            const values = getEnumValues(def.entries);
+            if (values.every((v) => typeof v === "number"))
+              json2.type = "number";
+            if (values.every((v) => typeof v === "string"))
+              json2.type = "string";
+            json2.enum = values;
+            break;
+          }
+          case "literal": {
+            const json2 = _json;
+            const vals = [];
+            for (const val of def.values) {
+              if (val === void 0) {
+                if (this.unrepresentable === "throw") {
+                  throw new Error("Literal `undefined` cannot be represented in JSON Schema");
+                } else {
+                }
+              } else if (typeof val === "bigint") {
+                if (this.unrepresentable === "throw") {
+                  throw new Error("BigInt literals cannot be represented in JSON Schema");
+                } else {
+                  vals.push(Number(val));
+                }
+              } else {
+                vals.push(val);
+              }
+            }
+            if (vals.length === 0) {
+            } else if (vals.length === 1) {
+              const val = vals[0];
+              json2.type = val === null ? "null" : typeof val;
+              json2.const = val;
+            } else {
+              if (vals.every((v) => typeof v === "number"))
+                json2.type = "number";
+              if (vals.every((v) => typeof v === "string"))
+                json2.type = "string";
+              if (vals.every((v) => typeof v === "boolean"))
+                json2.type = "string";
+              if (vals.every((v) => v === null))
+                json2.type = "null";
+              json2.enum = vals;
+            }
+            break;
+          }
+          case "file": {
+            const json2 = _json;
+            const file2 = {
+              type: "string",
+              format: "binary",
+              contentEncoding: "binary"
+            };
+            const { minimum, maximum, mime } = schema._zod.bag;
+            if (minimum !== void 0)
+              file2.minLength = minimum;
+            if (maximum !== void 0)
+              file2.maxLength = maximum;
+            if (mime) {
+              if (mime.length === 1) {
+                file2.contentMediaType = mime[0];
+                Object.assign(json2, file2);
+              } else {
+                json2.anyOf = mime.map((m) => {
+                  const mFile = { ...file2, contentMediaType: m };
+                  return mFile;
+                });
+              }
+            } else {
+              Object.assign(json2, file2);
+            }
+            break;
+          }
+          case "transform": {
+            if (this.unrepresentable === "throw") {
+              throw new Error("Transforms cannot be represented in JSON Schema");
+            }
+            break;
+          }
+          case "nullable": {
+            const inner = this.process(def.innerType, params);
+            _json.anyOf = [inner, { type: "null" }];
+            break;
+          }
+          case "nonoptional": {
+            this.process(def.innerType, params);
+            result.ref = def.innerType;
+            break;
+          }
+          case "success": {
+            const json2 = _json;
+            json2.type = "boolean";
+            break;
+          }
+          case "default": {
+            this.process(def.innerType, params);
+            result.ref = def.innerType;
+            _json.default = JSON.parse(JSON.stringify(def.defaultValue));
+            break;
+          }
+          case "prefault": {
+            this.process(def.innerType, params);
+            result.ref = def.innerType;
+            if (this.io === "input")
+              _json._prefault = JSON.parse(JSON.stringify(def.defaultValue));
+            break;
+          }
+          case "catch": {
+            this.process(def.innerType, params);
+            result.ref = def.innerType;
+            let catchValue;
+            try {
+              catchValue = def.catchValue(void 0);
+            } catch {
+              throw new Error("Dynamic catch values are not supported in JSON Schema");
+            }
+            _json.default = catchValue;
+            break;
+          }
+          case "nan": {
+            if (this.unrepresentable === "throw") {
+              throw new Error("NaN cannot be represented in JSON Schema");
+            }
+            break;
+          }
+          case "template_literal": {
+            const json2 = _json;
+            const pattern = schema._zod.pattern;
+            if (!pattern)
+              throw new Error("Pattern not found in template literal");
+            json2.type = "string";
+            json2.pattern = pattern.source;
+            break;
+          }
+          case "pipe": {
+            const innerType = this.io === "input" ? def.in._zod.def.type === "transform" ? def.out : def.in : def.out;
+            this.process(innerType, params);
+            result.ref = innerType;
+            break;
+          }
+          case "readonly": {
+            this.process(def.innerType, params);
+            result.ref = def.innerType;
+            _json.readOnly = true;
+            break;
+          }
+          // passthrough types
+          case "promise": {
+            this.process(def.innerType, params);
+            result.ref = def.innerType;
+            break;
+          }
+          case "optional": {
+            this.process(def.innerType, params);
+            result.ref = def.innerType;
+            break;
+          }
+          case "lazy": {
+            const innerType = schema._zod.innerType;
+            this.process(innerType, params);
+            result.ref = innerType;
+            break;
+          }
+          case "custom": {
+            if (this.unrepresentable === "throw") {
+              throw new Error("Custom types cannot be represented in JSON Schema");
+            }
+            break;
+          }
+          default: {
+            def;
+          }
+        }
+      }
+    }
+    const meta = this.metadataRegistry.get(schema);
+    if (meta)
+      Object.assign(result.schema, meta);
+    if (this.io === "input" && isTransforming(schema)) {
+      delete result.schema.examples;
+      delete result.schema.default;
+    }
+    if (this.io === "input" && result.schema._prefault)
+      (_a = result.schema).default ?? (_a.default = result.schema._prefault);
+    delete result.schema._prefault;
+    const _result = this.seen.get(schema);
+    return _result.schema;
+  }
+  emit(schema, _params) {
+    const params = {
+      cycles: _params?.cycles ?? "ref",
+      reused: _params?.reused ?? "inline",
+      // unrepresentable: _params?.unrepresentable ?? "throw",
+      // uri: _params?.uri ?? ((id) => `${id}`),
+      external: _params?.external ?? void 0
+    };
+    const root = this.seen.get(schema);
+    if (!root)
+      throw new Error("Unprocessed schema. This is a bug in Zod.");
+    const makeURI = (entry) => {
+      const defsSegment = this.target === "draft-2020-12" ? "$defs" : "definitions";
+      if (params.external) {
+        const externalId = params.external.registry.get(entry[0])?.id;
+        const uriGenerator = params.external.uri ?? ((id2) => id2);
+        if (externalId) {
+          return { ref: uriGenerator(externalId) };
+        }
+        const id = entry[1].defId ?? entry[1].schema.id ?? `schema${this.counter++}`;
+        entry[1].defId = id;
+        return { defId: id, ref: `${uriGenerator("__shared")}#/${defsSegment}/${id}` };
+      }
+      if (entry[1] === root) {
+        return { ref: "#" };
+      }
+      const uriPrefix = `#`;
+      const defUriPrefix = `${uriPrefix}/${defsSegment}/`;
+      const defId = entry[1].schema.id ?? `__schema${this.counter++}`;
+      return { defId, ref: defUriPrefix + defId };
+    };
+    const extractToDef = (entry) => {
+      if (entry[1].schema.$ref) {
+        return;
+      }
+      const seen = entry[1];
+      const { ref, defId } = makeURI(entry);
+      seen.def = { ...seen.schema };
+      if (defId)
+        seen.defId = defId;
+      const schema2 = seen.schema;
+      for (const key in schema2) {
+        delete schema2[key];
+      }
+      schema2.$ref = ref;
+    };
+    if (params.cycles === "throw") {
+      for (const entry of this.seen.entries()) {
+        const seen = entry[1];
+        if (seen.cycle) {
+          throw new Error(`Cycle detected: #/${seen.cycle?.join("/")}/<root>
+
+Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.`);
+        }
+      }
+    }
+    for (const entry of this.seen.entries()) {
+      const seen = entry[1];
+      if (schema === entry[0]) {
+        extractToDef(entry);
+        continue;
+      }
+      if (params.external) {
+        const ext = params.external.registry.get(entry[0])?.id;
+        if (schema !== entry[0] && ext) {
+          extractToDef(entry);
+          continue;
+        }
+      }
+      const id = this.metadataRegistry.get(entry[0])?.id;
+      if (id) {
+        extractToDef(entry);
+        continue;
+      }
+      if (seen.cycle) {
+        extractToDef(entry);
+        continue;
+      }
+      if (seen.count > 1) {
+        if (params.reused === "ref") {
+          extractToDef(entry);
+          continue;
+        }
+      }
+    }
+    const flattenRef = (zodSchema, params2) => {
+      const seen = this.seen.get(zodSchema);
+      const schema2 = seen.def ?? seen.schema;
+      const _cached = { ...schema2 };
+      if (seen.ref === null) {
+        return;
+      }
+      const ref = seen.ref;
+      seen.ref = null;
+      if (ref) {
+        flattenRef(ref, params2);
+        const refSchema = this.seen.get(ref).schema;
+        if (refSchema.$ref && params2.target === "draft-7") {
+          schema2.allOf = schema2.allOf ?? [];
+          schema2.allOf.push(refSchema);
+        } else {
+          Object.assign(schema2, refSchema);
+          Object.assign(schema2, _cached);
+        }
+      }
+      if (!seen.isParent)
+        this.override({
+          zodSchema,
+          jsonSchema: schema2,
+          path: seen.path ?? []
+        });
+    };
+    for (const entry of [...this.seen.entries()].reverse()) {
+      flattenRef(entry[0], { target: this.target });
+    }
+    const result = {};
+    if (this.target === "draft-2020-12") {
+      result.$schema = "https://json-schema.org/draft/2020-12/schema";
+    } else if (this.target === "draft-7") {
+      result.$schema = "http://json-schema.org/draft-07/schema#";
+    } else {
+      console.warn(`Invalid target: ${this.target}`);
+    }
+    if (params.external?.uri) {
+      const id = params.external.registry.get(schema)?.id;
+      if (!id)
+        throw new Error("Schema is missing an `id` property");
+      result.$id = params.external.uri(id);
+    }
+    Object.assign(result, root.def);
+    const defs = params.external?.defs ?? {};
+    for (const entry of this.seen.entries()) {
+      const seen = entry[1];
+      if (seen.def && seen.defId) {
+        defs[seen.defId] = seen.def;
+      }
+    }
+    if (params.external) {
+    } else {
+      if (Object.keys(defs).length > 0) {
+        if (this.target === "draft-2020-12") {
+          result.$defs = defs;
+        } else {
+          result.definitions = defs;
+        }
+      }
+    }
+    try {
+      return JSON.parse(JSON.stringify(result));
+    } catch (_err) {
+      throw new Error("Error converting schema to JSON.");
+    }
+  }
+};
+function toJSONSchema(input, _params) {
+  if (input instanceof $ZodRegistry) {
+    const gen2 = new JSONSchemaGenerator(_params);
+    const defs = {};
+    for (const entry of input._idmap.entries()) {
+      const [_, schema] = entry;
+      gen2.process(schema);
+    }
+    const schemas = {};
+    const external = {
+      registry: input,
+      uri: _params?.uri,
+      defs
+    };
+    for (const entry of input._idmap.entries()) {
+      const [key, schema] = entry;
+      schemas[key] = gen2.emit(schema, {
+        ..._params,
+        external
+      });
+    }
+    if (Object.keys(defs).length > 0) {
+      const defsSegment = gen2.target === "draft-2020-12" ? "$defs" : "definitions";
+      schemas.__shared = {
+        [defsSegment]: defs
+      };
+    }
+    return { schemas };
+  }
+  const gen = new JSONSchemaGenerator(_params);
+  gen.process(input);
+  return gen.emit(input, _params);
+}
+function isTransforming(_schema, _ctx) {
+  const ctx = _ctx ?? { seen: /* @__PURE__ */ new Set() };
+  if (ctx.seen.has(_schema))
+    return false;
+  ctx.seen.add(_schema);
+  const schema = _schema;
+  const def = schema._zod.def;
+  switch (def.type) {
+    case "string":
+    case "number":
+    case "bigint":
+    case "boolean":
+    case "date":
+    case "symbol":
+    case "undefined":
+    case "null":
+    case "any":
+    case "unknown":
+    case "never":
+    case "void":
+    case "literal":
+    case "enum":
+    case "nan":
+    case "file":
+    case "template_literal":
+      return false;
+    case "array": {
+      return isTransforming(def.element, ctx);
+    }
+    case "object": {
+      for (const key in def.shape) {
+        if (isTransforming(def.shape[key], ctx))
+          return true;
+      }
+      return false;
+    }
+    case "union": {
+      for (const option of def.options) {
+        if (isTransforming(option, ctx))
+          return true;
+      }
+      return false;
+    }
+    case "intersection": {
+      return isTransforming(def.left, ctx) || isTransforming(def.right, ctx);
+    }
+    case "tuple": {
+      for (const item of def.items) {
+        if (isTransforming(item, ctx))
+          return true;
+      }
+      if (def.rest && isTransforming(def.rest, ctx))
+        return true;
+      return false;
+    }
+    case "record": {
+      return isTransforming(def.keyType, ctx) || isTransforming(def.valueType, ctx);
+    }
+    case "map": {
+      return isTransforming(def.keyType, ctx) || isTransforming(def.valueType, ctx);
+    }
+    case "set": {
+      return isTransforming(def.valueType, ctx);
+    }
+    // inner types
+    case "promise":
+    case "optional":
+    case "nonoptional":
+    case "nullable":
+    case "readonly":
+      return isTransforming(def.innerType, ctx);
+    case "lazy":
+      return isTransforming(def.getter(), ctx);
+    case "default": {
+      return isTransforming(def.innerType, ctx);
+    }
+    case "prefault": {
+      return isTransforming(def.innerType, ctx);
+    }
+    case "custom": {
+      return false;
+    }
+    case "transform": {
+      return true;
+    }
+    case "pipe": {
+      return isTransforming(def.in, ctx) || isTransforming(def.out, ctx);
+    }
+    case "success": {
+      return false;
+    }
+    case "catch": {
+      return false;
+    }
+    default:
+      def;
+  }
+  throw new Error(`Unknown schema type: ${def.type}`);
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/json-schema.js
+var json_schema_exports = {};
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/classic/iso.js
+var iso_exports = {};
+__export(iso_exports, {
+  ZodISODate: () => ZodISODate,
+  ZodISODateTime: () => ZodISODateTime,
+  ZodISODuration: () => ZodISODuration,
+  ZodISOTime: () => ZodISOTime,
+  date: () => date2,
+  datetime: () => datetime2,
+  duration: () => duration2,
+  time: () => time2
+});
+var ZodISODateTime = /* @__PURE__ */ $constructor("ZodISODateTime", (inst, def) => {
+  $ZodISODateTime.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function datetime2(params) {
+  return _isoDateTime(ZodISODateTime, params);
+}
+var ZodISODate = /* @__PURE__ */ $constructor("ZodISODate", (inst, def) => {
+  $ZodISODate.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function date2(params) {
+  return _isoDate(ZodISODate, params);
+}
+var ZodISOTime = /* @__PURE__ */ $constructor("ZodISOTime", (inst, def) => {
+  $ZodISOTime.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function time2(params) {
+  return _isoTime(ZodISOTime, params);
+}
+var ZodISODuration = /* @__PURE__ */ $constructor("ZodISODuration", (inst, def) => {
+  $ZodISODuration.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function duration2(params) {
+  return _isoDuration(ZodISODuration, params);
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/classic/errors.js
+var initializer2 = (inst, issues) => {
+  $ZodError.init(inst, issues);
+  inst.name = "ZodError";
+  Object.defineProperties(inst, {
+    format: {
+      value: (mapper) => formatError(inst, mapper)
+      // enumerable: false,
+    },
+    flatten: {
+      value: (mapper) => flattenError(inst, mapper)
+      // enumerable: false,
+    },
+    addIssue: {
+      value: (issue2) => inst.issues.push(issue2)
+      // enumerable: false,
+    },
+    addIssues: {
+      value: (issues2) => inst.issues.push(...issues2)
+      // enumerable: false,
+    },
+    isEmpty: {
+      get() {
+        return inst.issues.length === 0;
+      }
+      // enumerable: false,
+    }
+  });
+};
+var ZodError2 = $constructor("ZodError", initializer2);
+var ZodRealError = $constructor("ZodError", initializer2, {
+  Parent: Error
+});
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/classic/parse.js
+var parse3 = /* @__PURE__ */ _parse(ZodRealError);
+var parseAsync2 = /* @__PURE__ */ _parseAsync(ZodRealError);
+var safeParse2 = /* @__PURE__ */ _safeParse(ZodRealError);
+var safeParseAsync2 = /* @__PURE__ */ _safeParseAsync(ZodRealError);
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/classic/schemas.js
+var ZodType2 = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst.def = def;
+  Object.defineProperty(inst, "_def", { value: def });
+  inst.check = (...checks) => {
+    return inst.clone(
+      {
+        ...def,
+        checks: [
+          ...def.checks ?? [],
+          ...checks.map((ch) => typeof ch === "function" ? { _zod: { check: ch, def: { check: "custom" }, onattach: [] } } : ch)
+        ]
+      }
+      // { parent: true }
+    );
+  };
+  inst.clone = (def2, params) => clone(inst, def2, params);
+  inst.brand = () => inst;
+  inst.register = ((reg, meta) => {
+    reg.add(inst, meta);
+    return inst;
+  });
+  inst.parse = (data, params) => parse3(inst, data, params, { callee: inst.parse });
+  inst.safeParse = (data, params) => safeParse2(inst, data, params);
+  inst.parseAsync = async (data, params) => parseAsync2(inst, data, params, { callee: inst.parseAsync });
+  inst.safeParseAsync = async (data, params) => safeParseAsync2(inst, data, params);
+  inst.spa = inst.safeParseAsync;
+  inst.refine = (check2, params) => inst.check(refine(check2, params));
+  inst.superRefine = (refinement) => inst.check(superRefine(refinement));
+  inst.overwrite = (fn) => inst.check(_overwrite(fn));
+  inst.optional = () => optional(inst);
+  inst.nullable = () => nullable(inst);
+  inst.nullish = () => optional(nullable(inst));
+  inst.nonoptional = (params) => nonoptional(inst, params);
+  inst.array = () => array(inst);
+  inst.or = (arg) => union([inst, arg]);
+  inst.and = (arg) => intersection(inst, arg);
+  inst.transform = (tx) => pipe(inst, transform(tx));
+  inst.default = (def2) => _default2(inst, def2);
+  inst.prefault = (def2) => prefault(inst, def2);
+  inst.catch = (params) => _catch2(inst, params);
+  inst.pipe = (target) => pipe(inst, target);
+  inst.readonly = () => readonly(inst);
+  inst.describe = (description) => {
+    const cl = inst.clone();
+    globalRegistry.add(cl, { description });
+    return cl;
+  };
+  Object.defineProperty(inst, "description", {
+    get() {
+      return globalRegistry.get(inst)?.description;
+    },
+    configurable: true
+  });
+  inst.meta = (...args) => {
+    if (args.length === 0) {
+      return globalRegistry.get(inst);
+    }
+    const cl = inst.clone();
+    globalRegistry.add(cl, args[0]);
+    return cl;
+  };
+  inst.isOptional = () => inst.safeParse(void 0).success;
+  inst.isNullable = () => inst.safeParse(null).success;
+  return inst;
+});
+var _ZodString = /* @__PURE__ */ $constructor("_ZodString", (inst, def) => {
+  $ZodString.init(inst, def);
+  ZodType2.init(inst, def);
+  const bag = inst._zod.bag;
+  inst.format = bag.format ?? null;
+  inst.minLength = bag.minimum ?? null;
+  inst.maxLength = bag.maximum ?? null;
+  inst.regex = (...args) => inst.check(_regex(...args));
+  inst.includes = (...args) => inst.check(_includes(...args));
+  inst.startsWith = (...args) => inst.check(_startsWith(...args));
+  inst.endsWith = (...args) => inst.check(_endsWith(...args));
+  inst.min = (...args) => inst.check(_minLength(...args));
+  inst.max = (...args) => inst.check(_maxLength(...args));
+  inst.length = (...args) => inst.check(_length(...args));
+  inst.nonempty = (...args) => inst.check(_minLength(1, ...args));
+  inst.lowercase = (params) => inst.check(_lowercase(params));
+  inst.uppercase = (params) => inst.check(_uppercase(params));
+  inst.trim = () => inst.check(_trim());
+  inst.normalize = (...args) => inst.check(_normalize(...args));
+  inst.toLowerCase = () => inst.check(_toLowerCase());
+  inst.toUpperCase = () => inst.check(_toUpperCase());
+});
+var ZodString2 = /* @__PURE__ */ $constructor("ZodString", (inst, def) => {
+  $ZodString.init(inst, def);
+  _ZodString.init(inst, def);
+  inst.email = (params) => inst.check(_email(ZodEmail, params));
+  inst.url = (params) => inst.check(_url(ZodURL, params));
+  inst.jwt = (params) => inst.check(_jwt(ZodJWT, params));
+  inst.emoji = (params) => inst.check(_emoji2(ZodEmoji, params));
+  inst.guid = (params) => inst.check(_guid(ZodGUID, params));
+  inst.uuid = (params) => inst.check(_uuid(ZodUUID, params));
+  inst.uuidv4 = (params) => inst.check(_uuidv4(ZodUUID, params));
+  inst.uuidv6 = (params) => inst.check(_uuidv6(ZodUUID, params));
+  inst.uuidv7 = (params) => inst.check(_uuidv7(ZodUUID, params));
+  inst.nanoid = (params) => inst.check(_nanoid(ZodNanoID, params));
+  inst.guid = (params) => inst.check(_guid(ZodGUID, params));
+  inst.cuid = (params) => inst.check(_cuid(ZodCUID, params));
+  inst.cuid2 = (params) => inst.check(_cuid2(ZodCUID2, params));
+  inst.ulid = (params) => inst.check(_ulid(ZodULID, params));
+  inst.base64 = (params) => inst.check(_base64(ZodBase64, params));
+  inst.base64url = (params) => inst.check(_base64url(ZodBase64URL, params));
+  inst.xid = (params) => inst.check(_xid(ZodXID, params));
+  inst.ksuid = (params) => inst.check(_ksuid(ZodKSUID, params));
+  inst.ipv4 = (params) => inst.check(_ipv4(ZodIPv4, params));
+  inst.ipv6 = (params) => inst.check(_ipv6(ZodIPv6, params));
+  inst.cidrv4 = (params) => inst.check(_cidrv4(ZodCIDRv4, params));
+  inst.cidrv6 = (params) => inst.check(_cidrv6(ZodCIDRv6, params));
+  inst.e164 = (params) => inst.check(_e164(ZodE164, params));
+  inst.datetime = (params) => inst.check(datetime2(params));
+  inst.date = (params) => inst.check(date2(params));
+  inst.time = (params) => inst.check(time2(params));
+  inst.duration = (params) => inst.check(duration2(params));
+});
+function string2(params) {
+  return _string(ZodString2, params);
+}
+var ZodStringFormat = /* @__PURE__ */ $constructor("ZodStringFormat", (inst, def) => {
+  $ZodStringFormat.init(inst, def);
+  _ZodString.init(inst, def);
+});
+var ZodEmail = /* @__PURE__ */ $constructor("ZodEmail", (inst, def) => {
+  $ZodEmail.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function email2(params) {
+  return _email(ZodEmail, params);
+}
+var ZodGUID = /* @__PURE__ */ $constructor("ZodGUID", (inst, def) => {
+  $ZodGUID.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function guid2(params) {
+  return _guid(ZodGUID, params);
+}
+var ZodUUID = /* @__PURE__ */ $constructor("ZodUUID", (inst, def) => {
+  $ZodUUID.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function uuid2(params) {
+  return _uuid(ZodUUID, params);
+}
+function uuidv4(params) {
+  return _uuidv4(ZodUUID, params);
+}
+function uuidv6(params) {
+  return _uuidv6(ZodUUID, params);
+}
+function uuidv7(params) {
+  return _uuidv7(ZodUUID, params);
+}
+var ZodURL = /* @__PURE__ */ $constructor("ZodURL", (inst, def) => {
+  $ZodURL.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function url(params) {
+  return _url(ZodURL, params);
+}
+var ZodEmoji = /* @__PURE__ */ $constructor("ZodEmoji", (inst, def) => {
+  $ZodEmoji.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function emoji2(params) {
+  return _emoji2(ZodEmoji, params);
+}
+var ZodNanoID = /* @__PURE__ */ $constructor("ZodNanoID", (inst, def) => {
+  $ZodNanoID.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function nanoid2(params) {
+  return _nanoid(ZodNanoID, params);
+}
+var ZodCUID = /* @__PURE__ */ $constructor("ZodCUID", (inst, def) => {
+  $ZodCUID.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function cuid3(params) {
+  return _cuid(ZodCUID, params);
+}
+var ZodCUID2 = /* @__PURE__ */ $constructor("ZodCUID2", (inst, def) => {
+  $ZodCUID2.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function cuid22(params) {
+  return _cuid2(ZodCUID2, params);
+}
+var ZodULID = /* @__PURE__ */ $constructor("ZodULID", (inst, def) => {
+  $ZodULID.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function ulid2(params) {
+  return _ulid(ZodULID, params);
+}
+var ZodXID = /* @__PURE__ */ $constructor("ZodXID", (inst, def) => {
+  $ZodXID.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function xid2(params) {
+  return _xid(ZodXID, params);
+}
+var ZodKSUID = /* @__PURE__ */ $constructor("ZodKSUID", (inst, def) => {
+  $ZodKSUID.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function ksuid2(params) {
+  return _ksuid(ZodKSUID, params);
+}
+var ZodIPv4 = /* @__PURE__ */ $constructor("ZodIPv4", (inst, def) => {
+  $ZodIPv4.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function ipv42(params) {
+  return _ipv4(ZodIPv4, params);
+}
+var ZodIPv6 = /* @__PURE__ */ $constructor("ZodIPv6", (inst, def) => {
+  $ZodIPv6.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function ipv62(params) {
+  return _ipv6(ZodIPv6, params);
+}
+var ZodCIDRv4 = /* @__PURE__ */ $constructor("ZodCIDRv4", (inst, def) => {
+  $ZodCIDRv4.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function cidrv42(params) {
+  return _cidrv4(ZodCIDRv4, params);
+}
+var ZodCIDRv6 = /* @__PURE__ */ $constructor("ZodCIDRv6", (inst, def) => {
+  $ZodCIDRv6.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function cidrv62(params) {
+  return _cidrv6(ZodCIDRv6, params);
+}
+var ZodBase64 = /* @__PURE__ */ $constructor("ZodBase64", (inst, def) => {
+  $ZodBase64.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function base642(params) {
+  return _base64(ZodBase64, params);
+}
+var ZodBase64URL = /* @__PURE__ */ $constructor("ZodBase64URL", (inst, def) => {
+  $ZodBase64URL.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function base64url2(params) {
+  return _base64url(ZodBase64URL, params);
+}
+var ZodE164 = /* @__PURE__ */ $constructor("ZodE164", (inst, def) => {
+  $ZodE164.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function e1642(params) {
+  return _e164(ZodE164, params);
+}
+var ZodJWT = /* @__PURE__ */ $constructor("ZodJWT", (inst, def) => {
+  $ZodJWT.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function jwt(params) {
+  return _jwt(ZodJWT, params);
+}
+var ZodCustomStringFormat = /* @__PURE__ */ $constructor("ZodCustomStringFormat", (inst, def) => {
+  $ZodCustomStringFormat.init(inst, def);
+  ZodStringFormat.init(inst, def);
+});
+function stringFormat(format, fnOrRegex, _params = {}) {
+  return _stringFormat(ZodCustomStringFormat, format, fnOrRegex, _params);
+}
+var ZodNumber2 = /* @__PURE__ */ $constructor("ZodNumber", (inst, def) => {
+  $ZodNumber.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.gt = (value, params) => inst.check(_gt(value, params));
+  inst.gte = (value, params) => inst.check(_gte(value, params));
+  inst.min = (value, params) => inst.check(_gte(value, params));
+  inst.lt = (value, params) => inst.check(_lt(value, params));
+  inst.lte = (value, params) => inst.check(_lte(value, params));
+  inst.max = (value, params) => inst.check(_lte(value, params));
+  inst.int = (params) => inst.check(int(params));
+  inst.safe = (params) => inst.check(int(params));
+  inst.positive = (params) => inst.check(_gt(0, params));
+  inst.nonnegative = (params) => inst.check(_gte(0, params));
+  inst.negative = (params) => inst.check(_lt(0, params));
+  inst.nonpositive = (params) => inst.check(_lte(0, params));
+  inst.multipleOf = (value, params) => inst.check(_multipleOf(value, params));
+  inst.step = (value, params) => inst.check(_multipleOf(value, params));
+  inst.finite = () => inst;
+  const bag = inst._zod.bag;
+  inst.minValue = Math.max(bag.minimum ?? Number.NEGATIVE_INFINITY, bag.exclusiveMinimum ?? Number.NEGATIVE_INFINITY) ?? null;
+  inst.maxValue = Math.min(bag.maximum ?? Number.POSITIVE_INFINITY, bag.exclusiveMaximum ?? Number.POSITIVE_INFINITY) ?? null;
+  inst.isInt = (bag.format ?? "").includes("int") || Number.isSafeInteger(bag.multipleOf ?? 0.5);
+  inst.isFinite = true;
+  inst.format = bag.format ?? null;
+});
+function number2(params) {
+  return _number(ZodNumber2, params);
+}
+var ZodNumberFormat = /* @__PURE__ */ $constructor("ZodNumberFormat", (inst, def) => {
+  $ZodNumberFormat.init(inst, def);
+  ZodNumber2.init(inst, def);
+});
+function int(params) {
+  return _int(ZodNumberFormat, params);
+}
+function float32(params) {
+  return _float32(ZodNumberFormat, params);
+}
+function float64(params) {
+  return _float64(ZodNumberFormat, params);
+}
+function int32(params) {
+  return _int32(ZodNumberFormat, params);
+}
+function uint32(params) {
+  return _uint32(ZodNumberFormat, params);
+}
+var ZodBoolean2 = /* @__PURE__ */ $constructor("ZodBoolean", (inst, def) => {
+  $ZodBoolean.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function boolean2(params) {
+  return _boolean(ZodBoolean2, params);
+}
+var ZodBigInt2 = /* @__PURE__ */ $constructor("ZodBigInt", (inst, def) => {
+  $ZodBigInt.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.gte = (value, params) => inst.check(_gte(value, params));
+  inst.min = (value, params) => inst.check(_gte(value, params));
+  inst.gt = (value, params) => inst.check(_gt(value, params));
+  inst.gte = (value, params) => inst.check(_gte(value, params));
+  inst.min = (value, params) => inst.check(_gte(value, params));
+  inst.lt = (value, params) => inst.check(_lt(value, params));
+  inst.lte = (value, params) => inst.check(_lte(value, params));
+  inst.max = (value, params) => inst.check(_lte(value, params));
+  inst.positive = (params) => inst.check(_gt(BigInt(0), params));
+  inst.negative = (params) => inst.check(_lt(BigInt(0), params));
+  inst.nonpositive = (params) => inst.check(_lte(BigInt(0), params));
+  inst.nonnegative = (params) => inst.check(_gte(BigInt(0), params));
+  inst.multipleOf = (value, params) => inst.check(_multipleOf(value, params));
+  const bag = inst._zod.bag;
+  inst.minValue = bag.minimum ?? null;
+  inst.maxValue = bag.maximum ?? null;
+  inst.format = bag.format ?? null;
+});
+function bigint2(params) {
+  return _bigint(ZodBigInt2, params);
+}
+var ZodBigIntFormat = /* @__PURE__ */ $constructor("ZodBigIntFormat", (inst, def) => {
+  $ZodBigIntFormat.init(inst, def);
+  ZodBigInt2.init(inst, def);
+});
+function int64(params) {
+  return _int64(ZodBigIntFormat, params);
+}
+function uint64(params) {
+  return _uint64(ZodBigIntFormat, params);
+}
+var ZodSymbol2 = /* @__PURE__ */ $constructor("ZodSymbol", (inst, def) => {
+  $ZodSymbol.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function symbol(params) {
+  return _symbol(ZodSymbol2, params);
+}
+var ZodUndefined2 = /* @__PURE__ */ $constructor("ZodUndefined", (inst, def) => {
+  $ZodUndefined.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function _undefined3(params) {
+  return _undefined2(ZodUndefined2, params);
+}
+var ZodNull2 = /* @__PURE__ */ $constructor("ZodNull", (inst, def) => {
+  $ZodNull.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function _null3(params) {
+  return _null2(ZodNull2, params);
+}
+var ZodAny2 = /* @__PURE__ */ $constructor("ZodAny", (inst, def) => {
+  $ZodAny.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function any() {
+  return _any(ZodAny2);
+}
+var ZodUnknown2 = /* @__PURE__ */ $constructor("ZodUnknown", (inst, def) => {
+  $ZodUnknown.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function unknown() {
+  return _unknown(ZodUnknown2);
+}
+var ZodNever2 = /* @__PURE__ */ $constructor("ZodNever", (inst, def) => {
+  $ZodNever.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function never(params) {
+  return _never(ZodNever2, params);
+}
+var ZodVoid2 = /* @__PURE__ */ $constructor("ZodVoid", (inst, def) => {
+  $ZodVoid.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function _void2(params) {
+  return _void(ZodVoid2, params);
+}
+var ZodDate2 = /* @__PURE__ */ $constructor("ZodDate", (inst, def) => {
+  $ZodDate.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.min = (value, params) => inst.check(_gte(value, params));
+  inst.max = (value, params) => inst.check(_lte(value, params));
+  const c = inst._zod.bag;
+  inst.minDate = c.minimum ? new Date(c.minimum) : null;
+  inst.maxDate = c.maximum ? new Date(c.maximum) : null;
+});
+function date3(params) {
+  return _date(ZodDate2, params);
+}
+var ZodArray2 = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
+  $ZodArray.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.element = def.element;
+  inst.min = (minLength, params) => inst.check(_minLength(minLength, params));
+  inst.nonempty = (params) => inst.check(_minLength(1, params));
+  inst.max = (maxLength, params) => inst.check(_maxLength(maxLength, params));
+  inst.length = (len, params) => inst.check(_length(len, params));
+  inst.unwrap = () => inst.element;
+});
+function array(element, params) {
+  return _array(ZodArray2, element, params);
+}
+function keyof(schema) {
+  const shape = schema._zod.def.shape;
+  return literal(Object.keys(shape));
+}
+var ZodObject2 = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
+  $ZodObject.init(inst, def);
+  ZodType2.init(inst, def);
+  util_exports.defineLazy(inst, "shape", () => def.shape);
+  inst.keyof = () => _enum2(Object.keys(inst._zod.def.shape));
+  inst.catchall = (catchall) => inst.clone({ ...inst._zod.def, catchall });
+  inst.passthrough = () => inst.clone({ ...inst._zod.def, catchall: unknown() });
+  inst.loose = () => inst.clone({ ...inst._zod.def, catchall: unknown() });
+  inst.strict = () => inst.clone({ ...inst._zod.def, catchall: never() });
+  inst.strip = () => inst.clone({ ...inst._zod.def, catchall: void 0 });
+  inst.extend = (incoming) => {
+    return util_exports.extend(inst, incoming);
+  };
+  inst.merge = (other) => util_exports.merge(inst, other);
+  inst.pick = (mask) => util_exports.pick(inst, mask);
+  inst.omit = (mask) => util_exports.omit(inst, mask);
+  inst.partial = (...args) => util_exports.partial(ZodOptional2, inst, args[0]);
+  inst.required = (...args) => util_exports.required(ZodNonOptional, inst, args[0]);
+});
+function object(shape, params) {
+  const def = {
+    type: "object",
+    get shape() {
+      util_exports.assignProp(this, "shape", { ...shape });
+      return this.shape;
+    },
+    ...util_exports.normalizeParams(params)
+  };
+  return new ZodObject2(def);
+}
+function strictObject(shape, params) {
+  return new ZodObject2({
+    type: "object",
+    get shape() {
+      util_exports.assignProp(this, "shape", { ...shape });
+      return this.shape;
+    },
+    catchall: never(),
+    ...util_exports.normalizeParams(params)
+  });
+}
+function looseObject(shape, params) {
+  return new ZodObject2({
+    type: "object",
+    get shape() {
+      util_exports.assignProp(this, "shape", { ...shape });
+      return this.shape;
+    },
+    catchall: unknown(),
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodUnion2 = /* @__PURE__ */ $constructor("ZodUnion", (inst, def) => {
+  $ZodUnion.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.options = def.options;
+});
+function union(options2, params) {
+  return new ZodUnion2({
+    type: "union",
+    options: options2,
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodDiscriminatedUnion2 = /* @__PURE__ */ $constructor("ZodDiscriminatedUnion", (inst, def) => {
+  ZodUnion2.init(inst, def);
+  $ZodDiscriminatedUnion.init(inst, def);
+});
+function discriminatedUnion(discriminator, options2, params) {
+  return new ZodDiscriminatedUnion2({
+    type: "union",
+    options: options2,
+    discriminator,
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodIntersection2 = /* @__PURE__ */ $constructor("ZodIntersection", (inst, def) => {
+  $ZodIntersection.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function intersection(left, right) {
+  return new ZodIntersection2({
+    type: "intersection",
+    left,
+    right
+  });
+}
+var ZodTuple2 = /* @__PURE__ */ $constructor("ZodTuple", (inst, def) => {
+  $ZodTuple.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.rest = (rest) => inst.clone({
+    ...inst._zod.def,
+    rest
+  });
+});
+function tuple(items, _paramsOrRest, _params) {
+  const hasRest = _paramsOrRest instanceof $ZodType;
+  const params = hasRest ? _params : _paramsOrRest;
+  const rest = hasRest ? _paramsOrRest : null;
+  return new ZodTuple2({
+    type: "tuple",
+    items,
+    rest,
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodRecord2 = /* @__PURE__ */ $constructor("ZodRecord", (inst, def) => {
+  $ZodRecord.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.keyType = def.keyType;
+  inst.valueType = def.valueType;
+});
+function record(keyType, valueType, params) {
+  return new ZodRecord2({
+    type: "record",
+    keyType,
+    valueType,
+    ...util_exports.normalizeParams(params)
+  });
+}
+function partialRecord(keyType, valueType, params) {
+  return new ZodRecord2({
+    type: "record",
+    keyType: union([keyType, never()]),
+    valueType,
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodMap2 = /* @__PURE__ */ $constructor("ZodMap", (inst, def) => {
+  $ZodMap.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.keyType = def.keyType;
+  inst.valueType = def.valueType;
+});
+function map(keyType, valueType, params) {
+  return new ZodMap2({
+    type: "map",
+    keyType,
+    valueType,
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodSet2 = /* @__PURE__ */ $constructor("ZodSet", (inst, def) => {
+  $ZodSet.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.min = (...args) => inst.check(_minSize(...args));
+  inst.nonempty = (params) => inst.check(_minSize(1, params));
+  inst.max = (...args) => inst.check(_maxSize(...args));
+  inst.size = (...args) => inst.check(_size(...args));
+});
+function set(valueType, params) {
+  return new ZodSet2({
+    type: "set",
+    valueType,
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodEnum2 = /* @__PURE__ */ $constructor("ZodEnum", (inst, def) => {
+  $ZodEnum.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.enum = def.entries;
+  inst.options = Object.values(def.entries);
+  const keys = new Set(Object.keys(def.entries));
+  inst.extract = (values, params) => {
+    const newEntries = {};
+    for (const value of values) {
+      if (keys.has(value)) {
+        newEntries[value] = def.entries[value];
+      } else
+        throw new Error(`Key ${value} not found in enum`);
+    }
+    return new ZodEnum2({
+      ...def,
+      checks: [],
+      ...util_exports.normalizeParams(params),
+      entries: newEntries
+    });
+  };
+  inst.exclude = (values, params) => {
+    const newEntries = { ...def.entries };
+    for (const value of values) {
+      if (keys.has(value)) {
+        delete newEntries[value];
+      } else
+        throw new Error(`Key ${value} not found in enum`);
+    }
+    return new ZodEnum2({
+      ...def,
+      checks: [],
+      ...util_exports.normalizeParams(params),
+      entries: newEntries
+    });
+  };
+});
+function _enum2(values, params) {
+  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v) => [v, v])) : values;
+  return new ZodEnum2({
+    type: "enum",
+    entries,
+    ...util_exports.normalizeParams(params)
+  });
+}
+function nativeEnum(entries, params) {
+  return new ZodEnum2({
+    type: "enum",
+    entries,
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodLiteral2 = /* @__PURE__ */ $constructor("ZodLiteral", (inst, def) => {
+  $ZodLiteral.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.values = new Set(def.values);
+  Object.defineProperty(inst, "value", {
+    get() {
+      if (def.values.length > 1) {
+        throw new Error("This schema contains multiple valid literal values. Use `.values` instead.");
+      }
+      return def.values[0];
+    }
+  });
+});
+function literal(value, params) {
+  return new ZodLiteral2({
+    type: "literal",
+    values: Array.isArray(value) ? value : [value],
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodFile = /* @__PURE__ */ $constructor("ZodFile", (inst, def) => {
+  $ZodFile.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.min = (size, params) => inst.check(_minSize(size, params));
+  inst.max = (size, params) => inst.check(_maxSize(size, params));
+  inst.mime = (types, params) => inst.check(_mime(Array.isArray(types) ? types : [types], params));
+});
+function file(params) {
+  return _file(ZodFile, params);
+}
+var ZodTransform = /* @__PURE__ */ $constructor("ZodTransform", (inst, def) => {
+  $ZodTransform.init(inst, def);
+  ZodType2.init(inst, def);
+  inst._zod.parse = (payload, _ctx) => {
+    payload.addIssue = (issue2) => {
+      if (typeof issue2 === "string") {
+        payload.issues.push(util_exports.issue(issue2, payload.value, def));
+      } else {
+        const _issue = issue2;
+        if (_issue.fatal)
+          _issue.continue = false;
+        _issue.code ?? (_issue.code = "custom");
+        _issue.input ?? (_issue.input = payload.value);
+        _issue.inst ?? (_issue.inst = inst);
+        _issue.continue ?? (_issue.continue = true);
+        payload.issues.push(util_exports.issue(_issue));
+      }
+    };
+    const output = def.transform(payload.value, payload);
+    if (output instanceof Promise) {
+      return output.then((output2) => {
+        payload.value = output2;
+        return payload;
+      });
+    }
+    payload.value = output;
+    return payload;
+  };
+});
+function transform(fn) {
+  return new ZodTransform({
+    type: "transform",
+    transform: fn
+  });
+}
+var ZodOptional2 = /* @__PURE__ */ $constructor("ZodOptional", (inst, def) => {
+  $ZodOptional.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.unwrap = () => inst._zod.def.innerType;
+});
+function optional(innerType) {
+  return new ZodOptional2({
+    type: "optional",
+    innerType
+  });
+}
+var ZodNullable2 = /* @__PURE__ */ $constructor("ZodNullable", (inst, def) => {
+  $ZodNullable.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.unwrap = () => inst._zod.def.innerType;
+});
+function nullable(innerType) {
+  return new ZodNullable2({
+    type: "nullable",
+    innerType
+  });
+}
+function nullish2(innerType) {
+  return optional(nullable(innerType));
+}
+var ZodDefault2 = /* @__PURE__ */ $constructor("ZodDefault", (inst, def) => {
+  $ZodDefault.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.unwrap = () => inst._zod.def.innerType;
+  inst.removeDefault = inst.unwrap;
+});
+function _default2(innerType, defaultValue) {
+  return new ZodDefault2({
+    type: "default",
+    innerType,
+    get defaultValue() {
+      return typeof defaultValue === "function" ? defaultValue() : defaultValue;
+    }
+  });
+}
+var ZodPrefault = /* @__PURE__ */ $constructor("ZodPrefault", (inst, def) => {
+  $ZodPrefault.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.unwrap = () => inst._zod.def.innerType;
+});
+function prefault(innerType, defaultValue) {
+  return new ZodPrefault({
+    type: "prefault",
+    innerType,
+    get defaultValue() {
+      return typeof defaultValue === "function" ? defaultValue() : defaultValue;
+    }
+  });
+}
+var ZodNonOptional = /* @__PURE__ */ $constructor("ZodNonOptional", (inst, def) => {
+  $ZodNonOptional.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.unwrap = () => inst._zod.def.innerType;
+});
+function nonoptional(innerType, params) {
+  return new ZodNonOptional({
+    type: "nonoptional",
+    innerType,
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodSuccess = /* @__PURE__ */ $constructor("ZodSuccess", (inst, def) => {
+  $ZodSuccess.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.unwrap = () => inst._zod.def.innerType;
+});
+function success(innerType) {
+  return new ZodSuccess({
+    type: "success",
+    innerType
+  });
+}
+var ZodCatch2 = /* @__PURE__ */ $constructor("ZodCatch", (inst, def) => {
+  $ZodCatch.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.unwrap = () => inst._zod.def.innerType;
+  inst.removeCatch = inst.unwrap;
+});
+function _catch2(innerType, catchValue) {
+  return new ZodCatch2({
+    type: "catch",
+    innerType,
+    catchValue: typeof catchValue === "function" ? catchValue : () => catchValue
+  });
+}
+var ZodNaN2 = /* @__PURE__ */ $constructor("ZodNaN", (inst, def) => {
+  $ZodNaN.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function nan(params) {
+  return _nan(ZodNaN2, params);
+}
+var ZodPipe = /* @__PURE__ */ $constructor("ZodPipe", (inst, def) => {
+  $ZodPipe.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.in = def.in;
+  inst.out = def.out;
+});
+function pipe(in_, out) {
+  return new ZodPipe({
+    type: "pipe",
+    in: in_,
+    out
+    // ...util.normalizeParams(params),
+  });
+}
+var ZodReadonly2 = /* @__PURE__ */ $constructor("ZodReadonly", (inst, def) => {
+  $ZodReadonly.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function readonly(innerType) {
+  return new ZodReadonly2({
+    type: "readonly",
+    innerType
+  });
+}
+var ZodTemplateLiteral = /* @__PURE__ */ $constructor("ZodTemplateLiteral", (inst, def) => {
+  $ZodTemplateLiteral.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function templateLiteral(parts, params) {
+  return new ZodTemplateLiteral({
+    type: "template_literal",
+    parts,
+    ...util_exports.normalizeParams(params)
+  });
+}
+var ZodLazy2 = /* @__PURE__ */ $constructor("ZodLazy", (inst, def) => {
+  $ZodLazy.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.unwrap = () => inst._zod.def.getter();
+});
+function lazy(getter) {
+  return new ZodLazy2({
+    type: "lazy",
+    getter
+  });
+}
+var ZodPromise2 = /* @__PURE__ */ $constructor("ZodPromise", (inst, def) => {
+  $ZodPromise.init(inst, def);
+  ZodType2.init(inst, def);
+  inst.unwrap = () => inst._zod.def.innerType;
+});
+function promise(innerType) {
+  return new ZodPromise2({
+    type: "promise",
+    innerType
+  });
+}
+var ZodCustom = /* @__PURE__ */ $constructor("ZodCustom", (inst, def) => {
+  $ZodCustom.init(inst, def);
+  ZodType2.init(inst, def);
+});
+function check(fn) {
+  const ch = new $ZodCheck({
+    check: "custom"
+    // ...util.normalizeParams(params),
+  });
+  ch._zod.check = fn;
+  return ch;
+}
+function custom2(fn, _params) {
+  return _custom(ZodCustom, fn ?? (() => true), _params);
+}
+function refine(fn, _params = {}) {
+  return _refine(ZodCustom, fn, _params);
+}
+function superRefine(fn) {
+  const ch = check((payload) => {
+    payload.addIssue = (issue2) => {
+      if (typeof issue2 === "string") {
+        payload.issues.push(util_exports.issue(issue2, payload.value, ch._zod.def));
+      } else {
+        const _issue = issue2;
+        if (_issue.fatal)
+          _issue.continue = false;
+        _issue.code ?? (_issue.code = "custom");
+        _issue.input ?? (_issue.input = payload.value);
+        _issue.inst ?? (_issue.inst = ch);
+        _issue.continue ?? (_issue.continue = !ch._zod.def.abort);
+        payload.issues.push(util_exports.issue(_issue));
+      }
+    };
+    return fn(payload.value, payload);
+  });
+  return ch;
+}
+function _instanceof(cls, params = {
+  error: `Input not instance of ${cls.name}`
+}) {
+  const inst = new ZodCustom({
+    type: "custom",
+    check: "custom",
+    fn: (data) => data instanceof cls,
+    abort: true,
+    ...util_exports.normalizeParams(params)
+  });
+  inst._zod.bag.Class = cls;
+  return inst;
+}
+var stringbool = (...args) => _stringbool({
+  Pipe: ZodPipe,
+  Boolean: ZodBoolean2,
+  String: ZodString2,
+  Transform: ZodTransform
+}, ...args);
+function json(params) {
+  const jsonSchema = lazy(() => {
+    return union([string2(params), number2(), boolean2(), _null3(), array(jsonSchema), record(string2(), jsonSchema)]);
+  });
+  return jsonSchema;
+}
+function preprocess(fn, schema) {
+  return pipe(transform(fn), schema);
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/classic/compat.js
+var ZodIssueCode2 = {
+  invalid_type: "invalid_type",
+  too_big: "too_big",
+  too_small: "too_small",
+  invalid_format: "invalid_format",
+  not_multiple_of: "not_multiple_of",
+  unrecognized_keys: "unrecognized_keys",
+  invalid_union: "invalid_union",
+  invalid_key: "invalid_key",
+  invalid_element: "invalid_element",
+  invalid_value: "invalid_value",
+  custom: "custom"
+};
+function setErrorMap2(map2) {
+  config({
+    customError: map2
+  });
+}
+function getErrorMap2() {
+  return config().customError;
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/classic/coerce.js
+var coerce_exports = {};
+__export(coerce_exports, {
+  bigint: () => bigint3,
+  boolean: () => boolean3,
+  date: () => date4,
+  number: () => number3,
+  string: () => string3
+});
+function string3(params) {
+  return _coercedString(ZodString2, params);
+}
+function number3(params) {
+  return _coercedNumber(ZodNumber2, params);
+}
+function boolean3(params) {
+  return _coercedBoolean(ZodBoolean2, params);
+}
+function bigint3(params) {
+  return _coercedBigint(ZodBigInt2, params);
+}
+function date4(params) {
+  return _coercedDate(ZodDate2, params);
+}
+
+// node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/classic/external.js
+config(en_default2());
+
+// packages/shared/dist/project-flow-contracts.js
+var PROJECT_FLOW_CONTRACT_VERSION = "v1";
+var PROJECT_FLOW_SCHEMA_BASE_URI = "https://memlin.ai/schemas/project-flows/v1";
+var ARTIFACT_REF_SCHEMA_ID = `${PROJECT_FLOW_SCHEMA_BASE_URI}/artifact-ref.schema.json`;
+var AGENT_STAGE_SUBMISSION_V1_SCHEMA_ID = `${PROJECT_FLOW_SCHEMA_BASE_URI}/agent-stage-submission.schema.json`;
+var STAGE_RESULT_ENVELOPE_V1_SCHEMA_ID = `${PROJECT_FLOW_SCHEMA_BASE_URI}/stage-result-envelope.schema.json`;
+var FLOW_DEFINITION_V1_SCHEMA_ID = `${PROJECT_FLOW_SCHEMA_BASE_URI}/flow-definition.schema.json`;
+var FLOW_PACK_MANIFEST_V1_SCHEMA_ID = `${PROJECT_FLOW_SCHEMA_BASE_URI}/flow-pack-manifest.schema.json`;
+var FLOW_EVAL_CASE_V1_SCHEMA_ID = `${PROJECT_FLOW_SCHEMA_BASE_URI}/flow-eval-case.schema.json`;
+var FLOW_EVAL_CASE_VERSION = "memlin.flow-eval/v1";
+var IDENTIFIER_PATTERN = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
+var CAPABILITY_PATTERN = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$/;
+var SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+var SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/;
+var IdentifierSchema = external_exports2.string().min(1).max(128).regex(IDENTIFIER_PATTERN, "must be a lowercase dot, underscore, or hyphen identifier");
+var CapabilityIdSchema = external_exports2.string().min(3).max(128).regex(CAPABILITY_PATTERN, "must be a namespaced lowercase capability such as source.read");
+var RelativePackPathSchema = external_exports2.string().min(1).max(512);
+var ArtifactRefSchema = external_exports2.object({
+  artifact_id: external_exports2.string().min(1).max(256),
+  version_id: external_exports2.string().min(1).max(256),
+  kind: external_exports2.enum([
+    "document",
+    "file",
+    "commit",
+    "build",
+    "test_result",
+    "review",
+    "interface_capture",
+    "deployment",
+    "external",
+    "other"
+  ]),
+  label: external_exports2.string().min(1).max(280).nullable(),
+  uri: external_exports2.string().min(1).max(2048).nullable(),
+  media_type: external_exports2.string().min(1).max(128).nullable(),
+  digest: external_exports2.string().regex(SHA256_PATTERN, "digest must be a lowercase sha256 value").nullable()
+}).strict();
+var StageOutcomeSchema = external_exports2.enum(["completed", "waiting", "blocked"]);
+var StageGateResultSchema = external_exports2.enum([
+  "pass",
+  "pass_with_advisories",
+  "changes_required",
+  "fail",
+  "skipped",
+  "not_applicable"
+]);
+var StageReasonCodeSchema = external_exports2.enum([
+  "requirements_gap",
+  "implementation_defect",
+  "test_gap",
+  "security_finding",
+  "ux_mismatch",
+  "missing_artifact",
+  "capability_unavailable",
+  "infrastructure_error",
+  "budget_exhausted",
+  "policy_requires_approval",
+  "needs_human_input",
+  "user_requested",
+  "not_applicable"
+]);
+var FindingSchema = external_exports2.object({
+  severity: external_exports2.enum(["info", "low", "medium", "high", "critical"]),
+  dimension: IdentifierSchema,
+  claim: external_exports2.string().min(1).max(4e3),
+  responsible_area: external_exports2.enum(["author", "implementation", "test", "security", "ux", "platform", "human"]).nullable(),
+  evidence: external_exports2.array(ArtifactRefSchema).max(32)
+}).strict();
+var AgentStageSubmissionV1BaseSchema = external_exports2.object({
+  schema_version: external_exports2.literal(PROJECT_FLOW_CONTRACT_VERSION),
+  outcome: StageOutcomeSchema,
+  gate_result: StageGateResultSchema,
+  reason_codes: external_exports2.array(StageReasonCodeSchema).max(16),
+  summary: external_exports2.string().min(1).max(4e3),
+  findings: external_exports2.array(FindingSchema).max(100),
+  artifacts: external_exports2.array(ArtifactRefSchema).max(100),
+  evidence: external_exports2.array(ArtifactRefSchema).max(100),
+  confidence: external_exports2.number().min(0).max(1)
+}).strict();
+var AgentStageSubmissionV1Schema = AgentStageSubmissionV1BaseSchema.superRefine(
+  (value, ctx) => {
+    if (value.outcome !== "completed" && value.gate_result !== "not_applicable") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["gate_result"],
+        message: "waiting and blocked submissions must use gate_result=not_applicable"
+      });
+    }
+    if (value.outcome !== "completed" && value.reason_codes.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["reason_codes"],
+        message: "waiting and blocked submissions require at least one reason code"
+      });
+    }
+    if ((value.gate_result === "changes_required" || value.gate_result === "fail") && value.findings.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["findings"],
+        message: "a blocking gate result requires at least one finding"
+      });
+    }
+    const blockingResultHasEvidence = value.evidence.length > 0 || value.findings.some((finding) => finding.evidence.length > 0);
+    const blockingResultNeedsHuman = value.reason_codes.some(
+      (reason) => ["needs_human_input", "policy_requires_approval"].includes(reason)
+    );
+    if ((value.gate_result === "changes_required" || value.gate_result === "fail") && !blockingResultHasEvidence && !blockingResultNeedsHuman) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["evidence"],
+        message: "a blocking gate result requires evidence or an explicit human-review reason"
+      });
+    }
+    if (value.gate_result === "skipped" && !value.reason_codes.some(
+      (reason) => ["capability_unavailable", "not_applicable", "user_requested"].includes(reason)
+    )) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["reason_codes"],
+        message: "a skipped gate must explain whether it was unavailable, not applicable, or requested"
+      });
+    }
+    value.findings.forEach((finding, index) => {
+      if ((finding.severity === "high" || finding.severity === "critical") && finding.evidence.length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["findings", index, "evidence"],
+          message: "high and critical findings require immutable evidence"
+        });
+      }
+      if ((value.gate_result === "pass" || value.gate_result === "pass_with_advisories") && (finding.severity === "high" || finding.severity === "critical")) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["findings", index, "severity"],
+          message: "high and critical findings require changes_required or fail"
+        });
+      }
+    });
+  }
+);
+var RuntimeStageStatusSchema = external_exports2.enum([
+  "completed",
+  "waiting",
+  "blocked",
+  "errored",
+  "cancelled"
+]);
+var ValidationResultSchema = external_exports2.object({
+  status: external_exports2.enum(["valid", "invalid", "not_run"]),
+  errors: external_exports2.array(
+    external_exports2.object({
+      path: external_exports2.string().min(1).max(512),
+      code: external_exports2.string().min(1).max(128),
+      message: external_exports2.string().min(1).max(1e3)
+    }).strict()
+  )
+}).strict();
+var RuntimeTransitionSchema = external_exports2.object({
+  action: external_exports2.enum(["advance", "retry", "pause", "complete", "cancel"]),
+  target_stage_id: IdentifierSchema.nullable(),
+  reason: external_exports2.string().min(1).max(1e3)
+}).strict();
+var RuntimeErrorSchema = external_exports2.object({
+  code: external_exports2.string().min(1).max(128),
+  message: external_exports2.string().min(1).max(2e3),
+  retryable: external_exports2.boolean()
+}).strict();
+var StageResultEnvelopeV1BaseSchema = external_exports2.object({
+  schema_version: external_exports2.literal(PROJECT_FLOW_CONTRACT_VERSION),
+  run_id: external_exports2.uuid(),
+  stage_run_id: external_exports2.uuid(),
+  attempt: external_exports2.number().int().min(1).max(100),
+  runtime_status: RuntimeStageStatusSchema,
+  submission: AgentStageSubmissionV1Schema.nullable(),
+  validation: ValidationResultSchema,
+  model_resolution_ref: external_exports2.string().min(1).max(256).nullable(),
+  usage_ref: external_exports2.string().min(1).max(256).nullable(),
+  started_at: external_exports2.iso.datetime({ offset: true }),
+  completed_at: external_exports2.iso.datetime({ offset: true }).nullable(),
+  transition: RuntimeTransitionSchema,
+  runtime_error: RuntimeErrorSchema.nullable()
+}).strict();
+var StageResultEnvelopeV1Schema = StageResultEnvelopeV1BaseSchema.superRefine(
+  (value, ctx) => {
+    const agentStatuses = ["completed", "waiting", "blocked"];
+    if (agentStatuses.includes(value.runtime_status)) {
+      if (!value.submission) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["submission"],
+          message: `${value.runtime_status} requires a validated agent submission`
+        });
+      } else if (value.submission.outcome !== value.runtime_status) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["runtime_status"],
+          message: "runtime status must match the validated submission outcome"
+        });
+      }
+      if (value.validation.status !== "valid") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["validation", "status"],
+          message: `${value.runtime_status} requires validation.status=valid`
+        });
+      }
+    }
+    if (value.validation.status === "valid" && value.validation.errors.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["validation", "errors"],
+        message: "valid results cannot contain validation errors"
+      });
+    }
+    if (value.validation.status === "invalid" && value.validation.errors.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["validation", "errors"],
+        message: "invalid results require at least one validation error"
+      });
+    }
+    if (value.validation.status === "not_run" && value.validation.errors.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["validation", "errors"],
+        message: "not_run validation cannot contain errors"
+      });
+    }
+    if ((value.transition.action === "advance" || value.transition.action === "retry") && !value.transition.target_stage_id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["transition", "target_stage_id"],
+        message: "advance and retry transitions require a target stage"
+      });
+    }
+    if (value.transition.action !== "advance" && value.transition.action !== "retry" && value.transition.target_stage_id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["transition", "target_stage_id"],
+        message: "only advance and retry transitions may name a target stage"
+      });
+    }
+    if ((value.runtime_status === "waiting" || value.runtime_status === "blocked") && value.transition.action !== "pause") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["transition", "action"],
+        message: "waiting and blocked stages must pause the run"
+      });
+    }
+    if (value.runtime_status === "cancelled" && value.transition.action !== "cancel") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["transition", "action"],
+        message: "cancelled stages must use a cancel transition"
+      });
+    }
+    if (value.runtime_status === "errored" && !value.runtime_error) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["runtime_error"],
+        message: "errored stages require runtime_error details"
+      });
+    }
+    if (value.runtime_status !== "errored" && value.runtime_error) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["runtime_error"],
+        message: "runtime_error is only valid for errored stages"
+      });
+    }
+  }
+);
+var AssuranceProfileSchema = external_exports2.enum(["direct", "standard", "assured"]);
+var CapabilitySetSchema = external_exports2.object({
+  required: external_exports2.array(CapabilityIdSchema).max(64),
+  recommended: external_exports2.array(CapabilityIdSchema).max(64),
+  optional: external_exports2.array(CapabilityIdSchema).max(64)
+}).strict();
+var CapabilityFallbackSchema = external_exports2.object({
+  capability: CapabilityIdSchema,
+  action: external_exports2.enum(["adapter", "manual", "human", "skip_stage", "pause", "fail"]),
+  adapter: IdentifierSchema.nullable()
+}).strict();
+var RiskTierSchema = external_exports2.enum(["low", "medium", "high", "regulated"]);
+var FlowInstallationRoleDocumentSchema = external_exports2.object({
+  document_id: external_exports2.string().uuid(),
+  version_id: external_exports2.string().uuid(),
+  skill_slug: IdentifierSchema.optional()
+}).strict();
+var FlowInstallationConfigurationSchema = external_exports2.object({
+  stage_overrides: external_exports2.record(
+    IdentifierSchema,
+    external_exports2.object({
+      disabled: external_exports2.boolean().optional(),
+      mode: external_exports2.literal("human").optional(),
+      role: IdentifierSchema.nullable().optional(),
+      skill: IdentifierSchema.nullable().optional(),
+      adapterBindings: external_exports2.record(CapabilityIdSchema, IdentifierSchema).optional()
+    }).strict()
+  ).optional(),
+  custom_skills: external_exports2.record(
+    IdentifierSchema,
+    FlowInstallationRoleDocumentSchema.extend({
+      capabilities: external_exports2.array(CapabilityIdSchema).max(128).optional()
+    }).strict()
+  ).optional(),
+  allowed_capabilities: external_exports2.array(CapabilityIdSchema).max(512).optional(),
+  recommended_role_documents: external_exports2.record(IdentifierSchema, FlowInstallationRoleDocumentSchema).optional(),
+  role_documents: external_exports2.record(IdentifierSchema, FlowInstallationRoleDocumentSchema).optional(),
+  use_recommended_skills_by_default: external_exports2.boolean().optional()
+}).strict();
+var StageRunConditionSchema = external_exports2.object({
+  risk_tiers: external_exports2.array(RiskTierSchema).max(4),
+  context_flags_any: external_exports2.array(IdentifierSchema).max(64),
+  context_flags_all: external_exports2.array(IdentifierSchema).max(64)
+}).strict();
+var StageBudgetSchema = external_exports2.object({
+  max_input_tokens: external_exports2.number().int().min(1).max(1e7),
+  max_output_tokens: external_exports2.number().int().min(1).max(1e6),
+  max_cost_usd: external_exports2.number().min(0).max(1e6),
+  max_duration_ms: external_exports2.number().int().min(1).max(6048e5)
+}).strict();
+var RetryPolicySchema = external_exports2.object({
+  max_attempts: external_exports2.number().int().min(1).max(5),
+  backoff_ms: external_exports2.literal(0)
+}).strict();
+var StageApprovalSchema = external_exports2.object({
+  timing: external_exports2.literal("before"),
+  type: external_exports2.enum(["start", "stage", "budget", "override", "external_action", "release"])
+}).strict();
+var StageGatePolicySchema = external_exports2.object({
+  success_results: external_exports2.array(external_exports2.enum(["pass", "pass_with_advisories"])).min(1).max(2),
+  minimum_evidence_items: external_exports2.number().int().min(1).max(100)
+}).strict();
+var TransitionConditionSchema = external_exports2.object({
+  outcome: StageOutcomeSchema.nullable(),
+  gate_result: StageGateResultSchema.nullable(),
+  reason_codes_any: external_exports2.array(StageReasonCodeSchema).max(16)
+}).strict();
+var TransitionTargetSchema = external_exports2.union([external_exports2.literal("$end"), external_exports2.literal("$pause"), IdentifierSchema]);
+var FlowTransitionSchema = external_exports2.object({
+  when: TransitionConditionSchema,
+  target: TransitionTargetSchema,
+  max_traversals: external_exports2.number().int().min(1).max(2).nullable()
+}).strict();
+var FlowStageSchema = external_exports2.object({
+  id: IdentifierSchema,
+  name: external_exports2.string().min(1).max(160),
+  description: external_exports2.string().min(1).max(1e3),
+  mode: external_exports2.enum(["agent", "human", "automation"]),
+  role: IdentifierSchema.nullable(),
+  skill: IdentifierSchema.nullable(),
+  optional: external_exports2.boolean(),
+  assurance_profiles: external_exports2.array(AssuranceProfileSchema).min(1).max(3),
+  run_if: StageRunConditionSchema,
+  capabilities: CapabilitySetSchema,
+  capability_fallbacks: external_exports2.array(CapabilityFallbackSchema).max(64),
+  model_role: IdentifierSchema.nullable(),
+  budget: StageBudgetSchema.nullable(),
+  retry: RetryPolicySchema,
+  approval: StageApprovalSchema.nullable(),
+  gate_policy: StageGatePolicySchema.nullable(),
+  transitions: external_exports2.array(FlowTransitionSchema).max(64),
+  default_transition: TransitionTargetSchema.nullable(),
+  bypass_target: TransitionTargetSchema.nullable()
+}).strict();
+var FlowDefinitionBaseSchema = external_exports2.object({
+  schema_version: external_exports2.literal(PROJECT_FLOW_CONTRACT_VERSION),
+  id: IdentifierSchema,
+  name: external_exports2.string().min(1).max(160),
+  description: external_exports2.string().min(1).max(2e3),
+  result_contract: external_exports2.literal(AGENT_STAGE_SUBMISSION_V1_SCHEMA_ID),
+  entry_stage: IdentifierSchema,
+  recommended_profile: AssuranceProfileSchema,
+  allow_no_flow: external_exports2.boolean(),
+  stages: external_exports2.array(FlowStageSchema).min(1).max(256)
+}).strict();
+var FlowEvalStageOverrideSchema = external_exports2.object({
+  disabled: external_exports2.boolean().optional(),
+  mode: external_exports2.enum(["agent", "human", "automation"]).optional(),
+  role: IdentifierSchema.nullable().optional(),
+  skill: IdentifierSchema.nullable().optional(),
+  adapter_bindings: external_exports2.record(CapabilityIdSchema, IdentifierSchema).optional()
+}).strict();
+var FlowEvalStageResultEventSchema = external_exports2.object({
+  kind: external_exports2.literal("stage_result"),
+  stage: IdentifierSchema,
+  outcome: StageOutcomeSchema,
+  gate_result: StageGateResultSchema,
+  reason_codes: external_exports2.array(StageReasonCodeSchema).max(16),
+  attempt: external_exports2.number().int().min(1).max(100),
+  evidence_items: external_exports2.number().int().min(0).max(100)
+}).strict();
+var FlowEvalApprovalEventSchema = external_exports2.object({
+  kind: external_exports2.literal("approval"),
+  stage: IdentifierSchema,
+  decision: external_exports2.enum(["approved", "rejected"])
+}).strict();
+var FlowEvalExpectedTransitionSchema = external_exports2.object({
+  stage: IdentifierSchema,
+  action: external_exports2.enum(["advance", "complete", "pause", "execute"]),
+  target_stage: IdentifierSchema.nullable(),
+  bypassed_stages: external_exports2.array(IdentifierSchema).max(256)
+}).strict();
+var FlowEvalExpectedStageSchema = external_exports2.object({
+  stage: IdentifierSchema,
+  availability: external_exports2.enum(["enabled", "skipped", "paused"]),
+  effective_mode: external_exports2.enum(["agent", "human", "automation"]),
+  adapter_bindings: external_exports2.record(CapabilityIdSchema, IdentifierSchema)
+}).strict();
+var FlowEvalBoundedEdgeSchema = external_exports2.object({
+  from_stage: IdentifierSchema,
+  to_stage: IdentifierSchema,
+  gate_result: StageGateResultSchema,
+  reason_code: StageReasonCodeSchema.nullable(),
+  max_traversals: external_exports2.number().int().min(1).max(2)
+}).strict();
+var FlowEvalExpectedFlowSchema = external_exports2.object({
+  selection: external_exports2.literal("flow"),
+  profile: AssuranceProfileSchema,
+  risk_tier: RiskTierSchema,
+  context_flags: external_exports2.array(IdentifierSchema).max(64),
+  available_capabilities: external_exports2.array(CapabilityIdSchema).max(256),
+  entry_stage: IdentifierSchema,
+  enabled_stages: external_exports2.array(IdentifierSchema).max(256),
+  bypassed_stages: external_exports2.array(IdentifierSchema).max(256),
+  paused_stages: external_exports2.array(IdentifierSchema).max(256),
+  required_approvals: external_exports2.array(IdentifierSchema).max(256),
+  protected_execution_stages: external_exports2.array(IdentifierSchema).max(256),
+  stage_expectations: external_exports2.array(FlowEvalExpectedStageSchema).max(256),
+  transitions: external_exports2.array(FlowEvalExpectedTransitionSchema).max(256),
+  replay: external_exports2.enum(["none", "deterministic"]),
+  bounded_edges: external_exports2.array(FlowEvalBoundedEdgeSchema).max(256)
+}).strict();
+var FlowEvalExpectedNoFlowSchema = external_exports2.object({
+  selection: external_exports2.literal("no-flow"),
+  reason: external_exports2.literal("user_declined")
+}).strict();
+var FlowEvalCaseV1Schema = external_exports2.object({
+  schema_version: external_exports2.literal(FLOW_EVAL_CASE_VERSION),
+  id: IdentifierSchema,
+  title: external_exports2.string().min(1).max(280),
+  input: external_exports2.object({
+    use_flow: external_exports2.boolean(),
+    profile: AssuranceProfileSchema,
+    risk_tier: RiskTierSchema,
+    context_flags: external_exports2.array(IdentifierSchema).max(64),
+    available_capabilities: external_exports2.array(CapabilityIdSchema).max(256),
+    available_adapters: external_exports2.array(IdentifierSchema).max(256),
+    capability_adapters: external_exports2.record(CapabilityIdSchema, IdentifierSchema),
+    stage_overrides: external_exports2.record(IdentifierSchema, FlowEvalStageOverrideSchema),
+    events: external_exports2.array(
+      external_exports2.discriminatedUnion("kind", [
+        FlowEvalStageResultEventSchema,
+        FlowEvalApprovalEventSchema
+      ])
+    ).max(256)
+  }).strict(),
+  expected: external_exports2.discriminatedUnion("selection", [
+    FlowEvalExpectedFlowSchema,
+    FlowEvalExpectedNoFlowSchema
+  ])
+}).strict().superRefine((value, ctx) => {
+  if (value.input.use_flow !== (value.expected.selection === "flow")) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["expected", "selection"],
+      message: "expected selection must match input.use_flow"
+    });
+  }
+  if (value.expected.selection === "flow" && value.input.events.length !== value.expected.transitions.length) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["expected", "transitions"],
+      message: "every executable eval event requires one expected transition"
+    });
+  }
+  if (value.expected.selection === "no-flow" && value.input.events.length > 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["input", "events"],
+      message: "no-flow evals cannot contain execution events"
+    });
+  }
+});
+function addDuplicateIssues(values, pathPrefix, code, issues) {
+  const firstIndex = /* @__PURE__ */ new Map();
+  values.forEach((value, index) => {
+    const normalized = value.toLowerCase();
+    const earlier = firstIndex.get(normalized);
+    if (earlier !== void 0) {
+      issues.push({
+        path: `${pathPrefix}.${index}`,
+        code,
+        message: `${JSON.stringify(value)} duplicates entry ${earlier}`
+      });
+      return;
+    }
+    firstIndex.set(normalized, index);
+  });
+}
+function isReservedTarget(target) {
+  return target === "$end" || target === "$pause";
+}
+function validateFlowDefinitionSemantics(flow) {
+  const issues = [];
+  const stageIds = flow.stages.map((stage) => stage.id);
+  addDuplicateIssues(stageIds, "stages", "duplicate_stage_id", issues);
+  const stageById = new Map(flow.stages.map((stage) => [stage.id, stage]));
+  if (!stageById.has(flow.entry_stage)) {
+    issues.push({
+      path: "entry_stage",
+      code: "missing_entry_stage",
+      message: `entry stage ${JSON.stringify(flow.entry_stage)} does not exist`
+    });
+  }
+  for (const [stageIndex, stage] of flow.stages.entries()) {
+    const capabilityGroups = [
+      ...stage.capabilities.required,
+      ...stage.capabilities.recommended,
+      ...stage.capabilities.optional
+    ];
+    addDuplicateIssues(
+      capabilityGroups,
+      `stages.${stageIndex}.capabilities`,
+      "duplicate_capability",
+      issues
+    );
+    const declaredCapabilities = new Set(capabilityGroups);
+    const requiredCapabilities = new Set(stage.capabilities.required);
+    for (const [fallbackIndex, fallback] of stage.capability_fallbacks.entries()) {
+      if (!declaredCapabilities.has(fallback.capability)) {
+        issues.push({
+          path: `stages.${stageIndex}.capability_fallbacks.${fallbackIndex}.capability`,
+          code: "undeclared_capability_fallback",
+          message: `fallback references undeclared capability ${JSON.stringify(fallback.capability)}`
+        });
+      } else if (!requiredCapabilities.has(fallback.capability)) {
+        issues.push({
+          path: `stages.${stageIndex}.capability_fallbacks.${fallbackIndex}.capability`,
+          code: "fallback_for_non_required_capability",
+          message: `fallbacks may reference required capabilities only; ${JSON.stringify(fallback.capability)} is not required`
+        });
+      }
+      if (fallback.action !== "adapter" && fallback.adapter !== null) {
+        issues.push({
+          path: `stages.${stageIndex}.capability_fallbacks.${fallbackIndex}.adapter`,
+          code: "unexpected_fallback_adapter",
+          message: "only adapter fallbacks may name an adapter"
+        });
+      }
+    }
+    addDuplicateIssues(
+      stage.capability_fallbacks.map((fallback) => fallback.capability),
+      `stages.${stageIndex}.capability_fallbacks`,
+      "duplicate_capability_fallback",
+      issues
+    );
+    addDuplicateIssues(
+      stage.assurance_profiles,
+      `stages.${stageIndex}.assurance_profiles`,
+      "duplicate_assurance_profile",
+      issues
+    );
+    addDuplicateIssues(
+      stage.run_if.risk_tiers,
+      `stages.${stageIndex}.run_if.risk_tiers`,
+      "duplicate_risk_tier",
+      issues
+    );
+    addDuplicateIssues(
+      [...stage.run_if.context_flags_any, ...stage.run_if.context_flags_all],
+      `stages.${stageIndex}.run_if`,
+      "duplicate_context_flag",
+      issues
+    );
+    if (stage.gate_policy) {
+      addDuplicateIssues(
+        stage.gate_policy.success_results,
+        `stages.${stageIndex}.gate_policy.success_results`,
+        "duplicate_gate_success_result",
+        issues
+      );
+    }
+    if (stage.mode !== "agent" && stage.model_role !== null) {
+      issues.push({
+        path: `stages.${stageIndex}.model_role`,
+        code: "model_role_without_agent",
+        message: "only agent stages may declare a model role"
+      });
+    }
+    if (stage.mode !== "agent" && stage.skill !== null) {
+      issues.push({
+        path: `stages.${stageIndex}.skill`,
+        code: "skill_without_agent",
+        message: "only agent stages may recommend a skill"
+      });
+    }
+    if (stage.transitions.length === 0 && stage.default_transition === null) {
+      issues.push({
+        path: `stages.${stageIndex}`,
+        code: "dead_end_stage",
+        message: "every stage must declare a transition or default_transition"
+      });
+    }
+    if ((stage.assurance_profiles.length < AssuranceProfileSchema.options.length || stage.run_if.risk_tiers.length > 0 || stage.run_if.context_flags_any.length > 0 || stage.run_if.context_flags_all.length > 0) && stage.bypass_target === null) {
+      issues.push({
+        path: `stages.${stageIndex}.bypass_target`,
+        code: "conditional_stage_without_fallback",
+        message: "conditional stages require a bypass target when they do not run"
+      });
+    }
+    if (stage.gate_policy) {
+      if (stage.default_transition !== "$pause") {
+        issues.push({
+          path: `stages.${stageIndex}.default_transition`,
+          code: "gate_default_must_pause",
+          message: "gate stages must pause when no explicit result transition matches"
+        });
+      }
+      for (const result of stage.gate_policy.success_results) {
+        const hasExplicitTransition = stage.transitions.some(
+          (transition) => transition.when.outcome === "completed" && transition.when.gate_result === result
+        );
+        if (!hasExplicitTransition) {
+          issues.push({
+            path: `stages.${stageIndex}.transitions`,
+            code: "gate_success_transition_missing",
+            message: `gate success result ${JSON.stringify(result)} requires an explicit completed transition`
+          });
+        }
+      }
+      stage.transitions.forEach((transition, transitionIndex) => {
+        const result = transition.when.gate_result;
+        if (result === null && (transition.when.outcome === null || transition.when.outcome === "completed")) {
+          issues.push({
+            path: `stages.${stageIndex}.transitions.${transitionIndex}.when.gate_result`,
+            code: "gate_completed_result_wildcard",
+            message: "gate routes that can match completed submissions require an explicit gate result"
+          });
+        }
+        if (result === "skipped" || result === "not_applicable") {
+          issues.push({
+            path: `stages.${stageIndex}.transitions.${transitionIndex}.when.gate_result`,
+            code: "gate_bypass_result_transition",
+            message: `gate result ${JSON.stringify(result)} must pause and cannot have a routing transition`
+          });
+        }
+        if ((result === "pass" || result === "pass_with_advisories") && !stage.gate_policy?.success_results.includes(result)) {
+          issues.push({
+            path: `stages.${stageIndex}.transitions.${transitionIndex}.when.gate_result`,
+            code: "undeclared_gate_success_transition",
+            message: `gate success result ${JSON.stringify(result)} is not declared by gate_policy`
+          });
+        }
+        if ((result === "pass" || result === "pass_with_advisories") && transition.when.outcome !== "completed") {
+          issues.push({
+            path: `stages.${stageIndex}.transitions.${transitionIndex}.when.outcome`,
+            code: "gate_success_outcome_not_explicit",
+            message: `gate success result ${JSON.stringify(result)} requires outcome=completed`
+          });
+        }
+      });
+    }
+    const targets = [
+      ...stage.transitions.map((transition, transitionIndex) => ({
+        target: transition.target,
+        path: `stages.${stageIndex}.transitions.${transitionIndex}.target`
+      })),
+      ...stage.default_transition === null ? [] : [
+        {
+          target: stage.default_transition,
+          path: `stages.${stageIndex}.default_transition`
+        }
+      ],
+      ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
+    ];
+    targets.forEach(({ target, path: path13 }) => {
+      if (!isReservedTarget(target) && !stageById.has(target)) {
+        issues.push({
+          path: path13,
+          code: "missing_transition_target",
+          message: `transition target ${JSON.stringify(target)} does not exist`
+        });
+      }
+    });
+    const serializedConditions = stage.transitions.map(
+      (transition) => JSON.stringify(transition.when)
+    );
+    addDuplicateIssues(
+      serializedConditions,
+      `stages.${stageIndex}.transitions`,
+      "duplicate_transition_condition",
+      issues
+    );
+    stage.transitions.forEach((transition, transitionIndex) => {
+      if ((transition.when.outcome === "waiting" || transition.when.outcome === "blocked") && transition.when.gate_result !== null && transition.when.gate_result !== "not_applicable") {
+        issues.push({
+          path: `stages.${stageIndex}.transitions.${transitionIndex}.when`,
+          code: "impossible_transition_condition",
+          message: "waiting and blocked results always use gate_result=not_applicable, so this transition can never match"
+        });
+      }
+    });
+  }
+  if (!stageById.has(flow.entry_stage)) return issues;
+  const reachable = /* @__PURE__ */ new Set();
+  const visiting = /* @__PURE__ */ new Set();
+  const visited = /* @__PURE__ */ new Set();
+  let hasReachableEnd = false;
+  const visit = (stageId, path13, pathBounds) => {
+    reachable.add(stageId);
+    if (visited.has(stageId)) return;
+    visiting.add(stageId);
+    const stage = stageById.get(stageId);
+    if (stage) {
+      const edges = [
+        ...stage.transitions.filter(
+          (transition) => !((transition.when.outcome === "waiting" || transition.when.outcome === "blocked") && transition.when.gate_result !== null && transition.when.gate_result !== "not_applicable")
+        ).map((transition) => ({
+          target: transition.target,
+          bounded: transition.max_traversals !== null
+        })),
+        ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
+        ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
+      ];
+      const currentPath = [...path13, stageId];
+      for (const edge of edges) {
+        const { target } = edge;
+        if (target === "$end") {
+          hasReachableEnd = true;
+        } else if (target !== "$pause") {
+          if (visiting.has(target)) {
+            const cycleStart = currentPath.indexOf(target);
+            const cycleBounds = [...pathBounds.slice(cycleStart), edge.bounded];
+            if (!cycleBounds.some(Boolean)) {
+              issues.push({
+                path: "stages",
+                code: "unbounded_flow_cycle",
+                message: `flow cycles require max_traversals on at least one cycle edge (${[
+                  ...currentPath.slice(cycleStart),
+                  target
+                ].join(" -> ")})`
+              });
+            }
+          } else {
+            visit(target, currentPath, [...pathBounds, edge.bounded]);
+          }
+        }
+      }
+    }
+    visiting.delete(stageId);
+    visited.add(stageId);
+  };
+  visit(flow.entry_stage, [], []);
+  flow.stages.forEach((stage, index) => {
+    if (!reachable.has(stage.id)) {
+      issues.push({
+        path: `stages.${index}.id`,
+        code: "unreachable_stage",
+        message: `stage ${JSON.stringify(stage.id)} is unreachable from entry_stage`
+      });
+    }
+  });
+  if (!hasReachableEnd) {
+    issues.push({
+      path: "stages",
+      code: "missing_terminal",
+      message: "at least one $end transition must be reachable from entry_stage"
+    });
+  }
+  return issues;
+}
+var FlowDefinitionSchema = FlowDefinitionBaseSchema.superRefine((value, ctx) => {
+  for (const issue2 of validateFlowDefinitionSemantics(value)) {
+    ctx.addIssue({
+      code: "custom",
+      path: issue2.path.split(".").map((part) => /^\d+$/.test(part) ? Number(part) : part),
+      message: `${issue2.code}: ${issue2.message}`
+    });
+  }
+});
+var ManifestRoleSchema = external_exports2.object({
+  id: IdentifierSchema,
+  path: RelativePackPathSchema,
+  description: external_exports2.string().min(1).max(500),
+  capabilities: CapabilitySetSchema
+}).strict();
+var ManifestSchemaEntrySchema = external_exports2.object({
+  id: external_exports2.string().min(1).max(256),
+  path: RelativePackPathSchema
+}).strict();
+var ManifestEvalSchema = external_exports2.object({
+  id: IdentifierSchema,
+  path: RelativePackPathSchema
+}).strict();
+var ManifestPolicySchema = external_exports2.object({
+  id: IdentifierSchema,
+  path: RelativePackPathSchema
+}).strict();
+var ModelRoleIndependencePolicySchema = external_exports2.object({
+  fresh_context: external_exports2.boolean(),
+  cross_provider: external_exports2.boolean(),
+  cross_family: external_exports2.boolean(),
+  compare_against_roles: external_exports2.array(IdentifierSchema).min(1).max(64)
+}).strict();
+var ManifestModelRoleSchema = external_exports2.object({
+  id: IdentifierSchema,
+  description: external_exports2.string().min(1).max(500),
+  quality_contract: external_exports2.string().min(1).max(256),
+  independence: ModelRoleIndependencePolicySchema.nullable()
+}).strict();
+var FlowPackManifestBaseSchema = external_exports2.object({
+  schema_version: external_exports2.literal(PROJECT_FLOW_CONTRACT_VERSION),
+  id: IdentifierSchema,
+  name: external_exports2.string().min(1).max(160),
+  description: external_exports2.string().min(1).max(2e3),
+  version: external_exports2.string().regex(SEMVER_PATTERN, "version must be valid semantic versioning"),
+  publisher: external_exports2.object({
+    id: IdentifierSchema,
+    name: external_exports2.string().min(1).max(160)
+  }).strict(),
+  license: external_exports2.string().min(1).max(128),
+  compatibility: external_exports2.object({
+    memlin: external_exports2.string().min(1).max(64)
+  }).strict(),
+  activation: external_exports2.literal("opt_in"),
+  flow: RelativePackPathSchema,
+  roles: external_exports2.array(ManifestRoleSchema).max(256),
+  schemas: external_exports2.array(ManifestSchemaEntrySchema).min(1).max(256),
+  policies: external_exports2.array(ManifestPolicySchema).max(64),
+  evals: external_exports2.array(ManifestEvalSchema).max(256),
+  model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
+}).strict();
+function validateRelativePackPath(path13) {
+  if (path13.startsWith("/") || path13.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path13) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path13)) {
+    return "drive-qualified paths and URI schemes are not allowed";
+  }
+  if (/[\u0000-\u001f\u007f]/.test(path13)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path13)) return "encoded path traversal is not allowed";
+  if (path13.includes("\\")) return "path must use forward slashes";
+  if (path13.split("/").some((segment) => segment === ".." || segment === ".")) {
+    return "path traversal and dot segments are not allowed";
+  }
+  if (path13.split("/").some((segment) => segment.length === 0)) {
+    return "path cannot contain empty segments";
+  }
+  return null;
+}
+function validateFlowPackManifestSemantics(manifest) {
+  const issues = [];
+  addDuplicateIssues(
+    manifest.roles.map((role) => role.id),
+    "roles",
+    "duplicate_role_id",
+    issues
+  );
+  addDuplicateIssues(
+    manifest.schemas.map((schema) => schema.id),
+    "schemas",
+    "duplicate_schema_id",
+    issues
+  );
+  addDuplicateIssues(
+    manifest.policies.map((policy) => policy.id),
+    "policies",
+    "duplicate_policy_id",
+    issues
+  );
+  addDuplicateIssues(
+    manifest.evals.map((evaluation) => evaluation.id),
+    "evals",
+    "duplicate_eval_id",
+    issues
+  );
+  addDuplicateIssues(
+    manifest.model_roles.map((role) => role.id),
+    "model_roles",
+    "duplicate_model_role_id",
+    issues
+  );
+  const modelRolesById = new Map(manifest.model_roles.map((role) => [role.id, role]));
+  manifest.model_roles.forEach((role, roleIndex) => {
+    if (!role.independence) return;
+    addDuplicateIssues(
+      role.independence.compare_against_roles,
+      `model_roles.${roleIndex}.independence.compare_against_roles`,
+      "duplicate_independence_reference",
+      issues
+    );
+    role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
+      const path13 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      if (comparedRole === role.id) {
+        issues.push({
+          path: path13,
+          code: "self_referential_model_independence",
+          message: "a model role cannot require independence from itself"
+        });
+      } else if (!modelRolesById.has(comparedRole)) {
+        issues.push({
+          path: path13,
+          code: "missing_independence_model_role",
+          message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
+        });
+      } else if (modelRolesById.get(comparedRole)?.independence !== null) {
+        issues.push({
+          path: path13,
+          code: "independence_reference_not_author",
+          message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
+        });
+      }
+    });
+  });
+  const paths = [
+    { path: manifest.flow, field: "flow" },
+    ...manifest.roles.map((role, index) => ({ path: role.path, field: `roles.${index}.path` })),
+    ...manifest.schemas.map((schema, index) => ({
+      path: schema.path,
+      field: `schemas.${index}.path`
+    })),
+    ...manifest.policies.map((policy, index) => ({
+      path: policy.path,
+      field: `policies.${index}.path`
+    })),
+    ...manifest.evals.map((evaluation, index) => ({
+      path: evaluation.path,
+      field: `evals.${index}.path`
+    }))
+  ];
+  addDuplicateIssues(
+    paths.map((entry) => entry.path),
+    "paths",
+    "duplicate_pack_path",
+    issues
+  );
+  for (const entry of paths) {
+    const error40 = validateRelativePackPath(entry.path);
+    if (error40) {
+      issues.push({ path: entry.field, code: "unsafe_pack_path", message: error40 });
+    }
+  }
+  if (!/\.ya?ml$/i.test(manifest.flow)) {
+    issues.push({
+      path: "flow",
+      code: "invalid_flow_path",
+      message: "flow must reference a .yaml or .yml file"
+    });
+  }
+  manifest.roles.forEach((role, index) => {
+    if (!/(^|\/)SKILL\.md$/.test(role.path)) {
+      issues.push({
+        path: `roles.${index}.path`,
+        code: "invalid_role_path",
+        message: "role paths must end in SKILL.md"
+      });
+    }
+  });
+  manifest.policies.forEach((policy, index) => {
+    if (!policy.path.startsWith("policies/") || !/\.ya?ml$/i.test(policy.path)) {
+      issues.push({
+        path: `policies.${index}.path`,
+        code: "invalid_policy_path",
+        message: "policy paths must be YAML files under policies/"
+      });
+    }
+  });
+  if (!manifest.schemas.some((entry) => entry.id === AGENT_STAGE_SUBMISSION_V1_SCHEMA_ID)) {
+    issues.push({
+      path: "schemas",
+      code: "missing_result_contract",
+      message: `manifest must include ${AGENT_STAGE_SUBMISSION_V1_SCHEMA_ID}`
+    });
+  }
+  return issues;
+}
+var FlowPackManifestSchema = FlowPackManifestBaseSchema.superRefine((value, ctx) => {
+  for (const issue2 of validateFlowPackManifestSemantics(value)) {
+    ctx.addIssue({
+      code: "custom",
+      path: issue2.path.split(".").map((part) => /^\d+$/.test(part) ? Number(part) : part),
+      message: `${issue2.code}: ${issue2.message}`
+    });
+  }
+});
+
+// packages/shared/dist/needs-you-engine.js
+var NEEDS_YOU_HORIZON_DAYS = 14;
+var HORIZON_MS = NEEDS_YOU_HORIZON_DAYS * 24 * 60 * 60 * 1e3;
+var STALLED_GOAL_AGE_MS = 30 * 24 * 60 * 60 * 1e3;
+
+// packages/plugin-core/dist/light-worker.js
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+function startLightWorker(cwd, payload) {
+  const directory = path.dirname(fileURLToPath(import.meta.url));
+  const worker = path.basename(directory) === "hooks" || path.basename(directory) === "cli" ? path.resolve(directory, "../cli/light-worker.js") : path.join(directory, "cli/light-worker.js");
+  const child = spawn(process.execPath, [worker, JSON.stringify({ cwd, payload })], {
+    cwd,
+    stdio: "ignore",
+    detached: true,
+    env: { ...process.env, MEMLIN_LIGHT_WORKER: "1" }
+  });
+  child.on("error", () => {
+  });
+  child.unref();
+}
+
+// packages/plugin-core/dist/stop-handler.js
+import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { promises as fs9, constants as fsConstants } from "node:fs";
+
+// packages/plugin-core/dist/client.js
+import { promises as fs5 } from "node:fs";
+import path8 from "node:path";
+import os6 from "node:os";
+import { randomUUID as randomUUID3 } from "node:crypto";
+
+// packages/plugin-core/dist/auth.js
+init_atomic_rename();
+import { promises as fs3 } from "node:fs";
+import path5 from "node:path";
+import os3 from "node:os";
+import { randomUUID } from "node:crypto";
+
+// packages/plugin-core/dist/backend-error.js
+var MemlinApiError = class extends Error {
+  constructor(message, status, code) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.name = "MemlinApiError";
+  }
+  status;
+  code;
+};
+function looksLikeHtml(text) {
+  const head = text.slice(0, 512).trimStart().toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html") || head.includes("<html") || head.startsWith("<") && /<\/(head|body|title|div|p)>/i.test(text);
+}
+function singleLine(text, max = 200) {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1)}\u2026`;
+}
+function describeOpaqueBody(status, text) {
+  const trimmed = text.trim();
+  if (!trimmed) return `HTTP ${status}`;
+  if (looksLikeHtml(trimmed)) {
+    const via = /cloudflare/i.test(trimmed) ? "Cloudflare " : "";
+    return `HTTP ${status} (${via}HTML error page suppressed, ${trimmed.length} chars)`;
+  }
+  return `HTTP ${status}: ${singleLine(trimmed)}`;
+}
+function backendUnreachableLine(detail) {
+  return `memlin: backend unreachable (${detail}), no memory available`;
+}
+var ROUTING_PATTERN = /account routing (unavailable|lookup failed)/i;
+var CLOUDFLARE_STATUS = /\b(52[0-7])\b/;
+function statusOf(err) {
+  if (err instanceof MemlinApiError) return err.status;
+  const status = err?.status;
+  if (typeof status === "number" && status >= 100 && status <= 599) return status;
+  const message = err instanceof Error ? err.message : String(err);
+  const arrow = message.match(/→ (\d{3}):/);
+  if (arrow) return Number(arrow[1]);
+  return null;
+}
+function summarizeBackendFailure(err) {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const status = statusOf(err);
+  if (ROUTING_PATTERN.test(message)) {
+    const embedded = message.match(CLOUDFLARE_STATUS)?.[1];
+    const code = embedded ?? (status !== null && status >= 500 ? String(status) : null);
+    const detail = code ? `routing ${code}` : "routing unavailable";
+    return { kind: "routing", status: code ? Number(code) : status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (status !== null && status >= 500) {
+    const detail = `HTTP ${status}`;
+    return { kind: "http", status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (/took longer than \d+ seconds/i.test(message)) {
+    return { kind: "network", status: null, detail: "timeout", line: backendUnreachableLine("timeout") };
+  }
+  if (/couldn'?t reach|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|network/i.test(message)) {
+    return {
+      kind: "network",
+      status: null,
+      detail: "network unreachable",
+      line: backendUnreachableLine("network unreachable")
+    };
+  }
+  return null;
+}
+
+// packages/plugin-core/dist/auth.js
+init_auth_refusal();
+var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
+var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
+var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
+var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
+var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
+function persistedTokenFilePath() {
+  return process.env.MEMLIN_TOKEN_FILE || path5.join(os3.homedir(), ".config", "memlin", "token.json");
+}
+var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
+var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
+var AUTH_FILE_LOCK_RETRY_MS = 50;
+function authFileLockPath() {
+  return `${persistedTokenFilePath()}.auth.lock`;
+}
+async function acquireAuthFileLock() {
+  const file2 = authFileLockPath();
+  const owner = `${process.pid}:${randomUUID()}`;
+  await fs3.mkdir(path5.dirname(file2), { recursive: true });
+  const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      const handle = await fs3.open(file2, "wx", 384);
+      try {
+        await handle.writeFile(owner, "utf8");
+        await handle.sync();
+      } catch (error40) {
+        await handle.close().catch(() => {
+        });
+        await fs3.rm(file2, { force: true }).catch(() => {
+        });
+        throw error40;
+      }
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        await handle.close().catch(() => {
+        });
+        const currentOwner = await fs3.readFile(file2, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs3.rm(file2, { force: true }).catch(() => {
+        });
+      };
+    } catch (error40) {
+      if (error40.code !== "EEXIST") throw error40;
+      try {
+        const stat = await fs3.stat(file2);
+        if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
+          await fs3.rm(file2, { force: true });
+          continue;
+        }
+      } catch (statError) {
+        if (statError.code === "ENOENT") continue;
+        throw statError;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error("another Memlin sign-in or token refresh is still being saved");
+      }
+      await new Promise((resolve) => setTimeout(resolve, AUTH_FILE_LOCK_RETRY_MS));
+    }
+  }
+}
+async function withAuthFileLock(operation) {
+  const release = await acquireAuthFileLock();
+  try {
+    return await operation();
+  } finally {
+    await release();
+  }
+}
+async function readPersistedToken() {
+  try {
+    const raw = await fs3.readFile(persistedTokenFilePath(), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+async function writePersistedToken(t) {
+  const file2 = persistedTokenFilePath();
+  await fs3.mkdir(path5.dirname(file2), { recursive: true });
+  const tmp = path5.join(
+    path5.dirname(file2),
+    `${path5.basename(file2)}.tmp-${process.pid}-${randomUUID()}`
+  );
+  const previous = await readPersistedToken().catch(() => null);
+  await fs3.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
+  await fs3.chmod(tmp, 384).catch(() => {
+  });
+  await atomicRename(tmp, file2);
+  await clearRefusalsIfAccountsChanged(previous?.access_token ?? null, t.access_token);
+}
+async function clearRefusalsIfAccountsChanged(before, after) {
+  try {
+    const claimIds = (jwt2) => {
+      if (!jwt2) return void 0;
+      try {
+        return decodeJwtPayload(jwt2).memlin_account_ids;
+      } catch {
+        return void 0;
+      }
+    };
+    if (accountIdsChanged(claimIds(before), claimIds(after))) {
+      await clearAllAuthRefusals();
+    }
+  } catch {
+  }
+}
+async function refreshAccessToken(refreshToken, options2 = {}) {
+  requireClientId();
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: AUTH0_CLIENT_ID
+  });
+  const res = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+    signal: AbortSignal.timeout(Math.max(1, options2.timeoutMs ?? 15e3))
+  });
+  if (!res.ok) {
+    throw new Error(`refresh: ${describeOpaqueBody(res.status, await res.text())}`);
+  }
+  const json2 = await res.json();
+  return toPersisted(json2, refreshToken);
+}
+var refreshInFlight = null;
+var DEFAULT_FRESHNESS_MARGIN_MS = 6e4;
+async function getValidAccessToken() {
+  return ensureFreshToken(DEFAULT_FRESHNESS_MARGIN_MS);
+}
+async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS, options2 = {}) {
+  const persisted = await readPersistedToken();
+  if (!persisted) throw new Error("not signed in \u2014 run `memlin login`");
+  if (Date.now() < persisted.expires_at - marginMs) return persisted.access_token;
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = doRefresh(persisted, marginMs, options2).finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+async function doRefresh(stale, marginMs, options2) {
+  const latest = await readPersistedToken();
+  if (latest && Date.now() < latest.expires_at - marginMs) return latest.access_token;
+  try {
+    const { companionGetToken: companionGetToken2 } = await Promise.resolve().then(() => (init_companion_client(), companion_client_exports));
+    const fromDaemon = await companionGetToken2();
+    if (fromDaemon && Date.now() < fromDaemon.expires_at - marginMs) {
+      return fromDaemon.access_token;
+    }
+  } catch {
+  }
+  const refreshSource = latest ?? stale;
+  const refreshToken = refreshSource.refresh_token;
+  if (!refreshToken) {
+    throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
+  }
+  try {
+    const fresh = await refreshAccessToken(refreshToken, options2);
+    return await withAuthFileLock(async () => {
+      const beforeWrite = await readPersistedToken();
+      if (!beforeWrite || beforeWrite.access_token !== refreshSource.access_token) {
+        if (beforeWrite && Date.now() < beforeWrite.expires_at - marginMs) {
+          return beforeWrite.access_token;
+        }
+        throw new Error("saved Memlin credentials changed while the token was refreshing");
+      }
+      await writePersistedToken(fresh);
+      return fresh.access_token;
+    });
+  } catch (err) {
+    const after = await readPersistedToken();
+    if (after && after.access_token !== refreshSource.access_token && Date.now() < after.expires_at - 6e4) {
+      return after.access_token;
+    }
+    throw new Error(
+      `access token refresh failed (${err instanceof Error ? err.message : String(err)}) \u2014 run \`memlin login\``
+    );
+  }
+}
+function toPersisted(json2, fallbackRefresh) {
+  return {
+    access_token: json2.access_token,
+    refresh_token: json2.refresh_token ?? fallbackRefresh,
+    expires_at: Date.now() + json2.expires_in * 1e3
+  };
+}
+function requireClientId() {
+  if (!AUTH0_CLIENT_ID) {
+    throw new Error(
+      "Auth0 client id not configured. Set MEMLIN_AUTH0_CLIENT_ID env var (and optionally MEMLIN_AUTH0_DOMAIN / MEMLIN_AUTH0_AUDIENCE for self-hosted setups)."
+    );
+  }
+}
+function decodeJwtPayload(jwt2) {
+  const parts = jwt2.split(".");
+  if (parts.length !== 3) throw new Error("not a JWT");
+  return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+}
+
+// packages/plugin-core/dist/client.js
+init_atomic_rename();
+
+// packages/plugin-core/dist/memlin-api-client.js
+init_auth_refusal();
+import { readFileSync } from "node:fs";
+import crypto3 from "node:crypto";
+import os5 from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+
+// packages/plugin-core/dist/runtime-shared.js
+var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
+var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
+var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
+var AGENT_CAPABILITIES_HEADER = "Memlin-Agent-Capabilities";
+var AGENT_PLATFORM_HEADER = "Memlin-Agent-Platform";
+var AGENT_ARCHITECTURE_HEADER = "Memlin-Agent-Architecture";
+var AGENT_EXPECTED_CAPABILITIES = {
+  "claude-code": ["cli", "commands", "hooks", "sync", "scribe", "resolve"],
+  cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
+  codex: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
+  windsurf: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
+  // VS Code (apps/vscode-extension): MCP + CLI + copilot-instructions; plain
+  // VS Code has no lifecycle-hook or slash-command surface.
+  vscode: ["mcp", "cli", "rules", "resolve"],
+  gemini: ["mcp", "rules", "resolve"],
+  grok: ["mcp", "rules", "resolve"],
+  hermes: ["mcp", "resolve"],
+  openclaw: ["mcp", "rules", "resolve"],
+  antigravity: ["mcp", "cli", "hooks", "commands", "rules", "sync", "scribe", "resolve"],
+  mcp: ["mcp", "resolve"],
+  "claude-ai": ["mcp", "resolve"],
+  // Companion daemon (apps/companion): background token keeper + realtime
+  // plan sync + local IPC socket other agents delegate to. No hooks/commands
+  // of its own.
+  companion: ["cli", "sync", "realtime", "resolve"]
+};
+var PROVIDER_HOSTS = [
+  "github.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "dev.azure.com",
+  "ssh.dev.azure.com",
+  "codeberg.org",
+  "sr.ht",
+  "git.sr.ht"
+];
+function normalizeGitRemote(raw) {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  if (!s.includes("://")) {
+    s = s.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
+  }
+  s = s.replace(/^(?:ssh|git|https?):\/\//, "");
+  s = s.replace(/^[^/@]+@/, "");
+  s = s.replace(/\.git$/, "");
+  s = s.replace(/\/$/, "");
+  const slash = s.indexOf("/");
+  if (slash > 0) {
+    const host = s.slice(0, slash).toLowerCase();
+    const rest = s.slice(slash);
+    s = host + rest;
+    for (const provider of PROVIDER_HOSTS) {
+      if (host === provider) break;
+      if (host.startsWith(provider + "-")) {
+        s = provider + rest;
+        break;
+      }
+    }
+  }
+  return s || null;
+}
+async function withTimeout(promise2, ms, fallback) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise2,
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+        timer.unref?.();
+      })
+    ]);
+  } finally {
+    if (timer !== void 0) clearTimeout(timer);
+  }
+}
+async function closeHttpSockets() {
+  try {
+    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
+    if (dispatcher && typeof dispatcher.close === "function") {
+      let timer;
+      await Promise.race([
+        dispatcher.close(),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 250);
+          timer.unref?.();
+        })
+      ]).finally(() => {
+        if (timer !== void 0) clearTimeout(timer);
+      });
+    }
+  } catch {
+  }
+}
+
+// packages/plugin-core/dist/host.js
+import os4 from "node:os";
+import path6 from "node:path";
+var BaseHost = class {
+  constructor(kind, home) {
+    this.kind = kind;
+    this.home = home;
+  }
+  kind;
+  home;
+  homeDir() {
+    return this.home;
+  }
+  plansDir() {
+    return path6.join(this.home, "plans");
+  }
+};
+var ClaudeCodeHost = class extends BaseHost {
+  constructor() {
+    super("claude-code", path6.join(os4.homedir(), ".claude"));
+  }
+};
+var CursorHost = class extends BaseHost {
+  constructor() {
+    super("cursor", path6.join(os4.homedir(), ".config", "memlin"));
+  }
+};
+var CodexHost = class extends BaseHost {
+  constructor() {
+    super("codex", path6.join(os4.homedir(), ".config", "memlin"));
+  }
+};
+var WindsurfHost = class extends BaseHost {
+  constructor() {
+    super("windsurf", path6.join(os4.homedir(), ".config", "memlin"));
+  }
+};
+var AntigravityHost = class extends BaseHost {
+  constructor() {
+    super("antigravity", path6.join(os4.homedir(), ".config", "memlin"));
+  }
+};
+var VSCodeHost = class extends BaseHost {
+  constructor() {
+    super("vscode", path6.join(os4.homedir(), ".config", "memlin"));
+  }
+};
+var CompanionHost = class extends BaseHost {
+  constructor() {
+    super("companion", path6.join(os4.homedir(), ".config", "memlin"));
+  }
+};
+var HOSTS2 = {
+  "claude-code": () => new ClaudeCodeHost(),
+  cursor: () => new CursorHost(),
+  codex: () => new CodexHost(),
+  windsurf: () => new WindsurfHost(),
+  antigravity: () => new AntigravityHost(),
+  vscode: () => new VSCodeHost(),
+  companion: () => new CompanionHost()
+};
+function resolveHost() {
+  const envHost = process.env.MEMLIN_HOST ?? (process.env.CURSOR_AGENT ? "cursor" : "claude-code");
+  const make = HOSTS2[envHost];
+  return (make ?? HOSTS2["claude-code"])();
+}
+
+// packages/plugin-core/dist/memlin-api-client.js
+var DEFAULT_API_URL = "https://memlin.ai/api/v1";
+function agentDevice() {
+  return process.env.MEMLIN_AGENT_DEVICE || os5.hostname() || "unknown";
+}
+var cachedAgentVersion = null;
+function agentVersion() {
+  if (cachedAgentVersion) return cachedAgentVersion;
+  cachedAgentVersion = "0.1.46";
+  return cachedAgentVersion;
+}
+function agentCapabilities() {
+  return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
+}
+var DEFAULT_REQUEST_TIMEOUT_MS = 15e3;
+var DEFAULT_MAX_RETRIES = 2;
+var DEFAULT_RETRY_BASE_DELAY_MS = 250;
+var NATIVE_MEMORY_BATCH_SIZE = 20;
+var NATIVE_MEMORY_BATCH_CONCURRENCY = 3;
+var NATIVE_MEMORY_REQUEST_TIMEOUT_MS = 9e4;
+var NATIVE_MEMORY_BATCH_INDEX = "# Native memory satellite batch\n";
+var RESOLVE_V2_MAX_LINE_BYTES = 2 * 1024 * 1024;
+var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
+var RETRIABLE_NETWORK_CODES = /* @__PURE__ */ new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "EPIPE",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EAI_AGAIN",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET"
+]);
+function isRetriableNetworkError(error40) {
+  if (error40 instanceof Error && (error40.name === "TimeoutError" || error40.name === "AbortError")) {
+    return true;
+  }
+  let current = error40;
+  for (let depth = 0; current instanceof Error && depth < 5; depth++) {
+    const code = current.code;
+    if (code && RETRIABLE_NETWORK_CODES.has(code)) return true;
+    current = current.cause;
+  }
+  return false;
+}
+function unreachableError(url2, cause, timeoutMs) {
+  let host = url2;
+  try {
+    host = new URL(url2).host;
+  } catch {
+  }
+  if (cause instanceof Error && (cause.name === "TimeoutError" || cause.name === "AbortError")) {
+    return new Error(
+      `Memlin at ${host} took longer than ${Math.ceil(timeoutMs / 1e3)} seconds to respond. The request was stopped; try again.`,
+      { cause }
+    );
+  }
+  return new Error(
+    `Couldn't reach Memlin at ${host}. Check your internet connection and try again.`,
+    { cause }
+  );
+}
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function delayWithSignal(ms, signal) {
+  if (!signal) return delay(ms);
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("request aborted"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      signal?.removeEventListener("abort", aborted2);
+      resolve();
+    }
+    function aborted2() {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error("request aborted"));
+    }
+    signal.addEventListener("abort", aborted2, { once: true });
+  });
+}
+function resolveV2Event(value) {
+  if (!value || typeof value !== "object") {
+    throw new Error("Memlin progressive resolver returned a non-object event");
+  }
+  const candidate = value;
+  if (candidate.type !== "hot" && candidate.type !== "full" && candidate.type !== "failed" || typeof candidate.resolve_id !== "string" || typeof candidate.turn_id !== "string" || typeof candidate.trace_id !== "string" || typeof candidate.account_id !== "string" || candidate.project_id !== null && typeof candidate.project_id !== "string" || !candidate.timing || typeof candidate.timing.total_ms !== "number" || !candidate.metrics || typeof candidate.metrics.db_calls !== "number") {
+    throw new Error("Memlin progressive resolver returned a malformed event");
+  }
+  if ((candidate.type === "hot" || candidate.type === "full") && !candidate.payload) {
+    throw new Error(`Memlin progressive resolver returned ${candidate.type} without a payload`);
+  }
+  if (candidate.type === "failed" && !candidate.error) {
+    throw new Error("Memlin progressive resolver returned failed without an error receipt");
+  }
+  return candidate;
+}
+async function* parseNdjsonEvents(body) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (; ; ) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      for (; ; ) {
+        const newline = buffer.indexOf("\n");
+        if (newline < 0) break;
+        const rawLine = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (Buffer.byteLength(rawLine) > RESOLVE_V2_MAX_LINE_BYTES) {
+          throw new Error("Memlin progressive resolver returned an oversized event");
+        }
+        const line = rawLine.trim();
+        if (!line) continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          throw new Error("Memlin progressive resolver returned invalid NDJSON");
+        }
+        yield resolveV2Event(parsed);
+      }
+      if (Buffer.byteLength(buffer) > RESOLVE_V2_MAX_LINE_BYTES) {
+        throw new Error("Memlin progressive resolver returned an oversized event");
+      }
+    }
+    buffer += decoder.decode();
+    if (Buffer.byteLength(buffer) > RESOLVE_V2_MAX_LINE_BYTES) {
+      throw new Error("Memlin progressive resolver returned an oversized event");
+    }
+    const tail = buffer.trim();
+    if (tail) {
+      let parsed;
+      try {
+        parsed = JSON.parse(tail);
+      } catch {
+        throw new Error("Memlin progressive resolver returned invalid NDJSON");
+      }
+      yield resolveV2Event(parsed);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+var MemlinApiClient = class {
+  constructor(cfg) {
+    this.cfg = cfg;
+  }
+  cfg;
+  /** The configured account (the light-gate cache key when a call names none). */
+  get defaultAccountId() {
+    return this.cfg.accountId;
+  }
+  // ---------- low-level ----------
+  async authHeaders(includeAccount = true, override = {}) {
+    const token = await this.cfg.getAccessToken();
+    const kind = override.agentKind ?? resolveHost().kind;
+    const version2 = override.agentKind === void 0 ? agentVersion() : override.agentVersion ?? "dev";
+    const h = {
+      Authorization: `Bearer ${token}`,
+      [AGENT_KIND_HEADER]: kind,
+      [AGENT_DEVICE_HEADER]: agentDevice(),
+      [AGENT_VERSION_HEADER]: version2,
+      [AGENT_CAPABILITIES_HEADER]: (override.agentKind ? AGENT_EXPECTED_CAPABILITIES[kind] : agentCapabilities()).join(","),
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os5.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os5.arch()
+    };
+    if (includeAccount && this.cfg.accountId) {
+      h["Memlin-Account-Id"] = this.cfg.accountId;
+    }
+    return h;
+  }
+  async request(method, pathAndQuery, body, opts = {}) {
+    const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
+    const refusalAccountId = this.refusalAccountId(opts.includeAccount ?? true, opts.accountId);
+    await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
+    const baseHeaders = await this.authHeaders(opts.includeAccount ?? true, opts);
+    if (opts.accountId) {
+      baseHeaders["Memlin-Account-Id"] = opts.accountId;
+    }
+    const headers = {
+      ...baseHeaders,
+      Accept: "application/json"
+    };
+    if (body !== void 0) headers["Content-Type"] = "application/json";
+    const idempotent = method === "GET";
+    const maxAttempts = idempotent ? Math.max(0, opts.maxRetries ?? this.cfg.maxRetries ?? DEFAULT_MAX_RETRIES) + 1 : 1;
+    const timeoutMs = Math.max(
+      1,
+      opts.requestTimeoutMs ?? this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    );
+    for (let attempt = 1; ; attempt++) {
+      let res;
+      let text;
+      try {
+        const timeoutSignal = AbortSignal.timeout(timeoutMs);
+        res = await fetch(url2, {
+          method,
+          headers,
+          // A dead socket must abort rather than hang the caller forever.
+          signal: opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal,
+          ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+        });
+        text = await res.text();
+      } catch (error40) {
+        if (attempt < maxAttempts && isRetriableNetworkError(error40)) {
+          await delay(this.backoffMs(attempt));
+          continue;
+        }
+        throw unreachableError(url2, error40, timeoutMs);
+      }
+      if (idempotent && attempt < maxAttempts && RETRIABLE_STATUS.has(res.status)) {
+        await delay(this.backoffMs(attempt));
+        continue;
+      }
+      let parsed = null;
+      if (text) {
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+        }
+      }
+      const refusalCode = await this.noteAuthOutcome(res.status, parsed, refusalAccountId);
+      if (!res.ok) {
+        const serverError = parsed?.error;
+        const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
+        throw new MemlinApiError(
+          `${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`,
+          res.status,
+          refusalCode
+        );
+      }
+      return parsed;
+    }
+  }
+  backoffMs(attempt) {
+    const base = this.cfg.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+    return base * 2 ** (attempt - 1);
+  }
+  /** Accounts whose refusals this client already cleared after a 2xx. */
+  refusalCleared = /* @__PURE__ */ new Set();
+  /** The account a request is scoped to (the Memlin-Account-Id it sends). */
+  refusalAccountId(includeAccount, override) {
+    if (override) return override;
+    return includeAccount && this.cfg.accountId ? this.cfg.accountId : null;
+  }
+  /** Zero-network short circuit while a membership refusal is fresh. */
+  async throwIfAuthRefused(method, pathAndQuery, accountId) {
+    if (!this.cfg.authRefusal || !accountId) return;
+    const entry = await readAuthRefusal(accountId, this.cfg.authRefusal.binding);
+    if (!entry) return;
+    throw new MemlinApiError(
+      `${method} ${pathAndQuery} \u2192 403: ${AUTH_REFUSAL_MESSAGES[entry.reason]} (recently refused; not retried \u2014 run /memlin-link or /memlin-login)`,
+      403,
+      entry.reason
+    );
+  }
+  /**
+   * Keep the refusal cache in step with what the server said: any 2xx for an
+   * account clears its refusals (every binding); a not_member / no_profile
+   * 403 records one. Returns the refusal code, if any. Never throws.
+   */
+  async noteAuthOutcome(status, body, accountId) {
+    if (!accountId) return void 0;
+    if (status >= 200 && status < 300) {
+      if (!this.refusalCleared.has(accountId)) {
+        this.refusalCleared.add(accountId);
+        await clearAuthRefusalsForAccount(accountId);
+      }
+      return void 0;
+    }
+    const reason = classifyAuthRefusal(status, body);
+    if (!reason) return void 0;
+    if (this.cfg.authRefusal) {
+      this.refusalCleared.delete(accountId);
+      await recordAuthRefusal({
+        accountId,
+        binding: this.cfg.authRefusal.binding,
+        reason,
+        accountName: accountId === this.cfg.accountId ? this.cfg.authRefusal.accountName ?? null : null
+      }).catch(() => {
+      });
+    }
+    return reason;
+  }
+  async openResolveV2Stream(method, pathAndQuery, body, opts = {}) {
+    const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
+    const refusalAccountId = this.refusalAccountId(true, opts.accountId);
+    await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
+    const headers = await this.authHeaders(true, opts);
+    if (opts.accountId) headers["Memlin-Account-Id"] = opts.accountId;
+    headers.Accept = "application/x-ndjson";
+    if (body !== void 0) headers["Content-Type"] = "application/json";
+    if (opts.traceId) {
+      const normalized = opts.traceId.replaceAll("-", "").toLowerCase();
+      const traceId = /^[0-9a-f]{32}$/.test(normalized) ? normalized : crypto3.createHash("sha256").update(opts.traceId).digest("hex").slice(0, 32);
+      headers.traceparent = `00-${traceId}-${crypto3.randomBytes(8).toString("hex")}-01`;
+    }
+    const timeoutMs = Math.max(
+      1,
+      opts.requestTimeoutMs ?? this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    );
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal;
+    let response;
+    try {
+      response = await fetch(url2, {
+        method,
+        headers,
+        signal,
+        ...body !== void 0 ? { body: JSON.stringify(body) } : {}
+      });
+    } catch (error40) {
+      throw unreachableError(url2, error40, timeoutMs);
+    }
+    if (response.ok) {
+      const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+      if (!contentType.includes("application/x-ndjson")) {
+        await response.body?.cancel().catch(() => void 0);
+        throw new Error("Memlin progressive resolver returned an unexpected response type");
+      }
+      await this.noteAuthOutcome(response.status, null, refusalAccountId);
+      return response;
+    }
+    const text = await response.text().catch(() => "");
+    let serverError;
+    let parsedBody = null;
+    try {
+      const parsed = JSON.parse(text);
+      parsedBody = parsed;
+      serverError = typeof parsed.error === "string" ? parsed.error : parsed.error?.message ?? parsed.error?.code;
+    } catch {
+    }
+    const refusalCode = await this.noteAuthOutcome(response.status, parsedBody, refusalAccountId);
+    const detail = response.status >= 500 ? `HTTP ${response.status} (upstream response suppressed)` : serverError ? singleLine(serverError, 300) : describeOpaqueBody(response.status, text);
+    throw new MemlinApiError(
+      `${method} ${pathAndQuery} \u2192 ${response.status}: ${detail}`,
+      response.status,
+      refusalCode
+    );
+  }
+  async *readResolveV2Response(response) {
+    if (!response.body) {
+      throw new Error("Memlin progressive resolver returned an empty response body");
+    }
+    yield* parseNdjsonEvents(response.body);
+  }
+  // ---------- endpoints ----------
+  /** GET /me — identity + account list. No account header sent (this is the discovery call). */
+  async me() {
+    return this.request("GET", "/me", void 0, { includeAccount: false });
+  }
+  /**
+   * GET /report — account-scoped usage aggregates (tokens saved, resolves,
+   * hit rate). The route nests the window (`window: { from, days }` — no
+   * top-level days field) and clamps days to [1, 31] server-side (default 1);
+   * `projectId` maps to the `?project=` query param. Consumed by the
+   * Companion's Memory panel for its tokens-saved counter.
+   */
+  async report(opts = {}) {
+    const q = new URLSearchParams();
+    if (opts.days !== void 0) q.set("days", String(opts.days));
+    if (opts.projectId) q.set("project", opts.projectId);
+    const qs = q.toString();
+    return this.request("GET", `/report${qs ? `?${qs}` : ""}`);
+  }
+  /**
+   * GET /realtime/config — Supabase connection info for the caller's
+   * effective account. The client config file is deliberately
+   * backend-agnostic (no Supabase URL / anon key), so Realtime subscribers
+   * — the Companion daemon (packages/companion-core) — bootstrap the
+   * connection from here. Dedicated-instance (paid org) accounts get THEIR
+   * instance's values, which is why this rides normal account-header auth.
+   */
+  async getRealtimeConfig(opts = {}) {
+    return this.request("GET", "/realtime/config", void 0, { accountId: opts.accountId });
+  }
+  /**
+   * POST /roles/assign — set a member's functional roles (backend, sre,
+   * ...). Defaults to the caller; pass user_id to assign another member
+   * (owner/admin only). Replaces the member's set wholesale.
+   */
+  async assignRoles(input, opts = {}) {
+    return this.request("POST", "/roles/assign", input, {
+      accountId: opts.accountId
+    });
+  }
+  /**
+   * POST /roles/tag — tag a document into one or more role packs. The
+   * resolver boosts the document for members holding a matching role.
+   * Replaces the document's role tags wholesale.
+   */
+  async tagDocumentRoles(input, opts = {}) {
+    return this.request("POST", "/roles/tag", input, {
+      accountId: opts.accountId
+    });
+  }
+  /**
+   * POST /documents/pin — force-include ("pin") a document, or unpin it.
+   * A pinned doc is fetched out-of-band by the resolver on every resolve in
+   * scope (no similarity threshold) and reserved budget off the top — a
+   * standing directive, not a similarity hit. Owner/admin-only server-side.
+   */
+  async setDocumentPinned(input, opts = {}) {
+    return this.request("POST", "/documents/pin", input, {
+      accountId: opts.accountId
+    });
+  }
+  /** GET /decisions/enforce — pull the guardrail rules currently
+   *  in effect for the caller's account (and optionally a project).
+   *  Returns kind='decision' docs whose `metadata.enforce` is set —
+   *  the PreToolUse handler in plugin-core's pre-tool-use-handler
+   *  module is the primary caller. */
+  async listEnforceDecisions(opts = {}, requestOpts = {}) {
+    const qs = new URLSearchParams();
+    if (opts.project_id !== void 0) {
+      qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return this.request("GET", `/decisions/enforce${suffix}`, void 0, {
+      accountId: requestOpts.accountId
+    });
+  }
+  /** POST /usage/event — write a usage_events row from the client.
+   *  Server-side enforces an allowlist of event_types (today:
+   *  tool.guardrail, action.invoke, resolve.outcome, edit.activity,
+   *  resolve.delivery) and re-derives account_id and user_id from the auth
+   *  context so callers can't forge rows for other workspaces.
+   *  `opts.accountId` routes the write to a non-default account
+   *  (multi-account workspaces). */
+  async writeUsageEvent(input, opts = {}) {
+    return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
+  }
+  /** Batched, idempotent editor-agent telemetry. This stream is deliberately
+   * separate from usage_events: it powers live sessions, subagent visibility,
+   * model analytics, and operational timelines without affecting metering. */
+  async writeAgentActivityBatch(events, opts = {}) {
+    return this.request("POST", "/agent/activity", { events }, opts);
+  }
+  /** GET /documents — list, filtered. */
+  async listDocuments(opts = {}, callOpts = {}) {
+    const qs = new URLSearchParams();
+    if (opts.kinds) for (const k of opts.kinds) qs.append("kind", k);
+    if (opts.scopes) for (const s of opts.scopes) qs.append("scope", s);
+    if (opts.statuses) for (const s of opts.statuses) qs.append("status", s);
+    if (opts.project_id !== void 0) {
+      qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
+    }
+    if (opts.has_trigger) qs.set("has_trigger", "true");
+    if (opts.path) qs.set("path", opts.path);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
+    return res.documents.map((d) => {
+      const { status, ...rest } = d;
+      return status == null ? rest : { ...rest, status };
+    });
+  }
+  async deleteLightMemory(documentId, expectedVersion) {
+    await this.request(
+      "DELETE",
+      "/light/memory",
+      { document_id: documentId, expected_version: expectedVersion },
+      { maxRetries: 0, requestTimeoutMs: 5e3 }
+    );
+  }
+  async recordLightSync(projectId, status) {
+    await this.request(
+      "POST",
+      "/light/sync",
+      { project_id: projectId, status },
+      { maxRetries: 0, requestTimeoutMs: 1500 }
+    );
+  }
+  // ---------- Light native sync (B2) ----------
+  // Writes are never retried by request() (only GET is), so a reset after the
+  // server committed can't duplicate a version. Error bodies carry a stable
+  // `{error: code}`; see lightErrorCode() in light/sync-api.ts.
+  /** POST /light/documents — versioned Light write; identical content is a metadata-only merge. */
+  async lightWriteDocument(input) {
+    return this.request("POST", "/light/documents", input, { requestTimeoutMs: 2e4 });
+  }
+  /** POST /light/lease — acquire or renew the per-host sync lease. */
+  async lightAcquireLease(input) {
+    return this.request("POST", "/light/lease", input, { requestTimeoutMs: 8e3 });
+  }
+  /** DELETE /light/lease — release a lease this holder owns. */
+  async lightReleaseLease(input) {
+    return this.request("DELETE", "/light/lease", input, { requestTimeoutMs: 5e3 });
+  }
+  /** POST /light/sync with per-host agent statuses. */
+  async lightReportSync(input) {
+    return this.request("POST", "/light/sync", input, { requestTimeoutMs: 8e3 });
+  }
+  /** GET /light/suppressions — forgotten items (the same hash never reimports). */
+  async listLightSuppressions() {
+    return (await this.request(
+      "GET",
+      "/light/suppressions",
+      void 0,
+      { requestTimeoutMs: 8e3 }
+    )).suppressions;
+  }
+  /** POST /light/suppressions */
+  async lightSuppress(input) {
+    return this.request("POST", "/light/suppressions", input, { requestTimeoutMs: 8e3 });
+  }
+  /** DELETE /light/suppressions */
+  async lightUnsuppress(id) {
+    return this.request("DELETE", "/light/suppressions", { id }, { requestTimeoutMs: 8e3 });
+  }
+  /**
+   * POST /light/suggestions — upsert this device's suggestions (≤ 100). The
+   * server never reopens a dismissed / accepted row with the same hash. An
+   * older server answers 404/405; callers treat that as "no server store".
+   */
+  async reportLightSuggestions(input) {
+    return this.request("POST", "/light/suggestions", input, { requestTimeoutMs: 8e3 });
+  }
+  /** GET /light/suggestions?status= */
+  async listLightSuggestions(status) {
+    return (await this.request(
+      "GET",
+      `/light/suggestions?status=${encodeURIComponent(status)}`,
+      void 0,
+      { requestTimeoutMs: 8e3 }
+    )).suggestions;
+  }
+  /**
+   * PATCH /light/suggestions — accept or dismiss. Accepting `suppressed_changed`
+   * deletes the suppression server-side; accepting `source_drift` clears
+   * metadata.custom.memlin_frozen (metadata only, no version).
+   */
+  async resolveLightSuggestion(input) {
+    return this.request("PATCH", "/light/suggestions", input, { requestTimeoutMs: 8e3 });
+  }
+  /** POST /documents/<id>/status — archive / unarchive / approve (curation). */
+  async setDocumentStatus(documentId, action) {
+    return this.request(
+      "POST",
+      `/documents/${encodeURIComponent(documentId)}/status`,
+      { action },
+      { requestTimeoutMs: 8e3 }
+    );
+  }
+  /** GET /light/agents — per-host, per-device sync rows. */
+  async listLightAgents() {
+    return (await this.request(
+      "GET",
+      "/light/agents",
+      void 0,
+      { requestTimeoutMs: 8e3 }
+    )).agents;
+  }
+  /**
+   * POST /plans {document_id} — attach a `drafted` plans row to an existing
+   * plan document (a Light plan after an upgrade, D3). Creates no version.
+   */
+  async backfillPlanRow(documentId) {
+    return this.request("POST", "/plans", { document_id: documentId }, { requestTimeoutMs: 8e3 });
+  }
+  async lightStatus(accountId) {
+    try {
+      return (await this.request("GET", "/light", void 0, {
+        accountId,
+        requestTimeoutMs: 1500,
+        maxRetries: 0
+      })).light;
+    } catch (error40) {
+      if (error40.status === 404) return null;
+      throw error40;
+    }
+  }
+  /** POST /documents — create or update a document. */
+  async writeDocument(input, callOpts = {}) {
+    return this.request("POST", "/documents", input, {
+      accountId: callOpts.accountId
+    });
+  }
+  /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
+  async syncWorkspaceContract(input) {
+    return this.request("POST", "/workspace-contract/sync", input);
+  }
+  /** GET /documents/{id} — fetch one doc with body + metadata. */
+  async getDocument(documentId) {
+    return this.request("GET", `/documents/${encodeURIComponent(documentId)}`);
+  }
+  /** POST /documents/{id}/contract-verification — H12. Record a contract
+   *  check. Used by `memlin diff --record`. */
+  async recordContractVerification(documentId, body) {
+    return this.request(
+      "POST",
+      `/documents/${encodeURIComponent(documentId)}/contract-verification`,
+      body
+    );
+  }
+  /** GET /documents/{id}/versions — history. */
+  async listVersions(documentId) {
+    const res = await this.request(
+      "GET",
+      `/documents/${encodeURIComponent(documentId)}/versions`
+    );
+    return res.versions;
+  }
+  /** POST /documents/{id}/revert — non-destructive revert to an older version. */
+  async revertDocument(documentId, targetVersionId, commitMessage) {
+    const light = await this.lightStatus();
+    const expectedVersion = light?.active ? (await this.getDocument(documentId)).version_number : void 0;
+    const res = await this.request(
+      "POST",
+      `/documents/${encodeURIComponent(documentId)}/revert`,
+      {
+        target_version_id: targetVersionId,
+        expected_version: expectedVersion,
+        ...commitMessage ? { commit_message: commitMessage } : {}
+      }
+    );
+    return res.new_version_id;
+  }
+  /** GET /inbox — pending scribe proposals (newest first), plus recently
+   *  auto-activated correction rules (so the user can see what stuck + undo).
+   *  Pass `opts.accountId` to read a different account's inbox than the pinned
+   *  one (e.g. `memlin status` showing the resolver-effective account). */
+  async listInbox(opts = {}) {
+    return this.request("GET", "/inbox", void 0, { accountId: opts.accountId });
+  }
+  /** GET /insights — pending derived insights, including auto-memory proposals. */
+  async listInsights(params = {}, opts = {}) {
+    const search = new URLSearchParams();
+    if (params.kind) search.set("kind", params.kind);
+    if (params.status) search.set("status", params.status);
+    if (params.limit) search.set("limit", String(params.limit));
+    const qs = search.toString();
+    return this.request(
+      "GET",
+      `/insights${qs ? `?${qs}` : ""}`,
+      void 0,
+      { accountId: opts.accountId }
+    );
+  }
+  async resolveInsight(insightId, action) {
+    return this.request("POST", `/insights/${encodeURIComponent(insightId)}/resolve`, { action });
+  }
+  /** POST /inbox/{id} — accept or reject a proposal, optionally with the reviewer's reason. */
+  async resolveProposal(proposalId, action, note) {
+    return this.request("POST", `/inbox/${encodeURIComponent(proposalId)}`, {
+      action,
+      ...note?.trim() ? { note: note.trim() } : {}
+    });
+  }
+  async listHandoffs(opts = {}, callOpts = {}) {
+    const qs = new URLSearchParams();
+    if (opts.project_id) qs.set("project_id", opts.project_id);
+    if (opts.target_agent_kind) qs.set("target_agent_kind", opts.target_agent_kind);
+    if (opts.target_session_id) qs.set("target_session_id", opts.target_session_id);
+    if (opts.target_session_id) qs.set("include_thoughts", "true");
+    if (opts.status) qs.set("status", opts.status);
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return this.request("GET", `/handoffs${suffix}`, void 0, {
+      accountId: callOpts.accountId
+    });
+  }
+  async updateHandoff(handoffId, action, opts = {}) {
+    return this.request(
+      "PATCH",
+      `/handoffs/${encodeURIComponent(handoffId)}`,
+      {
+        action,
+        ...opts.sessionId ? { target_session_id: opts.sessionId } : {},
+        ...opts.resultSummary !== void 0 ? { result_summary: opts.resultSummary } : {}
+      },
+      { accountId: opts.accountId }
+    );
+  }
+  async createHandoff(input) {
+    return this.request("POST", "/handoffs", input);
+  }
+  async listFeatures(opts = {}) {
+    const qs = new URLSearchParams();
+    if (opts.project_id) qs.set("project_id", opts.project_id);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return this.request("GET", `/features${suffix}`);
+  }
+  async createFeature(input) {
+    return this.request("POST", "/features", input);
+  }
+  async addFeatureMember(featureId, source) {
+    return this.request("POST", `/features/${featureId}/members`, { source });
+  }
+  /** POST /documents/search — semantic + text. */
+  async search(query, opts = {}) {
+    const res = await this.request("POST", "/documents/search", {
+      query,
+      ...opts
+    });
+    return res.hits;
+  }
+  /** GET /documents?q=... — fuzzy title/path lookup. Used by `memlin revert`. */
+  async findDocumentsByName(needle, limit = 10) {
+    const qs = new URLSearchParams({ q: needle, limit: String(limit) });
+    const res = await this.request("GET", `/documents?${qs.toString()}`);
+    return res.documents;
+  }
+  /**
+   * POST /resolve/v2 — one authenticated progressive NDJSON stream.
+   *
+   * A transport reset after the server claimed the id is recovered through
+   * GET replay, never by starting another POST with a fresh identity. Duplicate
+   * events from the replay are suppressed by phase.
+   */
+  async *resolveV2(args, opts = {}) {
+    const seen = /* @__PURE__ */ new Set();
+    let terminal = false;
+    let postError;
+    try {
+      const response = await this.openResolveV2Stream("POST", "/resolve/v2", args, opts);
+      for await (const event of this.readResolveV2Response(response)) {
+        if (event.resolve_id !== args.resolve_id || event.turn_id !== args.turn_id) {
+          throw new Error("Memlin progressive resolver returned an event for another turn");
+        }
+        if (event.type === "failed" && event.error?.code === "RESOLVE_V2_UNAVAILABLE" && !seen.has("hot") && !seen.has("full")) {
+          throw new MemlinApiError("POST /resolve/v2 \u2192 404: progressive resolve unavailable", 404);
+        }
+        if (event.type === "failed" && event.error?.code === "PENDING") continue;
+        if (!seen.has(event.type)) {
+          seen.add(event.type);
+          yield event;
+        }
+        if (event.type === "full" || event.type === "failed") terminal = true;
+      }
+    } catch (error40) {
+      postError = error40;
+    }
+    if (terminal) return;
+    if (opts.signal?.aborted) throw postError ?? opts.signal.reason;
+    if (postError instanceof MemlinApiError && (postError.status === 404 || postError.status === 405 || postError.status === 501)) {
+      throw postError;
+    }
+    const requestedDeadline = Date.parse(args.deadline_at);
+    const replayDeadline = Number.isFinite(requestedDeadline) ? requestedDeadline : Date.now() + (opts.requestTimeoutMs ?? this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
+    const replayDelays = [50, 100, 200, 350, 500];
+    const replayIdentity = new URLSearchParams({
+      turn_id: args.turn_id,
+      session_id: args.session_id ?? ""
+    });
+    let replayError;
+    for (let attempt = 0; !terminal && Date.now() < replayDeadline; attempt += 1) {
+      if (opts.signal?.aborted) throw postError ?? opts.signal.reason;
+      try {
+        const response = await this.openResolveV2Stream(
+          "GET",
+          `/resolve/v2/${encodeURIComponent(args.resolve_id)}?${replayIdentity.toString()}`,
+          void 0,
+          {
+            ...opts,
+            requestTimeoutMs: Math.max(1, replayDeadline - Date.now())
+          }
+        );
+        for await (const event of this.readResolveV2Response(response)) {
+          if (event.resolve_id !== args.resolve_id || event.turn_id !== args.turn_id) {
+            throw new Error(
+              "Memlin progressive resolver replay returned an event for another turn"
+            );
+          }
+          if (event.type === "failed" && event.error?.code === "PENDING") continue;
+          if (!seen.has(event.type)) {
+            seen.add(event.type);
+            yield event;
+          }
+          if (event.type === "full" || event.type === "failed") terminal = true;
+        }
+        replayError = void 0;
+      } catch (error40) {
+        replayError = error40;
+        const retryable = !(error40 instanceof MemlinApiError) || error40.status === 408 || error40.status === 429 || error40.status >= 500;
+        if (!retryable) {
+          if (seen.has("hot") || seen.has("full")) {
+            throw new Error(
+              "Memlin progressive resolver replay was rejected after resolution started"
+            );
+          }
+          throw postError ?? error40;
+        }
+      }
+      if (terminal) return;
+      const remaining = replayDeadline - Date.now();
+      if (remaining <= 0) break;
+      await delayWithSignal(
+        Math.min(replayDelays[Math.min(attempt, replayDelays.length - 1)], remaining),
+        opts.signal
+      );
+    }
+    throw postError ?? replayError ?? new Error("Memlin progressive resolver did not reach a terminal phase before its deadline");
+  }
+  /** Read stored phases without starting a resolver operation. */
+  async *replayResolveV2(resolveId, expected, opts = {}) {
+    const identity = new URLSearchParams({
+      turn_id: expected.turn_id,
+      session_id: expected.session_id ?? ""
+    });
+    const response = await this.openResolveV2Stream(
+      "GET",
+      `/resolve/v2/${encodeURIComponent(resolveId)}?${identity.toString()}`,
+      void 0,
+      opts
+    );
+    for await (const event of this.readResolveV2Response(response)) {
+      if (event.resolve_id !== resolveId || event.turn_id !== expected.turn_id) {
+        throw new Error("Memlin progressive resolver replay returned an event for another turn");
+      }
+      yield event;
+    }
+  }
+  /** Hook-emitted delivery truth for a progressive resolve. The route accepts
+   * only this sanitized detail allowlist; prompts and source content never
+   * enter telemetry. */
+  async reportResolveV2Delivery(resolveId, input, opts = {}) {
+    return this.request("POST", `/resolve/v2/${encodeURIComponent(resolveId)}/delivery`, input, {
+      accountId: opts.accountId,
+      requestTimeoutMs: opts.requestTimeoutMs ?? 2e3,
+      signal: opts.signal,
+      agentKind: opts.agentKind,
+      agentVersion: opts.agentVersion
+    });
+  }
+  /**
+   * POST /resolve — the marquee context-assembly endpoint.
+   *
+   * `cwd` and `git_remote` let the server infer the caller's active component
+   * (when the project has any defined) and apply a soft +0.15 boost to
+   * docs tagged to that component. Both are optional; omitting them yields
+   * the same project-wide ranking we used pre-component-awareness.
+   */
+  async resolve(args, opts = {}) {
+    return this.request("POST", "/resolve", args, {
+      accountId: opts.accountId,
+      requestTimeoutMs: opts.requestTimeoutMs,
+      signal: opts.signal,
+      agentKind: opts.agentKind,
+      agentVersion: opts.agentVersion
+    });
+  }
+  /**
+   * GET /account — name/tier/kind for the current account.
+   *
+   * Pass `opts.accountId` to target an account other than the pinned one.
+   * `memlin status` uses this to show the resolver-effective account in a
+   * multi-account workspace, so the returned `id` and `name` always describe
+   * the same account (no global-default/pinned-name mismatch).
+   */
+  async getAccount(opts = {}) {
+    return this.request("GET", "/account", void 0, {
+      accountId: opts.accountId,
+      requestTimeoutMs: opts.requestTimeoutMs,
+      maxRetries: opts.maxRetries
+    });
+  }
+  /**
+   * POST /projects/resolve — server-side project resolution.
+   *
+   * Returns `account_id` when a project matches in any account the user
+   * has access to (via the JWT's memlin_account_ids claim) — not just the
+   * one pinned in config. Callers use the returned account_id to retarget
+   * the actual resolve / write call to the right backend.
+   */
+  async resolveProject(input) {
+    return this.request("POST", "/projects/resolve", input);
+  }
+  /** GET /account/enforce-done-deployed — the workspace done-deployed gate flag. */
+  async getEnforceDoneDeployed(opts = {}) {
+    return this.request("GET", "/account/enforce-done-deployed", void 0, opts);
+  }
+  /** PUT /account/enforce-done-deployed — owner/admin sets the workspace flag. */
+  async setEnforceDoneDeployed(enabled, opts = {}) {
+    return this.request("PUT", "/account/enforce-done-deployed", { enabled }, opts);
+  }
+  /**
+   * POST /deploy-guard — acquire, release, status, or queue the per-project
+   * deploy lease / waiter line.
+   *
+   * The PreToolUse deploy hook calls `acquire` before a raw deploy command
+   * runs; laptop ship scripts call acquire themselves and wait on collision.
+   * `queue` parks a waiter when acquire misses. `acquired: false` means
+   * another session already holds an active lease.
+   * project_id is passed explicitly — the hook resolves it from cwd first.
+   */
+  async deployGuard(input, opts = {}) {
+    return this.request("POST", "/deploy-guard", input, { accountId: opts.accountId });
+  }
+  /**
+   * POST /edit-guard — real-time, pre-edit file-collision check.
+   *
+   * The PreToolUse hook calls this before an Edit/Write/MultiEdit, passing the
+   * repo-relative path(s) about to change. The server reads the same
+   * `edit.activity` feed the resolver's recent_file_edits uses and returns any
+   * LIVE collisions — other sessions that edited the same path within the last
+   * ~10 min — so the hook can warn or block. Read-only; never mutates.
+   * project_id is passed explicitly (the hook resolves it from cwd first).
+   */
+  async editGuard(input, opts = {}) {
+    return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
+  }
+  /** Transactional edit broker. prepare acquires exact-path ownership or
+   * returns the first holder that still needs compatibility proof. */
+  async editBroker(input, opts = {}) {
+    return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
+  }
+  /** GET /audit/<id>/replay — reconstruct a past resolve's exact bundle. */
+  async replayAudit(auditId, opts = {}) {
+    return this.request("GET", `/audit/${auditId}/replay`, void 0, {
+      accountId: opts.accountId
+    });
+  }
+  /** GET /audit/<id>/explain — per-item decomposition of a past resolve's
+   *  ranking arithmetic (similarity, kind weight, component boost, rerank,
+   *  decay) plus human-readable reasons. The "homework, shown" companion
+   *  to /replay. */
+  async explainAudit(auditId) {
+    return this.request("GET", `/audit/${auditId}/explain`);
+  }
+  /** GET /actions — list approved actions in the workspace. Same shape
+   *  the memlin_actions_list MCP tool returns. */
+  async listActions(opts = {}) {
+    const q = [];
+    if (opts.filter) q.push(`filter=${encodeURIComponent(opts.filter)}`);
+    if (opts.limit !== void 0) q.push(`limit=${opts.limit}`);
+    const qs = q.length > 0 ? `?${q.join("&")}` : "";
+    const { actions } = await this.request("GET", `/actions${qs}`);
+    return actions;
+  }
+  /** POST /actions/<id>/execute — invoke a callable action by id with
+   *  validated input. Returns the result + audit_id. */
+  async executeAction(actionId, input) {
+    return this.request("POST", `/actions/${actionId}/execute`, { input });
+  }
+  /** POST /prompt-ci — run Prompt CI regression tests for a skill. */
+  async runPromptCi(skillId, content) {
+    return this.request("POST", "/prompt-ci", { skill_id: skillId, content });
+  }
+  /**
+   * POST /memory/propose — extract memory candidates from a recent agent
+   * turn and queue them for user accept/dismiss. Fire-and-forget from the
+   * Stop hook's perspective; the server runs a cheap Haiku extraction and
+   * silently no-ops if it finds nothing worth remembering.
+   */
+  async proposeMemory(input, opts = {}) {
+    return this.request("POST", "/memory/propose", input, { accountId: opts.accountId });
+  }
+  /**
+   * POST /scribe/diff — Phase 2 auto-capture from a single git commit.
+   *
+   * Called by the PostToolUse hook after the agent runs `git commit`.
+   * The server reads the commit message + diff, asks Haiku to extract
+   * any decision/memory/skill baked into the change, and persists the
+   * results. The server may activate or background captures automatically;
+   * only the post-processing `proposals_pending` subset needs inbox review.
+   */
+  async scribeDiff(input, opts = {}) {
+    return this.request("POST", "/scribe/diff", input, { accountId: opts.accountId });
+  }
+  /**
+   * POST /scribe/session — Phase 1 auto-capture from a Claude Code
+   * session transcript. Server slices the transcript (tail-biased
+   * when too large), runs Haiku extraction, persists proposals, and reports
+   * how many still need review after automatic handling.
+   *
+   * Triggered manually by /memlin-scribe today; an auto-triggered
+   * variant on Stop with a 15-min debounce is a fast follow-up.
+   */
+  async scribeSession(input, opts = {}) {
+    const light = await this.lightStatus(opts.accountId);
+    if (light?.active) {
+      const { readFile } = await import("node:fs/promises");
+      const { resolve } = await import("node:path");
+      const { findWorkspaceBinding: findWorkspaceBinding2 } = await Promise.resolve().then(() => (init_workspace_binding(), workspace_binding_exports));
+      const binding = await findWorkspaceBinding2(input.cwd ?? process.cwd());
+      let excluded = [];
+      try {
+        excluded = (await readFile(
+          resolve(binding?.workspaceRoot ?? input.cwd ?? process.cwd(), ".memlin/light-exclude"),
+          "utf8"
+        )).split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#"));
+      } catch (error40) {
+        if (error40.code !== "ENOENT") throw error40;
+      }
+      if (lightCaptureExcluded(input.transcript, excluded))
+        return {
+          run_id: "",
+          proposals_extracted: 0,
+          proposals_persisted: 0,
+          proposals_pending: 0,
+          proposal_ids: [],
+          latency_ms: 0,
+          truncated: false
+        };
+      input = {
+        ...input,
+        transcript: boundLightText(redactLightTranscript(input.transcript), 5500)
+      };
+    }
+    return this.request("POST", "/scribe/session", input, {
+      accountId: opts.accountId,
+      ...light?.active ? { maxRetries: 0, requestTimeoutMs: 25e3 } : {}
+    });
+  }
+  /**
+   * POST /memory/ingest-native — ingest a host's native auto-memory.
+   *
+   * Sends the raw native MEMORY.md index (+ the satellite filenames the
+   * adapter already pulls) so the server parses it and runs the entries
+   * through the scribe dedup (corroborate, don't duplicate). Makes turning
+   * off native auto-memory lossless.
+   */
+  async ingestNativeMemory(input, opts = {}) {
+    const satellites = input.satellites ?? [];
+    if (satellites.length <= NATIVE_MEMORY_BATCH_SIZE) {
+      return this.request("POST", "/memory/ingest-native", input, {
+        accountId: opts.accountId,
+        requestTimeoutMs: NATIVE_MEMORY_REQUEST_TIMEOUT_MS
+      });
+    }
+    const satelliteFiles = [
+      .../* @__PURE__ */ new Set([
+        ...input.satellite_files ?? [],
+        ...satellites.map((satellite) => satellite.name)
+      ])
+    ];
+    const batches = [];
+    for (let offset = 0; offset < satellites.length; offset += NATIVE_MEMORY_BATCH_SIZE) {
+      batches.push(satellites.slice(offset, offset + NATIVE_MEMORY_BATCH_SIZE));
+    }
+    const results = [];
+    for (let offset = 0; offset < batches.length; offset += NATIVE_MEMORY_BATCH_CONCURRENCY) {
+      const group = batches.slice(offset, offset + NATIVE_MEMORY_BATCH_CONCURRENCY);
+      const settled = await Promise.allSettled(
+        group.map((batch, groupIndex) => {
+          const batchIndex = offset + groupIndex;
+          return this.request(
+            "POST",
+            "/memory/ingest-native",
+            {
+              ...input,
+              memory_index_md: batchIndex === 0 ? input.memory_index_md : NATIVE_MEMORY_BATCH_INDEX,
+              satellites: batch,
+              satellite_files: satelliteFiles
+            },
+            {
+              accountId: opts.accountId,
+              requestTimeoutMs: NATIVE_MEMORY_REQUEST_TIMEOUT_MS
+            }
+          );
+        })
+      );
+      const rejected = settled.find(
+        (result) => result.status === "rejected"
+      );
+      if (rejected) throw rejected.reason;
+      const groupResults = settled.filter(
+        (result) => result.status === "fulfilled"
+      ).map((result) => result.value);
+      results.push(...groupResults);
+      if (groupResults.some((result) => result.skipped)) break;
+    }
+    const sum = (key) => results.reduce((total, result) => {
+      const value = result[key];
+      return total + (typeof value === "number" ? value : 0);
+    }, 0);
+    const refused = results.find((result) => result.skipped);
+    return {
+      entries_parsed: sum("entries_parsed"),
+      satellites_received: sum("satellites_received"),
+      proposals_built: sum("proposals_built"),
+      run_id: results.find((result) => result.run_id)?.run_id ?? null,
+      proposals_persisted: sum("proposals_persisted"),
+      proposal_ids: results.flatMap((result) => result.proposal_ids),
+      proposals_corroborated: sum("proposals_corroborated"),
+      proposals_auto_promoted: sum("proposals_auto_promoted"),
+      proposals_auto_activated: sum("proposals_auto_activated"),
+      proposals_reconciled: sum("proposals_reconciled"),
+      ...refused ? { skipped: true, reason: refused.reason ?? "skipped" } : {}
+    };
+  }
+  /**
+   * POST /memory/remember — save one user-typed durable memory
+   * (/memlin-remember). Routes through the server-side scribe dedup, tagged
+   * as a provenance-verified directive so it activates immediately and can
+   * supersede the stale fact it corrects.
+   */
+  async rememberMemory(input, opts = {}) {
+    return this.request("POST", "/memory/remember", input, { accountId: opts.accountId });
+  }
+  /**
+   * POST /plans — upload a Claude Code plan as a first-class plan document.
+   *
+   * Server resolves project from cwd/git_remote (when not pinned), writes
+   * the document via writeDocument (auto-embedding), and inserts a
+   * companion plans row with status='drafted'. Returns the document_id
+   * + version metadata for downstream URL construction.
+   */
+  async pushPlan(input, opts = {}) {
+    return this.request("POST", "/plans", input, { accountId: opts.accountId });
+  }
+  /**
+   * GET /plans — list plans for the account, optionally filtered by
+   * `updated_after` (epoch ms) for cheap delta polling. Used by the
+   * UserPromptSubmit + SessionStart hooks to keep ~/.claude/plans/ in
+   * sync with the server.
+   */
+  async listPlans(opts = {}, callOpts = {}) {
+    const qs = new URLSearchParams();
+    if (opts.status) qs.set("status", opts.status);
+    if (opts.project_id !== void 0) {
+      qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
+    }
+    if (opts.updated_after) qs.set("updated_after", opts.updated_after);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    const res = await this.request(
+      "GET",
+      `/plans${suffix}`,
+      void 0,
+      { accountId: callOpts.accountId }
+    );
+    return res.plans;
+  }
+  /** GET /plans/<id> — full plan detail (status + body + bundle ref). */
+  async getPlan(id, opts = {}) {
+    return this.request("GET", `/plans/${encodeURIComponent(id)}`, void 0, {
+      accountId: opts.accountId
+    });
+  }
+  /**
+   * PATCH /plans/<id> — replace the plan's body (creates a new
+   * document_version, auto-embeds). Used by the PostToolUse hook to push
+   * Claude Code edits back up to Memlin.
+   */
+  async updatePlan(id, input, opts = {}) {
+    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input, {
+      accountId: opts.accountId
+    });
+  }
+  /**
+   * POST /projects — create a project in the caller's current account.
+   * Used by `memlin init` to register a Claude Code workspace.
+   */
+  async createProject(input, opts = {}) {
+    return this.request("POST", "/projects", input, { accountId: opts.accountId });
+  }
+  /** Atomically create/select a project and register one or more logical
+   * local sources. Device paths are intentionally absent from this wire
+   * contract. */
+  async linkLocalSources(input, opts = {}) {
+    return this.request("POST", "/projects/local-link", input, { accountId: opts.accountId });
+  }
+  /**
+   * PATCH /projects/{id} — attach/detach local paths, set/clear the git
+   * remote, or rename. Owner/admin only; 409 when a path or remote is
+   * already attached to another project in the account. Backs
+   * `memlin attach-path` and add-project's attach-instead-of-fork offer.
+   */
+  async patchProject(projectId, input, opts = {}) {
+    return this.request("PATCH", `/projects/${encodeURIComponent(projectId)}`, input, {
+      accountId: opts.accountId
+    });
+  }
+  /** POST /decisions/{id}/verify — record an outcome on the decision
+   *  ledger. Verdicts surface on every future resolve of the decision. */
+  async verifyDecision(decisionId, input, opts = {}) {
+    return this.request("POST", `/decisions/${encodeURIComponent(decisionId)}/verify`, input, {
+      accountId: opts.accountId
+    });
+  }
+  /** GET /decisions/review-due — decisions whose review date arrived. */
+  async listReviewDueDecisions(opts = {}) {
+    const qs = opts.projectId ? `?project_id=${encodeURIComponent(opts.projectId)}` : "";
+    return this.request("GET", `/decisions/review-due${qs}`, void 0, {
+      accountId: opts.accountId
+    });
+  }
+  /**
+   * GET /decisions — open memory decisions (most consequential first), the raw
+   * open `count`, and the grouped `needs_you_count` + `groups` the web app
+   * shows. The grouped fields are absent on older servers: read them through
+   * decisionCountsOf (@memlin/shared), which falls back to `count`.
+   */
+  async listDecisions(opts = {}) {
+    const qs = opts.limit ? `?limit=${encodeURIComponent(String(opts.limit))}` : "";
+    return this.request("GET", `/decisions${qs}`, void 0, {
+      accountId: opts.accountId,
+      maxRetries: opts.maxRetries,
+      requestTimeoutMs: opts.requestTimeoutMs
+    });
+  }
+  /** GET /decisions/{id} — one decision with its code-built evidence and cached AI explanation. */
+  async getDecision(decisionId, opts = {}) {
+    return this.request("GET", `/decisions/${encodeURIComponent(decisionId)}`, void 0, {
+      accountId: opts.accountId
+    });
+  }
+  /** POST /decisions/{id}/asked — this decision was put to the person (idempotent). */
+  async markDecisionAsked(decisionId, via = "session", opts = {}) {
+    return this.request(
+      "POST",
+      `/decisions/${encodeURIComponent(decisionId)}/asked`,
+      { via },
+      { accountId: opts.accountId, requestTimeoutMs: 1500 }
+    );
+  }
+  /** POST /decisions/{id}/answer — record a person's answer, their reason and their words. */
+  async answerDecision(decisionId, input, opts = {}) {
+    return this.request(
+      "POST",
+      `/decisions/${encodeURIComponent(decisionId)}/answer`,
+      {
+        option: input.option,
+        ...input.note?.trim() ? { note: input.note.trim() } : {},
+        ...input.user_quote?.trim() ? { user_quote: input.user_quote.trim() } : {},
+        via: input.via ?? "cli"
+      },
+      { accountId: opts.accountId }
+    );
+  }
+  /**
+   * POST /ask — natural-language Q&A over the team's workspace memory.
+   * Server resolves a bundle, sends it to Claude, returns answer +
+   * citations + audit_id. Used by `memlin ask` CLI and the web /ask
+   * panel.
+   */
+  async ask(input, opts = {}) {
+    return this.request("POST", "/ask", input, { accountId: opts.accountId });
+  }
+  /** GET /projects — list every project in the current account. */
+  async listProjects(opts = {}) {
+    const res = await this.request("GET", "/projects", void 0, { accountId: opts.accountId });
+    return res.projects;
+  }
+};
+function resolveApiUrl() {
+  return process.env.MEMLIN_API_URL?.trim() || DEFAULT_API_URL;
+}
+
+// packages/plugin-core/dist/client.js
+init_workspace_binding();
+
+// packages/plugin-core/dist/hook-exit.js
+var HOOK_WATCHDOG_MS = 2e3;
+function releaseStdin() {
+  try {
+    const stdin = process.stdin;
+    stdin.pause();
+    stdin.unref?.();
+  } catch {
+  }
+}
+function exitHook(code) {
+  process.exitCode = code;
+  releaseStdin();
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), HOOK_WATCHDOG_MS).unref();
+}
+
+// packages/plugin-core/dist/client.js
+init_auth_refusal();
+function globalConfigFilePath() {
+  return process.env.MEMLIN_CONFIG_FILE || path8.join(os6.homedir(), ".config", "memlin", "config.json");
+}
+var CONFIG_DIR = path8.join(os6.homedir(), ".config", "memlin");
+var TOKEN_FILE = path8.join(CONFIG_DIR, "token.json");
+async function readConfig() {
+  try {
+    const raw = await fs5.readFile(globalConfigFilePath(), "utf8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
+      return null;
+    }
+    return {
+      api_url: typeof parsed.api_url === "string" && parsed.api_url.trim() ? parsed.api_url : DEFAULT_API_URL,
+      account_id: parsed.account_id,
+      user_id: parsed.user_id,
+      auth0_sub: parsed.auth0_sub,
+      project_id: typeof parsed.project_id === "string" || parsed.project_id === null ? parsed.project_id : null
+    };
+  } catch {
+    return null;
+  }
+}
+function accessTokenSubject(accessToken) {
+  try {
+    const subject = decodeJwtPayload(accessToken).sub;
+    return typeof subject === "string" && subject.length > 0 ? subject : null;
+  } catch {
+    return null;
+  }
+}
+function configMatchesAccessToken(config2, accessToken) {
+  const subject = accessTokenSubject(accessToken);
+  return subject !== null && subject === config2.auth0_sub;
+}
+async function getIdentityBoundAccessToken(config2) {
+  const accessToken = await getValidAccessToken();
+  if (!configMatchesAccessToken(config2, accessToken)) {
+    throw new Error("not signed in \u2014 saved Memlin account does not match the saved token");
+  }
+  return accessToken;
+}
+async function getApi(opts = {}) {
+  const config2 = await readConfig();
+  if (!config2) return null;
+  try {
+    await getIdentityBoundAccessToken(config2);
+  } catch {
+    return null;
+  }
+  const cwd = opts.cwd ?? process.cwd();
+  const overlay = await findWorkspaceBinding(cwd);
+  const { workspaceBound, workspaceRoot, workspaceAccountName } = applyWorkspaceOverlay(
+    config2,
+    overlay
+  );
+  const apiUrl = process.env.MEMLIN_API_URL?.trim() || config2.api_url || resolveApiUrl();
+  const api = new MemlinApiClient({
+    baseUrl: apiUrl,
+    getAccessToken: () => getIdentityBoundAccessToken(config2),
+    accountId: config2.account_id,
+    authRefusal: { binding: workspaceRoot, accountName: workspaceAccountName }
+  });
+  return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName };
+}
+function applyWorkspaceOverlay(config2, overlay) {
+  if (!overlay) return { workspaceBound: false, workspaceRoot: null, workspaceAccountName: null };
+  config2.account_id = overlay.binding.account_id;
+  if (overlay.binding.project_id !== void 0) {
+    config2.project_id = overlay.binding.project_id;
+  }
+  return {
+    workspaceBound: true,
+    workspaceRoot: overlay.workspaceRoot,
+    workspaceAccountName: overlay.binding.account_name ?? null
+  };
+}
+function log(msg) {
+  if (process.env.MEMLIN_DEBUG) {
+    process.stderr.write(`[memlin] ${msg}
+`);
+  }
+}
+
+// packages/plugin-core/dist/done-gate.js
+init_companion_client();
+import { execFileSync } from "node:child_process";
+import { promises as fs6 } from "node:fs";
+import path9 from "node:path";
+var CLAIM = /\bit'?s (now )?(live|deployed|done|fixed|shipped)\b|\bnow live\b|\bis live\b|\bis deployed\b|\bdeployed to prod\b|\ball done\b|\bfully (fixed|working|deployed|shipped)\b|\bfix(ed)? (and|&) deployed\b|\bmerged (and|&) deployed\b|(^|\n)\s*[-*•\s]*(done|deployed|shipped|fixed)\b|✅/i;
+var HARD = /(^|\n)\s*[-*✅•\s]*\s*(fixed|deployed|shipped|done)\b[.! ]*\s*$/im;
+var HONEST = /not (yet )?(live|merged|deployed|shipped)|isn'?t (live|merged|deployed|shipped)|remaining step|next step (is|to)|not on main|still on (the |a )?(feature )?branch|needs? (to be )?merg|to be merged|before (this|it) is live|to make (it|this) live|awaiting (merge|deploy)|hold(ing)? the merge/i;
+var OVERRIDE = /\[skip-done-gate\]|done-gate:\s*override/i;
+var DELIVERY_REQUEST = /\b(?:fix|repair|implement|build|create|add|change|update|remove|refactor|deploy(?:ed|ing|ment)?|ship(?:ped|ping)?|publish(?:ed|ing)?|release(?:d|ing)?)\b|\bmake\b[^\n.!?]{0,80}\bwork(?:ing)?\b/i;
+function isOff(v) {
+  const s = (v || "").trim().toLowerCase();
+  return s === "off" || s === "0" || s === "false" || s === "no";
+}
+async function readMarker(cwd) {
+  let dir = path9.resolve(cwd);
+  for (let i = 0; i < 40; i += 1) {
+    const file2 = path9.join(dir, ".memlin", "enforce-done-deployed.json");
+    try {
+      const raw = await fs6.readFile(file2, "utf8");
+      const parsed = JSON.parse(raw);
+      const deploymentEvidence = Array.isArray(parsed.deploymentEvidence) ? parsed.deploymentEvidence.filter(
+        (item) => item && typeof item.name === "string" && typeof item.tag === "string" && Array.isArray(item.paths) && item.paths.every((p) => typeof p === "string" && p.length > 0)
+      ) : [];
+      return {
+        enabled: parsed.enabled !== false,
+        base: parsed.base || "origin/main",
+        strict: parsed.strict === true,
+        deploymentEvidence
+      };
+    } catch {
+    }
+    const parent = path9.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+async function readCompanionPolicy(cwd) {
+  try {
+    const ws = await companionRequest("workspace.resolve", { cwd });
+    const v = ws?.enforce_done_deployed;
+    return typeof v === "boolean" ? v : void 0;
+  } catch {
+    return void 0;
+  }
+}
+async function resolveGate(cwd) {
+  if (isOff(process.env.MEMLIN_DONE_GATE)) return null;
+  const marker = await readMarker(cwd);
+  if (marker && marker.enabled === false) return null;
+  const serverEnabled = await readCompanionPolicy(cwd);
+  const env = process.env.MEMLIN_DONE_MEANS_DEPLOYED;
+  const envOn = env === "1" || env === "true";
+  const enabled = serverEnabled === true || marker?.enabled === true || envOn;
+  if (!enabled) return null;
+  return {
+    enabled: true,
+    base: marker?.base || "origin/main",
+    strict: marker?.strict === true,
+    deploymentEvidence: marker?.deploymentEvidence ?? []
+  };
+}
+function contentText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((block) => {
+    if (!block || typeof block !== "object") return "";
+    const item = block;
+    return item.type === "text" || item.type === "input_text" || item.type === "output_text" ? String(item.text ?? "") : "";
+  }).join(" ");
+}
+async function readTranscript(transcriptPath) {
+  let raw;
+  try {
+    raw = await fs6.readFile(transcriptPath, "utf8");
+  } catch {
+    return null;
+  }
+  let lastAssistantText = "";
+  const userTexts = [];
+  let baselineCommit = null;
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let ev;
+    try {
+      ev = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const row = ev;
+    if (!baselineCommit && row.type === "session_meta") {
+      const commit = row.payload?.git?.commit_hash;
+      if (typeof commit === "string" && commit) baselineCommit = commit;
+    }
+    const msg = row.message;
+    if (msg?.role === "assistant") {
+      const chunk = contentText(msg.content);
+      if (chunk.trim()) lastAssistantText = chunk;
+    } else if (msg?.role === "user") {
+      const chunk = contentText(msg.content);
+      if (chunk.trim()) userTexts.push(chunk);
+    }
+    const payload = row.payload;
+    if (row.type === "response_item" && payload?.type === "message") {
+      const chunk = contentText(payload.content);
+      if (payload.role === "assistant" && chunk.trim()) lastAssistantText = chunk;
+      if (payload.role === "user" && chunk.trim()) userTexts.push(chunk);
+    } else if (row.type === "event_msg" && payload?.type === "user_message") {
+      const chunk = typeof payload.message === "string" ? payload.message : "";
+      if (chunk.trim()) userTexts.push(chunk);
+    }
+  }
+  return { lastAssistantText, userTexts, baselineCommit };
+}
+function git(args, cwd) {
+  try {
+    return execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5e3
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+function gitOk(args, cwd) {
+  try {
+    execFileSync("git", args, {
+      cwd,
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 5e3
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function changedPathsSince(baseline, cwd) {
+  if (!baseline || !gitOk(["rev-parse", "--verify", `${baseline}^{commit}`], cwd)) return null;
+  const output = git(["diff", "--name-only", `${baseline}..HEAD`], cwd);
+  return output === null ? null : output.split("\n").map((p) => p.trim()).filter(Boolean);
+}
+function changedEvidencePaths(evidence, cwd) {
+  const paths = /* @__PURE__ */ new Set();
+  for (const item of evidence) {
+    if (!gitOk(["rev-parse", "--verify", `${item.tag}^{commit}`], cwd)) {
+      for (const prefix of item.paths) paths.add(prefix);
+      continue;
+    }
+    const output = git(["diff", "--name-only", `${item.tag}...HEAD`, "--", ...item.paths], cwd);
+    for (const file2 of output?.split("\n") ?? []) {
+      if (file2.trim()) paths.add(file2.trim());
+    }
+  }
+  return [...paths];
+}
+function pathMatchesPrefix(file2, prefix) {
+  const normalized = prefix.replace(/^\.\//, "").replace(/\/$/, "");
+  return file2 === normalized || file2.startsWith(`${normalized}/`);
+}
+function pendingDeploymentEvidence(evidence, changedPaths, cwd) {
+  const pending = [];
+  for (const item of evidence) {
+    const applies = changedPaths.some(
+      (file2) => item.paths.some((prefix) => pathMatchesPrefix(file2, prefix))
+    );
+    if (!applies) continue;
+    const tagRef = `${item.tag}^{commit}`;
+    if (!gitOk(["rev-parse", "--verify", tagRef], cwd)) {
+      pending.push(`${item.name}: deployment tag ${item.tag} is missing`);
+      continue;
+    }
+    if (!gitOk(["diff", "--quiet", `${item.tag}...HEAD`, "--", ...item.paths], cwd)) {
+      pending.push(`${item.name}: ${item.tag} does not contain the task's current code`);
+    }
+  }
+  return pending;
+}
+function strictBlock(reasons, base) {
+  return {
+    decision: "block",
+    reason: "HOLD \u2014 this session has an unfinished delivery obligation: " + reasons.join("; ") + `. Keep working until the change is committed, merged into ${base}, deployed, and verified by the configured production evidence. An honest \u201Cnot deployed\u201D status does not complete the task. Only the user may cancel the requirement or disable the gate.`
+  };
+}
+async function enforceDoneMeansDeployed(payload) {
+  let strictConfig = null;
+  try {
+    const cwd = payload.cwd || process.cwd();
+    const cfg = await resolveGate(cwd);
+    if (!cfg) return null;
+    strictConfig = cfg.strict ? cfg : null;
+    const transcript = payload.transcript_path;
+    if (!transcript) {
+      return cfg.strict ? strictBlock(["the host supplied no transcript, so completion cannot be verified"], cfg.base) : null;
+    }
+    const snapshot = await readTranscript(transcript);
+    if (!snapshot) {
+      return cfg.strict ? strictBlock(["the transcript could not be read, so completion cannot be verified"], cfg.base) : null;
+    }
+    const text = snapshot.lastAssistantText;
+    const deliveryRequested = snapshot.userTexts.some((userText) => DELIVERY_REQUEST.test(userText));
+    if (cfg.strict && deliveryRequested) {
+      const why2 = [];
+      if (!gitOk(["rev-parse", "--verify", cfg.base], cwd)) {
+        why2.push(`the configured base ref ${cfg.base} is unavailable`);
+        return strictBlock(why2, cfg.base);
+      }
+      const branchOutput = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+      const branch2 = branchOutput || "HEAD";
+      const status = git(["status", "--porcelain"], cwd);
+      const dirty2 = Boolean(status);
+      const merged2 = gitOk(["merge-base", "--is-ancestor", "HEAD", cfg.base], cwd);
+      const onMain2 = branch2 === "main" || branch2 === "master";
+      const unpushed2 = onMain2 ? Boolean(git(["rev-list", `${cfg.base}..HEAD`], cwd)) : false;
+      if (!merged2) why2.push(`HEAD (${branch2}) is not merged into ${cfg.base}`);
+      if (branchOutput === null) why2.push("the current Git branch could not be inspected");
+      if (status === null) why2.push("the working tree could not be inspected");
+      if (dirty2) why2.push("the working tree has uncommitted changes");
+      if (unpushed2) why2.push(`there are unpushed commits (${cfg.base}..HEAD)`);
+      const changedPaths = changedPathsSince(snapshot.baselineCommit, cwd);
+      const scopedPaths = changedPaths ?? changedEvidencePaths(cfg.deploymentEvidence, cwd);
+      why2.push(...pendingDeploymentEvidence(cfg.deploymentEvidence, scopedPaths, cwd));
+      if (why2.length > 0) return strictBlock(why2, cfg.base);
+      return null;
+    }
+    if (payload.stop_hook_active) return null;
+    if (!text) return null;
+    if (HONEST.test(text)) return null;
+    if (OVERRIDE.test(text)) return null;
+    if (!CLAIM.test(text) && !HARD.test(text)) return null;
+    if (!gitOk(["rev-parse", "--verify", cfg.base], cwd)) return null;
+    const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd) || "HEAD";
+    const dirty = Boolean(git(["status", "--porcelain"], cwd));
+    const merged = gitOk(["merge-base", "--is-ancestor", "HEAD", cfg.base], cwd);
+    const onMain = branch === "main" || branch === "master";
+    const unpushed = onMain ? Boolean(git(["rev-list", `${cfg.base}..HEAD`], cwd)) : false;
+    const live = merged && !dirty && !unpushed;
+    if (live) return null;
+    const why = [];
+    if (!merged) why.push(`HEAD (${branch}) is not merged into ${cfg.base}`);
+    if (dirty) why.push("the working tree has uncommitted changes");
+    if (unpushed) why.push(`there are unpushed commits (${cfg.base}..HEAD)`);
+    const reason = "HOLD \u2014 the last message claims the work is done/fixed/deployed, but it is NOT live: " + why.join("; ") + `. On this project "done" means merged into ${cfg.base} and deployed. Do ONE of:
+  (1) Ship it: commit \u2192 merge \u2192 confirm the deploy succeeded \u2192 verify the change live, THEN report done; or
+  (2) If you cannot merge right now (a concurrent deploy is in flight, you need sign-off, CI is red), say so plainly and state the exact remaining step \u2014 but do NOT call it done, fixed, or deployed.
+Override (deliberate): include [skip-done-gate] in your message to ship-anyway this once, or disable the gate entirely with MEMLIN_DONE_GATE=off (or set "enabled": false in .memlin/enforce-done-deployed.json). The gate is opt-in and read-only \u2014 it never edits your files.`;
+    return { decision: "block", reason };
+  } catch (error40) {
+    if (strictConfig) {
+      return strictBlock(
+        [`verification failed: ${error40 instanceof Error ? error40.message : String(error40)}`],
+        strictConfig.base
+      );
+    }
+    return null;
+  }
+}
+
+// packages/plugin-core/dist/heartbeat.js
+import crypto4 from "node:crypto";
+import { promises as fs7 } from "node:fs";
+import os7 from "node:os";
+import path11 from "node:path";
+
+// packages/plugin-core/dist/project-resolver.js
+import { existsSync, readdirSync, readFileSync as readFileSync2, lstatSync } from "node:fs";
+import path10 from "node:path";
+init_workspace_binding();
+var ALLOW_ACCOUNT_MISMATCH_ENV = "MEMLIN_ALLOW_ACCOUNT_MISMATCH";
+function allowAccountMismatch(env = process.env) {
+  const v = env[ALLOW_ACCOUNT_MISMATCH_ENV];
+  return v === "1" || v === "true" || v === "yes";
+}
+function accountBindingHazard(r, opts = {}) {
+  if (!r.hasGitRemote || !r.project_id) return "none";
+  if (r.reason === "local-path") return opts.allowMismatch ? "warn" : "block";
+  if (r.reason === "config") return "warn";
+  return "none";
+}
+async function resolveProject(api, cwd, configProjectId) {
+  const absCwd = path10.resolve(cwd);
+  const remotes = detectGitRemotes(cwd);
+  const hasGitRemote = remotes.length > 0;
+  let serverFailure;
+  try {
+    const result = await api.resolveProject({
+      // Primary remote (back-compat with the single-remote server path).
+      git_remote: remotes[0] ?? null,
+      // All detected remotes — for the workspace-root-of-repos case, this is
+      // every sibling repo so the server resolves to the owning project.
+      git_remotes: remotes,
+      cwd: absCwd
+    });
+    if (result.project_id) {
+      return {
+        project_id: result.project_id,
+        project_name: result.name,
+        account_id: result.account_id,
+        reason: result.reason === "none" ? "config" : result.reason,
+        hasGitRemote,
+        enforce_done_deployed: result.enforce_done_deployed
+      };
+    }
+  } catch (e) {
+    serverFailure = summarizeBackendFailure(e) ?? void 0;
+  }
+  if (configProjectId) {
+    const localBinding = await findWorkspaceBinding(absCwd).catch(() => null);
+    if (localBinding?.binding.project_id === configProjectId) {
+      return {
+        project_id: configProjectId,
+        project_name: null,
+        account_id: null,
+        reason: "config",
+        hasGitRemote,
+        server_failure: serverFailure
+      };
+    }
+  }
+  return {
+    project_id: null,
+    project_name: null,
+    account_id: null,
+    reason: "none",
+    hasGitRemote,
+    server_failure: serverFailure
+  };
+}
+function readGitRemote(cwd) {
+  const read = (file2) => {
+    const stat = lstatSync(file2);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024)
+      throw new Error("Unsupported Git metadata");
+    return readFileSync2(file2, "utf8");
+  };
+  try {
+    let root = path10.resolve(cwd);
+    for (; ; ) {
+      const marker = path10.join(root, ".git");
+      if (existsSync(marker)) {
+        const info = lstatSync(marker);
+        if (info.isSymbolicLink()) return null;
+        let directory = marker;
+        if (info.isFile()) {
+          const match = /^gitdir:\s*(.+)$/m.exec(read(marker));
+          if (!match) return null;
+          directory = path10.resolve(root, match[1].trim());
+        }
+        const common2 = path10.join(directory, "commondir");
+        if (existsSync(common2)) directory = path10.resolve(directory, read(common2).trim());
+        let origin = false;
+        for (const line of read(path10.join(directory, "config")).split(/\r?\n/)) {
+          if (/^\s*\[/.test(line)) origin = /^\s*\[remote\s+"origin"\]\s*(?:[#;].*)?$/.test(line);
+          else if (origin) {
+            const match = /^\s*url\s*=\s*(.*?)\s*$/.exec(line);
+            if (match) return normalizeGitRemote(match[1].replace(/^"(.*)"$/, "$1"));
+          }
+        }
+        return null;
+      }
+      const parent = path10.dirname(root);
+      if (parent === root) return null;
+      root = parent;
+    }
+  } catch {
+    return null;
+  }
+}
+var MAX_WORKSPACE_SCAN = 64;
+function detectGitRemotes(cwd) {
+  const enclosing = readGitRemote(cwd);
+  if (enclosing) return [enclosing];
+  const out = [];
+  try {
+    let scanned = 0;
+    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
+      if (scanned >= MAX_WORKSPACE_SCAN) break;
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+      scanned++;
+      const child = path10.join(cwd, entry.name);
+      if (!existsSync(path10.join(child, ".git"))) continue;
+      const remote = readGitRemote(child);
+      if (remote && !out.includes(remote)) out.push(remote);
+    }
+  } catch {
+  }
+  return out;
+}
+function isWorkspaceActive(input) {
+  return Boolean(input.resolvedProjectId) || input.workspaceBound;
+}
+function effectiveAccountId(input) {
+  return input.resolvedAccountId ?? input.configAccountId;
+}
+
+// packages/plugin-core/dist/heartbeat.js
+var DEFAULT_THROTTLE_MS = 6e4;
+var HEARTBEAT_REQUEST_TIMEOUT_MS = 750;
+function statePath(cwd, host) {
+  const key = crypto4.createHash("sha256").update(cwd).digest("hex").slice(0, 16);
+  return path11.join(os7.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
+}
+async function recentlySent(file2, throttleMs) {
+  try {
+    const raw = await fs7.readFile(file2, "utf8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed.sent_at === "number" && Date.now() - parsed.sent_at < throttleMs;
+  } catch {
+    return false;
+  }
+}
+async function recordInstallHeartbeat(cwd, reason, opts = {}) {
+  const host = opts.host ?? resolveHost().kind;
+  const throttleMs = opts.throttleMs ?? DEFAULT_THROTTLE_MS;
+  const file2 = statePath(cwd, host);
+  if (await recentlySent(file2, throttleMs)) return;
+  try {
+    const ctx = await getApi({ cwd });
+    if (!ctx) return;
+    const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
+    if (!isWorkspaceActive({
+      resolvedProjectId: resolved.project_id,
+      workspaceBound: ctx.workspaceBound
+    })) {
+      return;
+    }
+    await ctx.api.getAccount({
+      accountId: effectiveAccountId({
+        configAccountId: ctx.config.account_id,
+        resolvedAccountId: resolved.account_id
+      }),
+      requestTimeoutMs: HEARTBEAT_REQUEST_TIMEOUT_MS,
+      maxRetries: 0
+    });
+    await fs7.writeFile(file2, JSON.stringify({ sent_at: Date.now(), reason, host }), "utf8");
+    log(`${host} activity recorded: ${reason}`);
+  } catch (err) {
+    log(`${host} activity failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+// packages/plugin-core/dist/outcome-attribution.js
+function normalizeReference(value) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+function replayAttributionCandidates(replay) {
+  const rawDelivered = replay.delivered_items;
+  const delivered = Array.isArray(rawDelivered) ? rawDelivered.map((item) => {
+    if (!item || typeof item !== "object") return null;
+    const row = item;
+    if (typeof row.document_id !== "string" || typeof row.title !== "string" || typeof row.version_number !== "number") {
+      return null;
+    }
+    return {
+      id: row.document_id,
+      title: row.title,
+      path: typeof row.path === "string" ? row.path : null,
+      version_number: row.version_number,
+      kind: typeof row.kind === "string" ? row.kind : null
+    };
+  }).filter((item) => item !== null) : [];
+  const candidates = Array.isArray(rawDelivered) && (rawDelivered.length === 0 || delivered.length > 0) ? delivered : [...replay.pinned ?? [], ...replay.items ?? []].map((item) => ({
+    id: item.id,
+    title: item.title,
+    path: item.path,
+    version_number: item.version_number,
+    kind: item.kind
+  }));
+  return [...new Map(candidates.map((candidate) => [candidate.id, candidate])).values()];
+}
+function addReferenceKey(index, key, documentId) {
+  if (!key) return;
+  const ids = index.get(key) ?? /* @__PURE__ */ new Set();
+  ids.add(documentId);
+  index.set(key, ids);
+}
+var NEGATED_REFERENCE = /(?:\b(?:did not|didn't|never|without)\b|\b(?:not used|not applied|not followed|ignored|skipped)\b)[^.!?;]{0,64}$/i;
+function unnegatedReferencePositions(message, reference) {
+  if (!reference) return [];
+  const positions = [];
+  let offset = 0;
+  while (offset < message.length) {
+    const index = message.indexOf(reference, offset);
+    if (index < 0) break;
+    const before = index > 0 ? message[index - 1] : "";
+    const afterIndex = index + reference.length;
+    const after = afterIndex < message.length ? message[afterIndex] : "";
+    const bounded = !/[\p{L}\p{N}]/u.test(before ?? "") && !/[\p{L}\p{N}]/u.test(after ?? "");
+    const prefix = message.slice(Math.max(0, index - 80), index);
+    const suffix = message.slice(afterIndex, Math.min(message.length, afterIndex + 32));
+    const negatedAfter = /^\s*(?:was|were)?\s*(?:not used|not applied|not followed|ignored|skipped)\b/i.test(suffix);
+    if (bounded && !NEGATED_REFERENCE.test(prefix) && !negatedAfter) positions.push(index);
+    offset = index + Math.max(1, reference.length);
+  }
+  return positions;
+}
+function versionMentionNear(message, referencePosition, referenceLength, versionNumber) {
+  const window2 = message.slice(
+    Math.max(0, referencePosition - 40),
+    Math.min(message.length, referencePosition + referenceLength + 40)
+  );
+  return new RegExp(`(?:\\bv\\s*${versionNumber}\\b|\\bversion\\s*${versionNumber}\\b)`, "i").test(
+    window2
+  );
+}
+function titleReferenceIsExplicit(message, position, length) {
+  const before = message.slice(Math.max(0, position - 64), position);
+  const after = message.slice(position + length, Math.min(message.length, position + length + 40));
+  const opening = message[position - 1] ?? "";
+  const closing = message[position + length] ?? "";
+  const delimited = opening === "`" && closing === "`" || opening === '"' && closing === '"' || opening === "'" && closing === "'" || opening === "[" && closing === "]" || before.endsWith("**") && after.startsWith("**");
+  const appliedPrefix = /\b(?:used?|applied|followed|per|according to|based on|cited|referenced|consulted|from)\b[^.!?;]{0,48}$/i.test(
+    before
+  );
+  const referentialSuffix = /^\s*(?:skill|memory|rule|decision|schema)?\s*(?:says|requires|recommends|guided|informed)\b/i.test(
+    after
+  );
+  return delimited || appliedPrefix || referentialSuffix;
+}
+var APPLICATION_RECEIPT_RE = /<!--\s*memlin-applied\s*:\s*([\s\S]*?)-->/gi;
+function applicationReceiptIds(agentMessage, candidates) {
+  const deliveredSkills = new Set(
+    candidates.filter((candidate) => candidate.kind === "skill").map((candidate) => candidate.id)
+  );
+  const applied = [];
+  let match;
+  while ((match = APPLICATION_RECEIPT_RE.exec(agentMessage)) !== null) {
+    for (const rawId of (match[1] ?? "").split(",")) {
+      const id = rawId.trim();
+      if (deliveredSkills.has(id) && !applied.includes(id)) applied.push(id);
+    }
+  }
+  return applied;
+}
+function attributeAppliedItems(agentMessage, replay) {
+  const candidates = replayAttributionCandidates(replay);
+  const applied = applicationReceiptIds(agentMessage, candidates);
+  const message = normalizeReference(agentMessage);
+  const pathIds = /* @__PURE__ */ new Map();
+  const pathVersionIds = /* @__PURE__ */ new Map();
+  const titleIds = /* @__PURE__ */ new Map();
+  const titleVersionIds = /* @__PURE__ */ new Map();
+  for (const candidate of candidates) {
+    const path13 = candidate.path ? normalizeReference(candidate.path.replace(/^\.\//, "")) : "";
+    const title = normalizeReference(candidate.title);
+    addReferenceKey(pathIds, path13, candidate.id);
+    if (path13) {
+      addReferenceKey(pathVersionIds, `${path13}\0${candidate.version_number}`, candidate.id);
+    }
+    addReferenceKey(titleIds, title, candidate.id);
+    if (title) {
+      addReferenceKey(titleVersionIds, `${title}\0${candidate.version_number}`, candidate.id);
+    }
+  }
+  const referenced = [];
+  for (const candidate of candidates) {
+    const path13 = candidate.path ? normalizeReference(candidate.path.replace(/^\.\//, "")) : "";
+    const title = normalizeReference(candidate.title);
+    const pathPositions = unnegatedReferencePositions(message, path13);
+    const pathVersionKey = `${path13}\0${candidate.version_number}`;
+    const pathIsUnique = pathIds.get(path13)?.size === 1;
+    const pathVersionIsUnique = pathVersionIds.get(pathVersionKey)?.size === 1;
+    const pathMatch = pathPositions.length > 0 && (pathIsUnique || pathVersionIsUnique && pathPositions.some(
+      (position) => versionMentionNear(message, position, path13.length, candidate.version_number)
+    ));
+    const titlePositions = unnegatedReferencePositions(message, title);
+    const titleVersionKey = `${title}\0${candidate.version_number}`;
+    const titleIsUnique = titleIds.get(title)?.size === 1;
+    const titleVersionIsUnique = titleVersionIds.get(titleVersionKey)?.size === 1;
+    const titleMatch = titlePositions.some((position) => {
+      const versioned = versionMentionNear(
+        message,
+        position,
+        title.length,
+        candidate.version_number
+      );
+      if (versioned && titleVersionIsUnique) return true;
+      return titleIsUnique && titleReferenceIsExplicit(message, position, title.length);
+    });
+    if (pathMatch || titleMatch) referenced.push(candidate.id);
+  }
+  return {
+    applied_item_ids: applied,
+    referenced_item_ids: referenced,
+    attribution_mode: applied.length > 0 ? "structured_application_receipt" : referenced.length > 0 ? "explicit_reference" : "no_application_receipt"
+  };
+}
+
+// packages/plugin-core/dist/state.js
+init_atomic_rename();
+import { promises as fs8 } from "node:fs";
+import path12 from "node:path";
+import os8 from "node:os";
+import crypto5 from "node:crypto";
+var STATE_FILE = path12.join(os8.homedir(), ".config", "memlin", "state.json");
+var EMPTY = { documents: {} };
+async function readState() {
+  try {
+    const raw = await fs8.readFile(STATE_FILE, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return { ...EMPTY };
+  }
+}
+async function writeState(state) {
+  await fs8.mkdir(path12.dirname(STATE_FILE), { recursive: true });
+  const tmp = `${STATE_FILE}.${process.pid}.tmp`;
+  await fs8.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
+  await atomicRename(tmp, STATE_FILE);
+}
+var LOCK_DIR = `${STATE_FILE}.lock`;
+var LOCK_STALE_MS = 2e3;
+var LOCK_WAIT_MS = 2e3;
+var LOCK_RETRY_MS = 50;
+async function acquireStateLock() {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  await fs8.mkdir(path12.dirname(LOCK_DIR), { recursive: true }).catch(() => {
+  });
+  for (; ; ) {
+    try {
+      await fs8.mkdir(LOCK_DIR);
+      return true;
+    } catch {
+      try {
+        const stat = await fs8.stat(LOCK_DIR);
+        if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+          await fs8.rmdir(LOCK_DIR).catch(() => {
+          });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() >= deadline) return false;
+      await new Promise((r) => setTimeout(r, LOCK_RETRY_MS));
+    }
+  }
+}
+async function releaseStateLock() {
+  await fs8.rmdir(LOCK_DIR).catch(() => {
+  });
+}
+async function updateState(mutate) {
+  const locked = await acquireStateLock();
+  try {
+    const state = await readState();
+    await mutate(state);
+    await writeState(state);
+    return state;
+  } finally {
+    if (locked) await releaseStateLock();
+  }
+}
+function getLastResolveForSession(state, sessionId) {
+  if (sessionId) {
+    return state.last_resolves?.[sessionId] ?? (state.last_resolve?.session_id === sessionId ? state.last_resolve : void 0);
+  }
+  return state.last_resolve?.session_id ? void 0 : state.last_resolve;
+}
+
+// packages/plugin-core/dist/scribe-notice.js
+function count(value) {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+function accumulateScribeNotice(existing, input) {
+  const captured = count(input.captured);
+  if (captured === 0) return existing;
+  const pending = input.pending == null ? captured : Math.min(captured, count(input.pending));
+  const sameSession = existing?.session_id === input.sessionId;
+  const carriedCaptured = sameSession ? count(existing.unsurfaced) : 0;
+  const carriedPending = sameSession ? existing.pending == null ? count(existing.unsurfaced) : Math.min(count(existing.unsurfaced), count(existing.pending)) : 0;
+  return {
+    unsurfaced: carriedCaptured + captured,
+    pending: carriedPending + pending,
+    session_id: input.sessionId,
+    at: input.at
+  };
+}
+
+// packages/plugin-core/dist/session-decisions.js
+var MAX_SESSION_QUEUES = 16;
+var MARK_ASKED_TIMEOUT_MS = 1500;
+function strings(v) {
+  return Array.isArray(v) ? v.filter((s) => typeof s === "string" && s.trim().length > 0).slice(0, 5) : [];
+}
+function parseSessionDecisions(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const id = typeof item.id === "string" ? item.id : "";
+    if (!id || seen.has(id) || !isDecisionKind(item.kind)) continue;
+    const spec = DECISION_KINDS[item.kind];
+    const rawOptions = Array.isArray(item.options) ? item.options : [];
+    const options2 = spec.options.filter((o) => rawOptions.length === 0 || rawOptions.some((r) => r?.id === o.id)).map((o) => {
+      const r = rawOptions.find((x) => x?.id === o.id) ?? {};
+      return {
+        ...o,
+        label: typeof r.label === "string" && r.label ? r.label : o.label,
+        pros: strings(r.pros),
+        cons: strings(r.cons)
+      };
+    });
+    if (options2.length === 0) continue;
+    const rec = item.recommendation;
+    const recommendation = rec && typeof rec.option === "string" && options2.some((o) => o.id === rec.option) && typeof rec.rationale === "string" && typeof rec.confidence === "number" ? { option: rec.option, confidence: rec.confidence, rationale: rec.rationale } : null;
+    const defaultOption = typeof item.default_option === "string" && options2.some((o) => o.id === item.default_option) ? item.default_option : spec.defaultOption;
+    seen.add(id);
+    out.push({
+      id,
+      kind: item.kind,
+      question: typeof item.question === "string" && item.question ? item.question : spec.label,
+      why_human: typeof item.why_human === "string" && item.why_human ? item.why_human : spec.whyHuman,
+      recommendation,
+      options: options2,
+      default_option: defaultOption,
+      deadline_at: typeof item.deadline_at === "string" ? item.deadline_at : "",
+      urgent: item.urgent === true && spec.urgent
+    });
+  }
+  return out;
+}
+function queueSessionDecisions(existing, input) {
+  const base = existing && existing.session_id === input.sessionId ? {
+    ...existing,
+    pending: [...existing.pending ?? []],
+    asked_ids: [...existing.asked_ids ?? []],
+    urgent_asked: existing.urgent_asked ?? 0
+  } : {
+    session_id: input.sessionId,
+    account_id: input.accountId,
+    pending: [],
+    asked_ids: [],
+    urgent_asked: 0,
+    at: input.at
+  };
+  const known = /* @__PURE__ */ new Set([...base.pending.map((d) => d.id), ...base.asked_ids]);
+  let room = DECISION_CAPS.perSession - base.asked_ids.length - base.pending.length;
+  let added = 0;
+  for (const d of input.decisions) {
+    if (room <= 0) break;
+    if (known.has(d.id)) continue;
+    known.add(d.id);
+    base.pending.push(d);
+    room--;
+    added++;
+  }
+  base.account_id = input.accountId ?? base.account_id;
+  base.at = input.at;
+  return { queue: base, added };
+}
+function boundQueues(map2) {
+  const entries = Object.entries(map2);
+  if (entries.length <= MAX_SESSION_QUEUES) return map2;
+  return Object.fromEntries(
+    entries.sort(([, a], [, b]) => (b.at ?? 0) - (a.at ?? 0)).slice(0, MAX_SESSION_QUEUES)
+  );
+}
+function recordSessionDecisions(state, input) {
+  const map2 = { ...state.session_decisions ?? {} };
+  const { queue, added } = queueSessionDecisions(map2[input.sessionId], input);
+  map2[input.sessionId] = queue;
+  state.session_decisions = boundQueues(map2);
+  return added;
+}
+async function storeScribeDecisions(input) {
+  const decisions = parseSessionDecisions(input.decisions);
+  if (decisions.length === 0 || !input.sessionId) return 0;
+  let added = 0;
+  try {
+    await updateState((state) => {
+      added = recordSessionDecisions(state, {
+        sessionId: input.sessionId,
+        accountId: input.accountId,
+        decisions,
+        at: input.at ?? Date.now()
+      });
+    });
+  } catch {
+    return 0;
+  }
+  return added;
+}
+function pendingAfterDecisions(persisted, pending, decisionCount) {
+  const base = pending == null ? persisted : Math.min(persisted, pending);
+  return Math.max(0, base - Math.max(0, decisionCount));
+}
+function defaultMarkAsked(cwd) {
+  let ctx = null;
+  return async (decisionId, accountId) => {
+    ctx ??= getApi(cwd ? { cwd } : {});
+    const api = await ctx;
+    if (!api) return;
+    await api.api.markDecisionAsked(decisionId, "session", accountId ? { accountId } : {});
+  };
+}
+async function markAsked(decisions, accountId, mark) {
+  await withTimeout(
+    Promise.allSettled(decisions.map((d) => mark(d.id, accountId))),
+    MARK_ASKED_TIMEOUT_MS,
+    []
+  ).catch(() => void 0);
+}
+function takeUrgentFromState(state, sessionId, at = Date.now()) {
+  const queue = state.session_decisions?.[sessionId];
+  if (!queue || !Array.isArray(queue.pending)) return null;
+  queue.asked_ids ??= [];
+  if ((queue.urgent_asked ?? 0) >= DECISION_CAPS.urgentPerSession) return null;
+  if (queue.asked_ids.length >= DECISION_CAPS.perSession) return null;
+  const index = queue.pending.findIndex((d) => d.urgent === true && DECISION_KINDS[d.kind]?.urgent);
+  if (index < 0) return null;
+  const [decision] = queue.pending.splice(index, 1);
+  queue.asked_ids.push(decision.id);
+  queue.urgent_asked = (queue.urgent_asked ?? 0) + 1;
+  queue.at = at;
+  return { decision, accountId: queue.account_id ?? null };
+}
+async function takeUrgentStopDecision(opts) {
+  if (opts.stopHookActive) return null;
+  if (!opts.sessionId) return null;
+  const sessionId = opts.sessionId;
+  const nowMs = opts.nowMs ?? Date.now();
+  let taken = null;
+  try {
+    await updateState((state) => {
+      taken = takeUrgentFromState(state, sessionId, nowMs);
+    });
+  } catch {
+    return null;
+  }
+  if (!taken) return null;
+  const { decision, accountId } = taken;
+  await markAsked([decision], accountId, opts.markAsked ?? defaultMarkAsked(opts.cwd));
+  return {
+    decision: "block",
+    reason: [
+      "Before this turn ends, Memlin needs the user to answer one memory decision that should not wait.",
+      "Ask it now, once, as the block below describes. Then end the turn: whether or not they answer, do not ask it again. If they do not answer, the default applies.",
+      "",
+      renderDecisionBlock(decision, { host: opts.host, nowMs }).trimEnd()
+    ].join("\n")
+  };
+}
+
+// packages/plugin-core/dist/transcript.js
+function sessionIdFromTranscriptPath(p) {
+  const stem = p?.split(/[\\/]/).pop()?.replace(/\.jsonl$/, "");
+  return stem || null;
+}
+function summarizeToolUse(b) {
+  const n = b.name || "tool";
+  const i = b.input ?? {};
+  if (n === "TodoWrite") return null;
+  const filePath = typeof i.file_path === "string" ? i.file_path : null;
+  if (filePath && ["Edit", "Write", "Read", "NotebookEdit"].includes(n)) {
+    return `[${n} ${filePath}]`;
+  }
+  if (n === "Bash" && typeof i.command === "string") {
+    return `[Bash] ${i.command.replace(/\s+/g, " ").slice(0, 160)}`;
+  }
+  const pattern = typeof i.pattern === "string" ? i.pattern : typeof i.query === "string" ? i.query : null;
+  if (pattern && (n === "Grep" || n === "Glob")) return `[${n} ${pattern}]`;
+  if ((n === "Agent" || n === "Task") && typeof i.description === "string") {
+    return `[Agent: ${i.description}]`;
+  }
+  return `[${n}]`;
+}
+function flattenForScribe(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts = [];
+  for (const b of content) {
+    if (!b || !b.type) continue;
+    if (b.type === "text") {
+      if (b.text) parts.push(b.text);
+    } else if (b.type === "tool_use") {
+      const s = summarizeToolUse(b);
+      if (s) parts.push(s);
+    }
+  }
+  return parts.join("\n");
+}
+
 // packages/plugin-core/dist/stop-handler.js
 var MEMORABLE_USER_PATTERNS = [
   // Explicit memory triggers.
@@ -11033,7 +27532,7 @@ function flattenContent(c) {
 async function readLastExchange(transcriptPath) {
   let raw;
   try {
-    raw = await fs8.readFile(transcriptPath, "utf8");
+    raw = await fs9.readFile(transcriptPath, "utf8");
   } catch {
     return null;
   }
@@ -11075,7 +27574,7 @@ function nonNegativeInt(v) {
 async function readLastAssistantUsage(transcriptPath) {
   let raw;
   try {
-    raw = await fs8.readFile(transcriptPath, "utf8");
+    raw = await fs9.readFile(transcriptPath, "utf8");
   } catch {
     return null;
   }
@@ -11120,13 +27619,13 @@ async function heartbeat(cwd) {
 }
 function readGitRemote2(cwd) {
   try {
-    const url = execSync2("git remote get-url origin", {
+    const url2 = execSync("git remote get-url origin", {
       windowsHide: true,
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8"
     }).trim();
-    return normalizeGitRemote(url);
+    return normalizeGitRemote(url2);
   } catch {
     return null;
   }
@@ -11371,16 +27870,30 @@ function lastTurnHasInsistence(raw) {
   }
   return false;
 }
-async function maybeScribeSession(ctx, payload, routing) {
+async function maybeScribeSession(ctx, payload, routing, lightMode = false) {
   if (!payload.transcript_path) return;
   let raw;
   try {
-    raw = await fs8.readFile(payload.transcript_path, "utf8");
+    if (lightMode) {
+      const handle = await fs9.open(
+        payload.transcript_path,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW
+      );
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size > 8 * 1024 * 1024) return;
+        const buffer = Buffer.alloc(Math.min(stat.size, 8 * 1024 * 1024));
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        raw = buffer.subarray(0, bytesRead).toString("utf8");
+      } finally {
+        await handle.close();
+      }
+    } else raw = await fs9.readFile(payload.transcript_path, "utf8");
   } catch {
     return;
   }
   if (raw.length < SCRIBE_MIN_TRANSCRIPT_CHARS) return;
-  const sessionId = sessionIdFromTranscriptPath(payload.transcript_path) ?? "session";
+  const sessionId = payload.session_id ?? sessionIdFromTranscriptPath(payload.transcript_path) ?? "session";
   const state = await readState();
   const prev = state.session_scribe;
   const now = Date.now();
@@ -11418,9 +27931,10 @@ async function maybeScribeSession(ctx, payload, routing) {
     if (text) turns.push(`### ${turn.role}
 ${text}`);
   }
-  const transcript = turns.join("\n\n");
+  const transcript = lightMode ? flattenLightTranscript(raw) : turns.join("\n\n");
   const prevFlattened = prev && prev.session_id === sessionId ? prev.flattened_chars ?? 0 : 0;
-  const delta = transcript.length < prevFlattened ? transcript : transcript.slice(prevFlattened);
+  let delta = transcript.length < prevFlattened ? transcript : transcript.slice(prevFlattened);
+  if (lightMode) delta = boundLightText(delta, 5500);
   if (delta.length < SCRIBE_MIN_TRANSCRIPT_CHARS) return;
   const scribe = ctx.api.scribeSession(
     // resolvedProjectId was computed above for the workspace gate — pass
@@ -11438,7 +27952,7 @@ ${text}`);
     { accountId: routing.accountId }
   );
   try {
-    const result = await withTimeout(scribe, SCRIBE_TIMEOUT_MS, {
+    const result = await withTimeout(scribe, lightMode ? 25e3 : SCRIBE_TIMEOUT_MS, {
       run_id: "",
       proposals_extracted: 0,
       proposals_persisted: 0,
@@ -11447,6 +27961,8 @@ ${text}`);
       latency_ms: 0,
       truncated: false
     });
+    if (lightMode && !result.run_id) return;
+    const decisions = parseSessionDecisions(result.decisions);
     if (result.proposals_persisted > 0) {
       const pending = typeof result.proposals_pending === "number" ? Math.max(0, Math.min(result.proposals_persisted, result.proposals_pending)) : result.proposals_persisted;
       log(
@@ -11454,7 +27970,11 @@ ${text}`);
       );
       state.scribe_notice = accumulateScribeNotice(state.scribe_notice, {
         captured: result.proposals_persisted,
-        pending: result.proposals_pending,
+        pending: decisions.length > 0 ? pendingAfterDecisions(
+          result.proposals_persisted,
+          result.proposals_pending,
+          decisions.length
+        ) : result.proposals_pending,
         sessionId,
         at: now
       });
@@ -11463,9 +27983,18 @@ ${text}`);
       at: now,
       transcript_chars: raw.length,
       session_id: sessionId,
-      flattened_chars: transcript.length
+      flattened_chars: lightMode ? (transcript.length < prevFlattened ? 0 : prevFlattened) + delta.length : transcript.length
     };
     await writeState(state);
+    if (decisions.length > 0) {
+      const queued = await storeScribeDecisions({
+        sessionId,
+        accountId: routing.accountId,
+        decisions,
+        at: now
+      });
+      if (queued > 0) log(`session scribe: ${queued} decision(s) queued to ask in this session`);
+    }
   } catch (err) {
     log(`session scribe failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -11483,11 +28012,12 @@ function buildWorkingMemoryContent(input) {
     `- updated_at: ${updatedAt}`,
     ""
   ];
+  const redact = (text) => redactSecretShapes(text).redacted;
   if (input.task?.trim()) {
-    lines.push("## Current task", "", input.task.trim(), "");
+    lines.push("## Current task", "", redact(input.task.trim()), "");
   }
-  const user = (input.userMessage ?? "").trim();
-  const agent = (input.agentMessage ?? "").trim();
+  const user = redact((input.userMessage ?? "").trim());
+  const agent = redact((input.agentMessage ?? "").trim());
   if (user || agent) {
     lines.push("## Latest exchange", "");
     if (user) lines.push(`**User:** ${truncateWorkingText(user, 800)}`, "");
@@ -11531,7 +28061,7 @@ async function maybeUpsertWorkingMemory(ctx, payload, routing) {
     log("working memory: skipped \u2014 no resolve or exchange yet");
     return;
   }
-  const path11 = workingMemoryPath(sessionId);
+  const path13 = workingMemoryPath(sessionId);
   const callOpts = { accountId: routing.accountId };
   let documentId = state.working_memory_ids?.[sessionId] ?? null;
   if (!documentId) {
@@ -11540,6 +28070,7 @@ async function maybeUpsertWorkingMemory(ctx, payload, routing) {
         ctx.api.listDocuments(
           {
             kinds: ["memory"],
+            path: path13,
             ...routing.projectId ? { project_id: routing.projectId } : {}
           },
           callOpts
@@ -11547,13 +28078,18 @@ async function maybeUpsertWorkingMemory(ctx, payload, routing) {
         TIMEOUT_MS,
         []
       );
-      const hit = docs.find((d) => d.path === path11);
+      const hit = docs.find((d) => d.path === path13);
       if (hit) documentId = hit.id;
     } catch (err) {
       log(
         `working memory: list failed (continuing create): ${err instanceof Error ? err.message : String(err)}`
       );
     }
+  }
+  const contentHash = createHash("sha256").update(content).digest("hex");
+  if (documentId && state.working_memory_hashes?.[sessionId] === contentHash) {
+    log("working memory: unchanged since last turn, skipping write");
+    return;
   }
   try {
     const write = ctx.api.writeDocument(
@@ -11562,13 +28098,22 @@ async function maybeUpsertWorkingMemory(ctx, payload, routing) {
         scope: routing.projectId ? "project" : "team",
         kind: "memory",
         title: `Working memory \u2014 ${sessionId.slice(0, 12)}`,
-        path: path11,
+        path: path13,
         content,
         commit_message: "session working memory",
         project_id: routing.projectId,
         metadata: {
           memory_type: "working",
           session_id: sessionId
+          // Deliberately NOT stamping metadata.status here. These docs are
+          // recall-eligible only via the session_id force-include lane, and
+          // that lane calls isDirectResolverDocumentEligible WITHOUT
+          // includeBackground — so a 'background' stamp would drop session
+          // working memory entirely, and 'active' is what the absent key
+          // already coalesces to. The real problem (these scratch files
+          // competing as dedup candidates against genuine captures) is fixed
+          // where it belongs, in search_documents_for_dedup — see migration
+          // 20260902130400_dedup_excludes_working_memory.sql.
         }
       },
       callOpts
@@ -11583,17 +28128,25 @@ async function maybeUpsertWorkingMemory(ctx, payload, routing) {
       ...next.working_memory_ids ?? {},
       [sessionId]: result.document_id
     };
+    next.working_memory_hashes = {
+      ...next.working_memory_hashes ?? {},
+      [sessionId]: contentHash
+    };
     const ids = Object.entries(next.working_memory_ids);
     if (ids.length > 64) {
       next.working_memory_ids = Object.fromEntries(ids.slice(ids.length - 64));
     }
+    const keep = new Set(Object.keys(next.working_memory_ids));
+    next.working_memory_hashes = Object.fromEntries(
+      Object.entries(next.working_memory_hashes).filter(([k]) => keep.has(k))
+    );
     await writeState(next);
-    log(`working memory: upserted ${path11} (v${result.version_number})`);
+    log(`working memory: upserted ${path13} (v${result.version_number})`);
   } catch (err) {
     log(`working memory failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
-async function runStopHandler(payload) {
+async function runStopHandler(payload, opts = {}) {
   const cwd = payload.cwd ?? process.cwd();
   const gate = await enforceDoneMeansDeployed(payload);
   if (gate) {
@@ -11602,7 +28155,18 @@ async function runStopHandler(payload) {
   }
   const ctx = await getApi({ cwd });
   if (!ctx) return;
+  const light = await ctx.api.lightStatus().catch(() => void 0);
+  if (light === void 0) return;
+  if (light?.active && process.env.MEMLIN_LIGHT_WORKER !== "1") {
+    startLightWorker(cwd, payload);
+    return;
+  }
   const routing = await resolveStopWorkspaceRouting(ctx, cwd);
+  if (light?.active) {
+    if (light.capture_enabled && light.captures < 50 && light.cost_micros < 1e6)
+      await maybeScribeSession(ctx, payload, routing, true);
+    return;
+  }
   await Promise.allSettled([
     heartbeat(cwd),
     maybeProposeMemory(ctx, payload, routing),
@@ -11611,6 +28175,15 @@ async function runStopHandler(payload) {
     maybeRecordTurnTiming(ctx, payload, routing),
     maybeUpsertWorkingMemory(ctx, payload, routing)
   ]);
+  if (opts.urgentDecisionHost) {
+    const urgent = await takeUrgentStopDecision({
+      sessionId: payload.session_id ?? sessionIdFromTranscriptPath(payload.transcript_path) ?? null,
+      host: opts.urgentDecisionHost,
+      stopHookActive: payload.stop_hook_active === true,
+      cwd
+    }).catch(() => null);
+    if (urgent) process.stdout.write(JSON.stringify(urgent));
+  }
 }
 
 // apps/windsurf-plugin/src/hook-io.ts

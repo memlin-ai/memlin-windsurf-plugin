@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
 import { fileURLToPath as __ftp } from 'node:url'; import { dirname as __dn } from 'node:path';
 const __filename = __ftp(import.meta.url); const __dirname = __dn(__filename);
@@ -14,9 +13,6 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
   if (typeof require !== "undefined") return require.apply(this, arguments);
   throw Error('Dynamic require of "' + x + '" is not supported');
 });
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-};
 var __commonJS = (cb, mod) => function __require2() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
@@ -40,401 +36,6 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
-
-// packages/plugin-core/src/atomic-rename.ts
-import { promises as fs } from "node:fs";
-import path from "node:path";
-async function renameWithRetry(from, to, rename) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await rename(from, to);
-      return;
-    } catch (error40) {
-      const code = error40.code;
-      if (attempt >= MAX_ATTEMPTS || !code || !RETRYABLE_CODES.has(code)) throw error40;
-      const cap = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
-      const delay2 = cap / 2 + Math.random() * (cap / 2);
-      await new Promise((resolve) => setTimeout(resolve, delay2));
-    }
-  }
-}
-async function atomicRename(from, to, dependencies = {}) {
-  const rename = dependencies.rename ?? fs.rename;
-  const queueKey = path.resolve(to);
-  const previous = renameQueues.get(queueKey) ?? Promise.resolve();
-  const run = previous.catch(() => void 0).then(() => renameWithRetry(from, to, rename));
-  renameQueues.set(queueKey, run);
-  try {
-    await run;
-  } finally {
-    if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
-  }
-}
-var RETRYABLE_CODES, MAX_ATTEMPTS, BASE_DELAY_MS, MAX_DELAY_MS, renameQueues;
-var init_atomic_rename = __esm({
-  "packages/plugin-core/src/atomic-rename.ts"() {
-    "use strict";
-    RETRYABLE_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
-    MAX_ATTEMPTS = 10;
-    BASE_DELAY_MS = 10;
-    MAX_DELAY_MS = 100;
-    renameQueues = /* @__PURE__ */ new Map();
-  }
-});
-
-// packages/plugin-core/src/auth-refusal.ts
-import crypto from "node:crypto";
-import { promises as fs2 } from "node:fs";
-import os from "node:os";
-import path2 from "node:path";
-function isReason(value) {
-  return value === "not_member" || value === "no_profile";
-}
-function classifyAuthRefusal(status, body) {
-  if (status !== 403 || typeof body !== "object" || body === null) return null;
-  const record2 = body;
-  if (isReason(record2.code)) return record2.code;
-  let message = record2.error;
-  if (typeof record2.error === "object" && record2.error !== null) {
-    const nested = record2.error;
-    if (isReason(nested.code)) return nested.code;
-    message = nested.message;
-  }
-  if (typeof message !== "string") return null;
-  for (const reason of Object.keys(AUTH_REFUSAL_MESSAGES)) {
-    if (message === AUTH_REFUSAL_MESSAGES[reason]) return reason;
-  }
-  return null;
-}
-function authRefusalDir() {
-  return process.env.MEMLIN_AUTH_REFUSAL_DIR ?? path2.join(os.homedir(), ".config", "memlin", "auth-refusal");
-}
-function sha(value) {
-  return crypto.createHash("sha256").update(value).digest("hex").slice(0, 32);
-}
-function normalizeBinding(binding) {
-  return binding ? path2.resolve(binding) : null;
-}
-function accountDir(accountId) {
-  return path2.join(authRefusalDir(), sha(accountId));
-}
-function entryPath(accountId, binding) {
-  return path2.join(accountDir(accountId), `${sha(binding ?? "(global)")}.json`);
-}
-function isEntry(value) {
-  if (typeof value !== "object" || value === null) return false;
-  const e = value;
-  return typeof e.account_id === "string" && (e.binding === null || typeof e.binding === "string") && isReason(e.reason) && typeof e.expires_at === "number" && Array.isArray(e.notified_sessions);
-}
-async function readRaw(file2) {
-  try {
-    const parsed = JSON.parse(await fs2.readFile(file2, "utf8"));
-    return isEntry(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-async function writeEntry(entry) {
-  const file2 = entryPath(entry.account_id, entry.binding);
-  await fs2.mkdir(path2.dirname(file2), { recursive: true });
-  const tmp = `${file2}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  await fs2.writeFile(tmp, JSON.stringify(entry), { mode: 384 });
-  await atomicRename(tmp, file2);
-}
-async function recordAuthRefusal(input) {
-  const now = input.now ?? Date.now();
-  const binding = normalizeBinding(input.binding);
-  const previous = await readRaw(entryPath(input.accountId, binding));
-  const entry = {
-    account_id: input.accountId,
-    binding,
-    reason: input.reason,
-    account_name: input.accountName ?? previous?.account_name ?? null,
-    refused_at: now,
-    expires_at: now + AUTH_REFUSAL_TTL_MS,
-    notified_sessions: previous?.notified_sessions ?? []
-  };
-  await writeEntry(entry);
-  return entry;
-}
-async function readAuthRefusal(accountId, binding, now = Date.now()) {
-  const file2 = entryPath(accountId, normalizeBinding(binding));
-  const entry = await readRaw(file2);
-  if (!entry) return null;
-  if (now >= entry.expires_at) {
-    await fs2.rm(file2, { force: true }).catch(() => {
-    });
-    return null;
-  }
-  return entry;
-}
-async function clearAuthRefusalsForAccount(accountId) {
-  await fs2.rm(accountDir(accountId), { recursive: true, force: true }).catch(() => {
-  });
-}
-async function clearAllAuthRefusals() {
-  await fs2.rm(authRefusalDir(), { recursive: true, force: true }).catch(() => {
-  });
-}
-function accountIdsChanged(before, after) {
-  const normalize = (value) => Array.isArray(value) ? value.filter((v) => typeof v === "string").sort().join(",") : "";
-  return normalize(before) !== normalize(after);
-}
-var AUTH_REFUSAL_MESSAGES, AUTH_REFUSAL_TTL_MS;
-var init_auth_refusal = __esm({
-  "packages/plugin-core/src/auth-refusal.ts"() {
-    "use strict";
-    init_atomic_rename();
-    AUTH_REFUSAL_MESSAGES = {
-      not_member: "not a member of this account",
-      no_profile: "no Memlin profile for this user \u2014 sign in to the web app first"
-    };
-    AUTH_REFUSAL_TTL_MS = 15 * 60 * 1e3;
-  }
-});
-
-// packages/plugin-core/src/companion-client.ts
-var companion_client_exports = {};
-__export(companion_client_exports, {
-  CODEX_ADDITIONAL_CONTEXT_MAX_BYTES: () => CODEX_ADDITIONAL_CONTEXT_MAX_BYTES,
-  CODEX_HOOK_RESOLVE_PROFILE: () => CODEX_HOOK_RESOLVE_PROFILE,
-  COMPANION_PROTOCOL: () => COMPANION_PROTOCOL,
-  COMPANION_SOCKET_ENV: () => COMPANION_SOCKET_ENV,
-  IS_COMPANION_ENV: () => IS_COMPANION_ENV,
-  MAX_COMPANION_PROTOCOL: () => MAX_COMPANION_PROTOCOL,
-  MIN_COMPANION_PROTOCOL: () => MIN_COMPANION_PROTOCOL,
-  NO_COMPANION_ENV: () => NO_COMPANION_ENV,
-  USE_COMPANION_ENV: () => USE_COMPANION_ENV,
-  companionCommitResolveDelivery: () => companionCommitResolveDelivery,
-  companionDelegationEnabled: () => companionDelegationEnabled,
-  companionForDelegation: () => companionForDelegation,
-  companionGetToken: () => companionGetToken,
-  companionReadLocal: () => companionReadLocal,
-  companionReleaseResolveDelivery: () => companionReleaseResolveDelivery,
-  companionReportResolveDelivery: () => companionReportResolveDelivery,
-  companionReportSession: () => companionReportSession,
-  companionRequest: () => companionRequest,
-  companionReserveLateResolveDelivery: () => companionReserveLateResolveDelivery,
-  companionReserveResolveDelivery: () => companionReserveResolveDelivery,
-  companionResolveJoin: () => companionResolveJoin,
-  companionResolveReuse: () => companionResolveReuse,
-  companionResolveStart: () => companionResolveStart,
-  companionResolveTake: () => companionResolveTake,
-  companionResolveWorkspace: () => companionResolveWorkspace,
-  companionRunDir: () => companionRunDir,
-  companionSearchLocal: () => companionSearchLocal,
-  companionSocketPath: () => companionSocketPath,
-  companionStatus: () => companionStatus,
-  companionSyncNow: () => companionSyncNow,
-  deriveResolveId: () => deriveResolveId,
-  isCompanionHealthyForDelegation: () => isCompanionHealthyForDelegation,
-  resetCompanionClientCache: () => resetCompanionClientCache
-});
-import http from "node:http";
-import crypto2 from "node:crypto";
-import os2 from "node:os";
-import path3 from "node:path";
-function companionSocketPath(env = process.env) {
-  const override = env[COMPANION_SOCKET_ENV];
-  if (override) return override;
-  if (process.platform === "win32") {
-    return `\\\\.\\pipe\\memlin-companion-${os2.userInfo().username}`;
-  }
-  return path3.join(os2.homedir(), ".config", "memlin", "run", "companion.sock");
-}
-function companionRunDir() {
-  return path3.join(os2.homedir(), ".config", "memlin", "run");
-}
-function deriveResolveId(input) {
-  const digest = crypto2.createHash("sha256").update("memlin.resolve.v2\0").update(JSON.stringify([input.accountId, input.host, input.sessionId ?? null, input.turnId])).digest().subarray(0, 16);
-  digest[6] = digest[6] & 15 | 80;
-  digest[8] = digest[8] & 63 | 128;
-  const hex = digest.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-function companionDisabled(env = process.env) {
-  const off = env[NO_COMPANION_ENV];
-  if (off === "1" || off === "true" || off === "yes") return true;
-  return env[IS_COMPANION_ENV] === "1";
-}
-async function companionRequest(method, body, opts = {}) {
-  const env = opts.env ?? process.env;
-  if (companionDisabled(env)) return null;
-  if (Date.now() < socketDeadUntil) return null;
-  const timeoutMs = opts.timeoutMs ?? CALL_TIMEOUTS[method] ?? DEFAULT_CALL_TIMEOUT_MS;
-  const payload = JSON.stringify(body ?? {});
-  return new Promise((resolve) => {
-    let settled = false;
-    const fail = (markDead) => {
-      if (settled) return;
-      settled = true;
-      if (markDead) socketDeadUntil = Date.now() + SOCKET_DEAD_TTL_MS;
-      resolve(null);
-    };
-    const req = http.request(
-      {
-        socketPath: companionSocketPath(env),
-        path: `/v1/${method}`,
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(payload),
-          "memlin-client-protocol": String(COMPANION_PROTOCOL)
-        },
-        // Overall call budget; the connect phase gets its own tighter cap
-        // below via the socket timeout before the connection exists.
-        timeout: timeoutMs
-      },
-      (res) => {
-        const chunks = [];
-        res.on("data", (c) => chunks.push(c));
-        res.on("end", () => {
-          if (settled) return;
-          settled = true;
-          if (res.statusCode !== 200) return resolve(null);
-          try {
-            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-          } catch {
-            resolve(null);
-          }
-        });
-        res.on("error", () => fail(false));
-      }
-    );
-    const connectTimer = setTimeout(() => {
-      req.destroy();
-      fail(true);
-    }, CONNECT_TIMEOUT_MS);
-    connectTimer.unref?.();
-    req.on("socket", (socket) => {
-      if (!socket.connecting) clearTimeout(connectTimer);
-      else socket.once("connect", () => clearTimeout(connectTimer));
-    });
-    req.once("close", () => clearTimeout(connectTimer));
-    req.on("timeout", () => {
-      req.destroy();
-      fail(false);
-    });
-    req.on("error", () => fail(true));
-    req.end(payload);
-  });
-}
-async function companionStatus(opts = {}) {
-  const status = await companionRequest("status.get", {}, opts);
-  if (!status) return null;
-  if (status.protocol < MIN_COMPANION_PROTOCOL || status.protocol > MAX_COMPANION_PROTOCOL) {
-    return null;
-  }
-  return status;
-}
-async function companionGetToken() {
-  const token = await companionRequest("token.get", {});
-  if (!token || token.expires_at <= Date.now() + 6e4) return null;
-  return token;
-}
-async function companionResolveWorkspace(cwd) {
-  return companionRequest("workspace.resolve", { cwd });
-}
-async function companionSyncNow(req) {
-  return companionRequest("sync.now", req);
-}
-async function companionSearchLocal(req) {
-  return companionRequest("memory.search", req);
-}
-async function companionReadLocal(req) {
-  return companionRequest("memory.read", req);
-}
-async function companionResolveStart(req, opts = {}) {
-  return companionRequest("resolve.start", req, opts);
-}
-async function companionResolveTake(req) {
-  return companionRequest("resolve.take", req, {
-    timeoutMs: Math.max(250, req.wait_ms + 250)
-  });
-}
-async function companionResolveJoin(req) {
-  return companionRequest("resolve.join", req, {
-    timeoutMs: Math.max(250, req.wait_ms + 250)
-  });
-}
-async function companionResolveReuse(req) {
-  return companionRequest("resolve.reuse", req, {
-    timeoutMs: Math.max(250, Math.min(4500, req.wait_ms + 500))
-  });
-}
-async function companionReserveResolveDelivery(req, opts = {}) {
-  return companionRequest("resolve.reserve", req, opts);
-}
-async function companionReserveLateResolveDelivery(req, opts = {}) {
-  return companionRequest("resolve.reserve-late", req, opts);
-}
-async function companionCommitResolveDelivery(req, opts = {}) {
-  return (await companionRequest("resolve.commit", req, opts))?.accepted ?? null;
-}
-async function companionReleaseResolveDelivery(req, opts = {}) {
-  return (await companionRequest("resolve.release", req, opts))?.released ?? null;
-}
-async function companionReportResolveDelivery(req, opts = {}) {
-  return (await companionRequest("resolve.report", req, opts))?.accepted ?? null;
-}
-async function companionReportSession(req) {
-  return (await companionRequest("session.report", req))?.registered ?? false;
-}
-function isCompanionHealthyForDelegation(status) {
-  if (!status) return false;
-  if (status.auth.state !== "ok") return false;
-  if (status.sync.mode === "realtime") return true;
-  if (status.sync.mode !== "polling") return false;
-  if (!status.sync.last_delta_at) return false;
-  const age = Date.now() - Date.parse(status.sync.last_delta_at);
-  return Number.isFinite(age) && age < 5 * 6e4;
-}
-function companionDelegationEnabled(env = process.env) {
-  const v = env[USE_COMPANION_ENV];
-  return v === "1" || v === "true" || v === "yes";
-}
-async function companionForDelegation() {
-  if (!companionDelegationEnabled()) return null;
-  const status = await companionStatus();
-  return isCompanionHealthyForDelegation(status) ? status : null;
-}
-function resetCompanionClientCache() {
-  socketDeadUntil = 0;
-}
-var COMPANION_PROTOCOL, MIN_COMPANION_PROTOCOL, MAX_COMPANION_PROTOCOL, NO_COMPANION_ENV, IS_COMPANION_ENV, COMPANION_SOCKET_ENV, CODEX_HOOK_RESOLVE_PROFILE, CODEX_ADDITIONAL_CONTEXT_MAX_BYTES, CONNECT_TIMEOUT_MS, DEFAULT_CALL_TIMEOUT_MS, CALL_TIMEOUTS, socketDeadUntil, SOCKET_DEAD_TTL_MS, USE_COMPANION_ENV;
-var init_companion_client = __esm({
-  "packages/plugin-core/src/companion-client.ts"() {
-    "use strict";
-    COMPANION_PROTOCOL = 1;
-    MIN_COMPANION_PROTOCOL = 1;
-    MAX_COMPANION_PROTOCOL = 1;
-    NO_COMPANION_ENV = "MEMLIN_NO_DAEMON";
-    IS_COMPANION_ENV = "MEMLIN_DAEMON";
-    COMPANION_SOCKET_ENV = "MEMLIN_COMPANION_SOCKET";
-    CODEX_HOOK_RESOLVE_PROFILE = "codex-hook-v1:tokens=2200";
-    CODEX_ADDITIONAL_CONTEXT_MAX_BYTES = 2200;
-    CONNECT_TIMEOUT_MS = 150;
-    DEFAULT_CALL_TIMEOUT_MS = 1e3;
-    CALL_TIMEOUTS = {
-      "workspace.resolve": 2e3,
-      "resolve.start": 750,
-      "resolve.reuse": 4500,
-      "resolve.reserve": 750,
-      "resolve.reserve-late": 750,
-      "resolve.commit": 750,
-      "resolve.release": 500,
-      "resolve.report": 500,
-      "sync.now": 5e3,
-      "login.start": 1e4,
-      // Local-store reads walk the materialized doc tree on disk.
-      "memory.search": 2e3,
-      "memory.read": 2e3
-    };
-    socketDeadUntil = 0;
-    SOCKET_DEAD_TTL_MS = 5e3;
-    USE_COMPANION_ENV = "MEMLIN_USE_DAEMON";
-  }
-});
 
 // node_modules/.pnpm/kind-of@6.0.3/node_modules/kind-of/index.js
 var require_kind_of = __commonJS({
@@ -3807,7 +3408,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs7 = __require("fs");
+    var fs = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3891,7 +3492,7 @@ var require_gray_matter = __commonJS({
       return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs7.readFileSync(filepath, "utf8");
+      const str2 = fs.readFileSync(filepath, "utf8");
       const file2 = matter3(str2, options2);
       file2.path = filepath;
       return file2;
@@ -3918,561 +3519,6 @@ var require_gray_matter = __commonJS({
     module2.exports = matter3;
   }
 });
-
-// packages/plugin-core/src/workspace-binding.ts
-var workspace_binding_exports = {};
-__export(workspace_binding_exports, {
-  WORKSPACE_BINDING_FILE: () => WORKSPACE_BINDING_FILE,
-  WORKSPACE_DIR_NAME: () => WORKSPACE_DIR_NAME,
-  clearWorkspaceBinding: () => clearWorkspaceBinding,
-  findWorkspaceBinding: () => findWorkspaceBinding,
-  resolveGitWorkspaceIdentity: () => resolveGitWorkspaceIdentity,
-  writeWorkspaceBinding: () => writeWorkspaceBinding
-});
-import { randomUUID as randomUUID2 } from "node:crypto";
-import { constants, promises as fs4 } from "node:fs";
-import path6 from "node:path";
-async function walkForWorkspaceBinding(startDir) {
-  let dir = path6.resolve(startDir);
-  for (let i = 0; i < 64; i++) {
-    const candidate = path6.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
-    try {
-      const raw = await fs4.readFile(candidate, "utf8");
-      const parsed = JSON.parse(raw);
-      if (typeof parsed.account_id === "string" && parsed.account_id) {
-        return {
-          binding: {
-            account_id: parsed.account_id,
-            project_id: parsed.project_id ?? null,
-            account_name: parsed.account_name
-          },
-          workspaceRoot: dir
-        };
-      }
-    } catch {
-    }
-    const parent = path6.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-  return null;
-}
-async function readSmallRegularFile(file2) {
-  let before;
-  try {
-    before = await fs4.lstat(file2);
-  } catch (error40) {
-    return isFileNotFound(error40) ? { kind: "missing" } : { kind: "invalid" };
-  }
-  try {
-    if (before.isSymbolicLink() || !before.isFile() || before.size > GIT_POINTER_MAX_BYTES) {
-      return { kind: "invalid" };
-    }
-    const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-    const handle = await fs4.open(file2, constants.O_RDONLY | noFollow);
-    try {
-      const opened = await handle.stat();
-      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size || opened.size > GIT_POINTER_MAX_BYTES) {
-        return { kind: "invalid" };
-      }
-      const bytes = await handle.readFile();
-      const [after, afterPath] = await Promise.all([handle.stat(), fs4.lstat(file2)]);
-      if (afterPath.isSymbolicLink() || !afterPath.isFile() || after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size || bytes.byteLength !== opened.size || bytes.includes(0)) {
-        return { kind: "invalid" };
-      }
-      return { kind: "ok", value: bytes.toString("utf8") };
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return { kind: "invalid" };
-  }
-}
-function containedBy(parent, child) {
-  const relative = path6.relative(parent, child);
-  return relative === "" || relative !== ".." && !relative.startsWith(`..${path6.sep}`) && !path6.isAbsolute(relative);
-}
-async function canonicalSafeDirectory(candidate) {
-  try {
-    const before = await fs4.lstat(candidate);
-    if (before.isSymbolicLink() || !before.isDirectory()) return null;
-    await fs4.access(candidate, constants.R_OK | constants.X_OK);
-    const canonical = await fs4.realpath(candidate);
-    const after = await fs4.lstat(candidate);
-    if (after.isSymbolicLink() || !after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) {
-      return null;
-    }
-    return canonical;
-  } catch {
-    return null;
-  }
-}
-function gitIdentity(checkoutRoot, state, repositoryRoot = checkoutRoot) {
-  return {
-    checkout_root: checkoutRoot,
-    repository_root: repositoryRoot,
-    state
-  };
-}
-async function resolveGitWorkspaceIdentity(startDir) {
-  const requested = path6.resolve(startDir);
-  let canonicalStart;
-  try {
-    canonicalStart = await fs4.realpath(requested);
-    const startEntry = await fs4.stat(canonicalStart);
-    if (!startEntry.isDirectory()) return gitIdentity(canonicalStart, "unknown");
-  } catch {
-    return gitIdentity(requested, "unknown");
-  }
-  let dir = canonicalStart;
-  for (let i = 0; i < 64; i++) {
-    const gitEntry = path6.join(dir, ".git");
-    let entry;
-    try {
-      entry = await fs4.lstat(gitEntry);
-    } catch (error40) {
-      if (!isFileNotFound(error40)) return gitIdentity(dir, "unknown");
-      const parent = path6.dirname(dir);
-      if (parent === dir) return gitIdentity(canonicalStart, "none");
-      dir = parent;
-      continue;
-    }
-    const checkoutRoot = dir;
-    if (entry.isSymbolicLink()) return gitIdentity(checkoutRoot, "unknown");
-    if (entry.isDirectory()) {
-      if (!await canonicalSafeDirectory(gitEntry)) return gitIdentity(checkoutRoot, "unknown");
-      return gitIdentity(checkoutRoot, "main");
-    }
-    if (!entry.isFile()) return gitIdentity(checkoutRoot, "unknown");
-    const pointerRead = await readSmallRegularFile(gitEntry);
-    if (pointerRead.kind !== "ok" || pointerRead.value.includes("\0")) {
-      return gitIdentity(checkoutRoot, "unknown");
-    }
-    const pointerMatch = /^gitdir:[ \t]*([^\r\n]+)\r?\n?$/.exec(pointerRead.value);
-    const pointerValue = pointerMatch?.[1];
-    if (!pointerValue) return gitIdentity(checkoutRoot, "unknown");
-    let gitDirCandidate;
-    try {
-      gitDirCandidate = path6.isAbsolute(pointerValue) ? pointerValue : path6.resolve(checkoutRoot, pointerValue);
-    } catch {
-      return gitIdentity(checkoutRoot, "unknown");
-    }
-    const gitDir = await canonicalSafeDirectory(gitDirCandidate);
-    if (!gitDir) return gitIdentity(checkoutRoot, "unknown");
-    const commonRead = await readSmallRegularFile(path6.join(gitDir, "commondir"));
-    if (commonRead.kind === "missing") {
-      const gitDirParent = path6.dirname(gitDir);
-      const looksLikeWorktreeAdmin = path6.basename(gitDirParent) === "worktrees" && path6.basename(path6.dirname(gitDirParent)) === ".git";
-      if (looksLikeWorktreeAdmin) return gitIdentity(checkoutRoot, "unknown");
-      return gitIdentity(checkoutRoot, "main");
-    }
-    if (commonRead.kind !== "ok" || commonRead.value.includes("\0")) {
-      return gitIdentity(checkoutRoot, "unknown");
-    }
-    const commonMatch = /^([^\r\n]+)\r?\n?$/.exec(commonRead.value);
-    const commonValue = commonMatch?.[1];
-    if (!commonValue) return gitIdentity(checkoutRoot, "unknown");
-    let commonCandidate;
-    try {
-      commonCandidate = path6.isAbsolute(commonValue) ? commonValue : path6.resolve(gitDir, commonValue);
-    } catch {
-      return gitIdentity(checkoutRoot, "unknown");
-    }
-    const commonDir = await canonicalSafeDirectory(commonCandidate);
-    if (!commonDir) return gitIdentity(checkoutRoot, "unknown");
-    const worktreesDir = path6.join(commonDir, "worktrees");
-    if (path6.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
-      return gitIdentity(checkoutRoot, "unknown");
-    }
-    const repositoryRoot = path6.dirname(commonDir);
-    const repositoryGitDir = await canonicalSafeDirectory(path6.join(repositoryRoot, ".git"));
-    if (!repositoryGitDir || repositoryGitDir !== commonDir) {
-      return gitIdentity(checkoutRoot, "unknown");
-    }
-    const reverseRead = await readSmallRegularFile(path6.join(gitDir, "gitdir"));
-    if (reverseRead.kind !== "ok" || reverseRead.value.includes("\0")) {
-      return gitIdentity(checkoutRoot, "unknown");
-    }
-    const reverseMatch = /^([^\r\n]+)\r?\n?$/.exec(reverseRead.value);
-    const reverseValue = reverseMatch?.[1];
-    if (!reverseValue) return gitIdentity(checkoutRoot, "unknown");
-    try {
-      const reverseCandidate = path6.isAbsolute(reverseValue) ? reverseValue : path6.resolve(gitDir, reverseValue);
-      const [reverseTarget, checkoutGitFile] = await Promise.all([
-        fs4.realpath(reverseCandidate),
-        fs4.realpath(gitEntry)
-      ]);
-      if (reverseTarget !== checkoutGitFile) return gitIdentity(checkoutRoot, "unknown");
-    } catch {
-      return gitIdentity(checkoutRoot, "unknown");
-    }
-    return gitIdentity(checkoutRoot, "worktree", repositoryRoot);
-  }
-  return gitIdentity(canonicalStart, "unknown");
-}
-async function findWorkspaceBinding(startDir) {
-  const direct = await walkForWorkspaceBinding(startDir);
-  const gitIdentity2 = await resolveGitWorkspaceIdentity(startDir);
-  if (gitIdentity2.state !== "worktree") return direct;
-  if (direct) {
-    const bindingRoot = await fs4.realpath(direct.workspaceRoot).catch(() => path6.resolve(direct.workspaceRoot));
-    if (containedBy(gitIdentity2.checkout_root, bindingRoot)) return direct;
-  }
-  return walkForWorkspaceBinding(gitIdentity2.repository_root);
-}
-async function writeWorkspaceBinding(workspaceRoot, binding) {
-  if (typeof binding.account_id !== "string" || binding.account_id.length === 0) {
-    throw new Error("Workspace binding account_id is required.");
-  }
-  const root = await fs4.realpath(path6.resolve(workspaceRoot));
-  const rootEntry = await fs4.stat(root);
-  if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
-  const dir = path6.join(root, WORKSPACE_DIR_NAME);
-  try {
-    const entry = await fs4.lstat(dir);
-    if (!entry.isDirectory() || entry.isSymbolicLink()) {
-      throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
-    }
-  } catch (error40) {
-    if (!isFileNotFound(error40)) throw error40;
-    await fs4.mkdir(dir, { mode: 448, recursive: true });
-    const entry = await fs4.lstat(dir);
-    if (!entry.isDirectory() || entry.isSymbolicLink()) {
-      throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
-    }
-  }
-  const file2 = path6.join(dir, WORKSPACE_BINDING_FILE);
-  try {
-    const existing = await fs4.lstat(file2);
-    if (!existing.isFile() || existing.isSymbolicLink()) {
-      throw new Error(`Refusing to replace an unsafe workspace binding at ${file2}`);
-    }
-  } catch (error40) {
-    if (!isFileNotFound(error40)) throw error40;
-  }
-  const body = JSON.stringify(
-    {
-      account_id: binding.account_id,
-      project_id: binding.project_id ?? null,
-      account_name: binding.account_name
-    },
-    null,
-    2
-  );
-  const temporary = path6.join(dir, `.config.${randomUUID2()}.tmp`);
-  let handle;
-  try {
-    handle = await fs4.open(temporary, "wx", 384);
-    await handle.writeFile(body + "\n", "utf8");
-    await handle.sync();
-    await handle.close();
-    handle = void 0;
-    await atomicRename(temporary, file2);
-    const installed = await fs4.lstat(file2);
-    if (!installed.isFile() || installed.isSymbolicLink()) {
-      throw new Error(`Workspace binding verification failed at ${file2}`);
-    }
-    await clearAllAuthRefusals();
-    return file2;
-  } finally {
-    await handle?.close().catch(() => void 0);
-    await fs4.unlink(temporary).catch(() => void 0);
-  }
-}
-async function clearWorkspaceBinding(workspaceRoot) {
-  const root = await fs4.realpath(path6.resolve(workspaceRoot));
-  const rootEntry = await fs4.stat(root);
-  if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
-  const dir = path6.join(root, WORKSPACE_DIR_NAME);
-  try {
-    const entry = await fs4.lstat(dir);
-    if (!entry.isDirectory() || entry.isSymbolicLink()) {
-      throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
-    }
-  } catch (error40) {
-    if (isFileNotFound(error40)) return false;
-    throw error40;
-  }
-  const file2 = path6.join(dir, WORKSPACE_BINDING_FILE);
-  try {
-    const entry = await fs4.lstat(file2);
-    if (!entry.isFile() || entry.isSymbolicLink()) {
-      throw new Error(`Refusing to remove an unsafe workspace binding at ${file2}`);
-    }
-    await fs4.unlink(file2);
-    await clearAllAuthRefusals();
-    return true;
-  } catch (error40) {
-    if (isFileNotFound(error40)) return false;
-    throw error40;
-  }
-}
-function isFileNotFound(error40) {
-  return typeof error40 === "object" && error40 !== null && "code" in error40 && error40.code === "ENOENT";
-}
-var WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE, GIT_POINTER_MAX_BYTES;
-var init_workspace_binding = __esm({
-  "packages/plugin-core/src/workspace-binding.ts"() {
-    "use strict";
-    init_atomic_rename();
-    init_auth_refusal();
-    WORKSPACE_DIR_NAME = ".memlin";
-    WORKSPACE_BINDING_FILE = "config.json";
-    GIT_POINTER_MAX_BYTES = 8 * 1024;
-  }
-});
-
-// packages/plugin-core/src/cli/add-project.ts
-import { execSync as execSync2 } from "node:child_process";
-import path11 from "node:path";
-import readline from "node:readline";
-
-// packages/plugin-core/src/client.ts
-import { promises as fs5 } from "node:fs";
-import path7 from "node:path";
-import os6 from "node:os";
-import { randomUUID as randomUUID3 } from "node:crypto";
-
-// packages/plugin-core/src/auth.ts
-init_atomic_rename();
-import { promises as fs3 } from "node:fs";
-import path4 from "node:path";
-import os3 from "node:os";
-import { randomUUID } from "node:crypto";
-
-// packages/plugin-core/src/backend-error.ts
-var MemlinApiError = class extends Error {
-  constructor(message, status, code) {
-    super(message);
-    this.status = status;
-    this.code = code;
-    this.name = "MemlinApiError";
-  }
-  status;
-  code;
-};
-function looksLikeHtml(text) {
-  const head = text.slice(0, 512).trimStart().toLowerCase();
-  return head.startsWith("<!doctype html") || head.startsWith("<html") || head.includes("<html") || head.startsWith("<") && /<\/(head|body|title|div|p)>/i.test(text);
-}
-function singleLine(text, max = 200) {
-  const collapsed = text.replace(/\s+/g, " ").trim();
-  return collapsed.length <= max ? collapsed : `${collapsed.slice(0, max - 1)}\u2026`;
-}
-function describeOpaqueBody(status, text) {
-  const trimmed = text.trim();
-  if (!trimmed) return `HTTP ${status}`;
-  if (looksLikeHtml(trimmed)) {
-    const via = /cloudflare/i.test(trimmed) ? "Cloudflare " : "";
-    return `HTTP ${status} (${via}HTML error page suppressed, ${trimmed.length} chars)`;
-  }
-  return `HTTP ${status}: ${singleLine(trimmed)}`;
-}
-
-// packages/plugin-core/src/auth.ts
-init_auth_refusal();
-var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
-var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
-var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
-var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
-var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
-function persistedTokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path4.join(os3.homedir(), ".config", "memlin", "token.json");
-}
-var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
-var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
-var AUTH_FILE_LOCK_RETRY_MS = 50;
-function authFileLockPath() {
-  return `${persistedTokenFilePath()}.auth.lock`;
-}
-async function acquireAuthFileLock() {
-  const file2 = authFileLockPath();
-  const owner = `${process.pid}:${randomUUID()}`;
-  await fs3.mkdir(path4.dirname(file2), { recursive: true });
-  const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
-  while (true) {
-    try {
-      const handle = await fs3.open(file2, "wx", 384);
-      try {
-        await handle.writeFile(owner, "utf8");
-        await handle.sync();
-      } catch (error40) {
-        await handle.close().catch(() => {
-        });
-        await fs3.rm(file2, { force: true }).catch(() => {
-        });
-        throw error40;
-      }
-      let released = false;
-      return async () => {
-        if (released) return;
-        released = true;
-        await handle.close().catch(() => {
-        });
-        const currentOwner = await fs3.readFile(file2, "utf8").catch(() => null);
-        if (currentOwner === owner) await fs3.rm(file2, { force: true }).catch(() => {
-        });
-      };
-    } catch (error40) {
-      if (error40.code !== "EEXIST") throw error40;
-      try {
-        const stat = await fs3.stat(file2);
-        if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
-          await fs3.rm(file2, { force: true });
-          continue;
-        }
-      } catch (statError) {
-        if (statError.code === "ENOENT") continue;
-        throw statError;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error("another Memlin sign-in or token refresh is still being saved");
-      }
-      await new Promise((resolve) => setTimeout(resolve, AUTH_FILE_LOCK_RETRY_MS));
-    }
-  }
-}
-async function withAuthFileLock(operation) {
-  const release = await acquireAuthFileLock();
-  try {
-    return await operation();
-  } finally {
-    await release();
-  }
-}
-async function readPersistedToken() {
-  try {
-    const raw = await fs3.readFile(persistedTokenFilePath(), "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-async function writePersistedToken(t) {
-  const file2 = persistedTokenFilePath();
-  await fs3.mkdir(path4.dirname(file2), { recursive: true });
-  const tmp = path4.join(
-    path4.dirname(file2),
-    `${path4.basename(file2)}.tmp-${process.pid}-${randomUUID()}`
-  );
-  const previous = await readPersistedToken().catch(() => null);
-  await fs3.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
-  await fs3.chmod(tmp, 384).catch(() => {
-  });
-  await atomicRename(tmp, file2);
-  await clearRefusalsIfAccountsChanged(previous?.access_token ?? null, t.access_token);
-}
-async function clearRefusalsIfAccountsChanged(before, after) {
-  try {
-    const claimIds = (jwt2) => {
-      if (!jwt2) return void 0;
-      try {
-        return decodeJwtPayload(jwt2).memlin_account_ids;
-      } catch {
-        return void 0;
-      }
-    };
-    if (accountIdsChanged(claimIds(before), claimIds(after))) {
-      await clearAllAuthRefusals();
-    }
-  } catch {
-  }
-}
-async function refreshAccessToken(refreshToken, options2 = {}) {
-  requireClientId();
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: refreshToken,
-    client_id: AUTH0_CLIENT_ID
-  });
-  const res = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-    signal: AbortSignal.timeout(Math.max(1, options2.timeoutMs ?? 15e3))
-  });
-  if (!res.ok) {
-    throw new Error(`refresh: ${describeOpaqueBody(res.status, await res.text())}`);
-  }
-  const json2 = await res.json();
-  return toPersisted(json2, refreshToken);
-}
-var refreshInFlight = null;
-var DEFAULT_FRESHNESS_MARGIN_MS = 6e4;
-async function getValidAccessToken() {
-  return ensureFreshToken(DEFAULT_FRESHNESS_MARGIN_MS);
-}
-async function ensureFreshToken(marginMs = DEFAULT_FRESHNESS_MARGIN_MS, options2 = {}) {
-  const persisted = await readPersistedToken();
-  if (!persisted) throw new Error("not signed in \u2014 run `memlin login`");
-  if (Date.now() < persisted.expires_at - marginMs) return persisted.access_token;
-  if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = doRefresh(persisted, marginMs, options2).finally(() => {
-    refreshInFlight = null;
-  });
-  return refreshInFlight;
-}
-async function doRefresh(stale, marginMs, options2) {
-  const latest = await readPersistedToken();
-  if (latest && Date.now() < latest.expires_at - marginMs) return latest.access_token;
-  try {
-    const { companionGetToken: companionGetToken2 } = await Promise.resolve().then(() => (init_companion_client(), companion_client_exports));
-    const fromDaemon = await companionGetToken2();
-    if (fromDaemon && Date.now() < fromDaemon.expires_at - marginMs) {
-      return fromDaemon.access_token;
-    }
-  } catch {
-  }
-  const refreshSource = latest ?? stale;
-  const refreshToken = refreshSource.refresh_token;
-  if (!refreshToken) {
-    throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
-  }
-  try {
-    const fresh = await refreshAccessToken(refreshToken, options2);
-    return await withAuthFileLock(async () => {
-      const beforeWrite = await readPersistedToken();
-      if (!beforeWrite || beforeWrite.access_token !== refreshSource.access_token) {
-        if (beforeWrite && Date.now() < beforeWrite.expires_at - marginMs) {
-          return beforeWrite.access_token;
-        }
-        throw new Error("saved Memlin credentials changed while the token was refreshing");
-      }
-      await writePersistedToken(fresh);
-      return fresh.access_token;
-    });
-  } catch (err) {
-    const after = await readPersistedToken();
-    if (after && after.access_token !== refreshSource.access_token && Date.now() < after.expires_at - 6e4) {
-      return after.access_token;
-    }
-    throw new Error(
-      `access token refresh failed (${err instanceof Error ? err.message : String(err)}) \u2014 run \`memlin login\``
-    );
-  }
-}
-function toPersisted(json2, fallbackRefresh) {
-  return {
-    access_token: json2.access_token,
-    refresh_token: json2.refresh_token ?? fallbackRefresh,
-    expires_at: Date.now() + json2.expires_in * 1e3
-  };
-}
-function requireClientId() {
-  if (!AUTH0_CLIENT_ID) {
-    throw new Error(
-      "Auth0 client id not configured. Set MEMLIN_AUTH0_CLIENT_ID env var (and optionally MEMLIN_AUTH0_DOMAIN / MEMLIN_AUTH0_AUDIENCE for self-hosted setups)."
-    );
-  }
-}
-function decodeJwtPayload(jwt2) {
-  const parts = jwt2.split(".");
-  if (parts.length !== 3) throw new Error("not a JWT");
-  return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-}
-
-// packages/plugin-core/src/client.ts
-init_atomic_rename();
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
@@ -4952,8 +3998,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path, errorMaps, issueData } = params;
+  const fullPath = [...path, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5069,11 +4115,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path;
     this._key = key;
   }
   get path() {
@@ -9225,28 +8271,6 @@ var LIGHT_HOSTS = [
   "windsurf",
   "devin"
 ];
-function boundLightText(text, byteLimit) {
-  const encoder2 = new TextEncoder();
-  const bytes = encoder2.encode(text);
-  return bytes.length <= byteLimit ? text : new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, byteLimit)).replace(/\uFFFD$/, "");
-}
-function redactLightTranscript(text) {
-  return text.replace(
-    /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
-    "[private key removed]"
-  ).replace(
-    /\b(?:sk-[\w-]{12,}|gh[pousr]_[\w]{16,}|github_pat_[\w]{16,}|AKIA[A-Z0-9]{16})\b/g,
-    "[credential removed]"
-  ).replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[token removed]").replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]+=*/gi, "$1[removed]").replace(
-    /((?:password|secret|api[_-]?key|access[_-]?token)["']?\s*[=:]\s*)[^\s,;]+/gi,
-    "$1[removed]"
-  );
-}
-function lightCaptureExcluded(text, paths = []) {
-  return /(?:^|[\s/\\"'`])(?:\.env(?:\.[\w-]+)?|id_rsa|id_ed25519|credentials\.json)(?=$|[\s/\\"'`:])/m.test(
-    text
-  ) || paths.some((p) => p.length > 0 && text.includes(p));
-}
 
 // packages/shared/dist/skill-inventory.js
 var AGENTS_HOSTS = ["codex", "cursor", "windsurf", "copilot", "gemini_cli"];
@@ -9601,19 +8625,19 @@ var ContextManifestV1Schema = external_exports.object({
       location: `linked_contexts.${index}`
     }))
   ];
-  references.forEach(({ ref, path: path12, location }) => {
+  references.forEach(({ ref, path, location }) => {
     const identity = contextReferenceIdentityKey(ref);
     const prior = seen.get(identity);
     if (prior && prior.revision !== ref.revision) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path12,
+        path,
         message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
       });
     } else if (prior && location.startsWith("linked_contexts.")) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path12,
+        path,
         message: `duplicate linked context ${identity}`
       });
     }
@@ -9927,11 +8951,11 @@ var ContextBundleV1Schema = external_exports.object({
         path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
       }))
     ];
-    for (const { ref, path: path12 } of references) {
+    for (const { ref, path } of references) {
       if (!contextKeys.has(contextReferenceKey(ref))) {
         ctx.addIssue({
           code: external_exports.ZodIssueCode.custom,
-          path: path12,
+          path,
           message: "provider coverage is outside the exact manifest contexts"
         });
       }
@@ -12084,8 +11108,185 @@ var ExperienceHarnessRunControlV2Schema = external_exports.discriminatedUnion("a
 // packages/shared/dist/light-provenance.js
 var HOSTS = new Set(LIGHT_HOSTS);
 
+// packages/shared/dist/memory-decisions.js
+var DECISION_KINDS = {
+  replace: {
+    id: "replace",
+    label: "Replace live memory",
+    raisedWhen: "A new capture would retire or rewrite a live doc that governs agents: a decision, a correction, a verified directive, or anything a person wrote.",
+    whyHuman: "Agents follow the existing doc today. Replacing it changes what every agent is told, and the evidence alone cannot say the new version is right.",
+    options: [
+      {
+        id: "replace",
+        label: "Replace",
+        consequence: "The new capture goes live and the existing doc is retired.",
+        reversible: true
+      },
+      {
+        id: "keep_both",
+        label: "Keep both",
+        consequence: "Both stay live. Agents may be given both.",
+        reversible: true
+      },
+      {
+        id: "keep_existing",
+        label: "Keep existing",
+        consequence: "Nothing changes for agents. The new capture stays searchable only.",
+        reversible: true
+      }
+    ],
+    defaultOption: "keep_existing",
+    deadlineDays: 7,
+    urgent: true,
+    aiExplanation: true
+  },
+  conflict: {
+    id: "conflict",
+    label: "Two live docs disagree",
+    raisedWhen: "Two live docs contradict, at least one was served to agents in the last 30 days, and at least one is a decision or was written by a person.",
+    whyHuman: "Agents are being given both answers. Which one is current is a judgement about your project that neither doc settles.",
+    options: [
+      {
+        id: "a_wins",
+        label: "First is current",
+        consequence: "The first doc stays live and the second is retired.",
+        reversible: true
+      },
+      {
+        id: "b_wins",
+        label: "Second is current",
+        consequence: "The second doc stays live and the first is retired.",
+        reversible: true
+      },
+      {
+        id: "both_valid",
+        label: "Both are valid",
+        consequence: "Both stay live; the pair is marked as not a conflict and is not raised again.",
+        reversible: true
+      }
+    ],
+    defaultOption: "both_valid",
+    deadlineDays: 14,
+    urgent: false,
+    aiExplanation: true
+  },
+  sensitive: {
+    id: "sensitive",
+    label: "Sensitive content",
+    raisedWhen: "A capture matches a sensitive topic: compensation, HR, personal data or banking.",
+    whyHuman: "Whether this should be remembered, and who may see it, is not something automation should decide.",
+    options: [
+      {
+        id: "keep",
+        label: "Keep for the team",
+        consequence: "It goes live at its captured scope.",
+        reversible: true
+      },
+      {
+        id: "private",
+        label: "Keep private to me",
+        consequence: "It goes live, visible only to you.",
+        reversible: true
+      },
+      {
+        id: "discard",
+        label: "Discard",
+        consequence: "It is removed and will not be captured again.",
+        reversible: true
+      }
+    ],
+    defaultOption: "discard",
+    deadlineDays: 7,
+    urgent: true,
+    aiExplanation: false
+  },
+  runbook: {
+    id: "runbook",
+    label: "Incident runbook",
+    raisedWhen: "A session that handled an incident produced a runbook.",
+    whyHuman: "A runbook steers future incident response. You were there; you know whether it is what should happen next time.",
+    options: [
+      {
+        id: "keep_live",
+        label: "Keep live",
+        consequence: "Agents are given it for similar incidents.",
+        reversible: true
+      },
+      {
+        id: "searchable_only",
+        label: "Searchable only",
+        consequence: "It is kept and findable, but not given to agents unprompted.",
+        reversible: true
+      },
+      {
+        id: "discard",
+        label: "Discard",
+        consequence: "It is removed.",
+        reversible: true
+      }
+    ],
+    defaultOption: "searchable_only",
+    deadlineDays: 7,
+    urgent: false,
+    aiExplanation: true
+  },
+  goal: {
+    id: "goal",
+    label: "Goal approval",
+    raisedWhen: "A goal was proposed and needs approval before agents work toward it.",
+    whyHuman: "Goals direct what agents optimise for. Only a person can commit the team to one.",
+    options: [
+      {
+        id: "approve",
+        label: "Approve",
+        consequence: "Agents are given the goal.",
+        reversible: true
+      },
+      {
+        id: "not_now",
+        label: "Not now",
+        consequence: "It stays a draft that agents are not given.",
+        reversible: true
+      },
+      {
+        id: "reject",
+        label: "Reject",
+        consequence: "It is closed.",
+        reversible: true
+      }
+    ],
+    defaultOption: "not_now",
+    deadlineDays: 14,
+    urgent: false,
+    aiExplanation: true
+  }
+};
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function labelDecisionOptionIds(kind, text) {
+  const spec = DECISION_KINDS[kind];
+  if (!spec || !text) return text;
+  let out = text;
+  const options2 = [...spec.options].sort((a, b) => b.id.length - a.id.length);
+  for (const o of options2) {
+    const id = escapeRegExp(o.id);
+    const bare = o.id.includes("_") ? `|(?<![\\w-])${id}(?![\\w-])` : "";
+    out = out.replace(new RegExp(`\`${id}\`${bare}`, "gi"), o.label);
+  }
+  return out;
+}
+
 // packages/shared/dist/decision-prompt.js
 var encoder = new TextEncoder();
+function describeDeadline(deadlineAt, nowMs = Date.now()) {
+  const t = Date.parse(deadlineAt);
+  if (!Number.isFinite(t)) return "at its deadline";
+  const date5 = new Date(t).toISOString().slice(0, 10);
+  const days = Math.ceil((t - nowMs) / 864e5);
+  if (days <= 0) return `on ${date5} (due now)`;
+  return `on ${date5} (in ${days} day${days === 1 ? "" : "s"})`;
+}
 
 // packages/shared/dist/thought-handoff-v2.js
 var ThoughtHandoffRequestV2Schema = external_exports.object({
@@ -12805,10 +12006,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path12) {
-  if (!path12)
+function getElementAtPath(obj, path) {
+  if (!path)
     return obj;
-  return path12.reduce((acc, key) => acc?.[key], obj);
+  return path.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -13128,11 +12329,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path12, issues) {
+function prefixIssues(path, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path12);
+    iss.path.unshift(path);
     return iss;
   });
 }
@@ -13269,7 +12470,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path12 = []) => {
+  const processError = (error41, path = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -13279,7 +12480,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -13309,9 +12510,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path12) {
+function toDotPath(path) {
   const segs = [];
-  for (const seg of path12) {
+  for (const seg of path) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -23969,10 +23170,10 @@ function validateFlowDefinitionSemantics(flow) {
       ],
       ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
     ];
-    targets.forEach(({ target, path: path12 }) => {
+    targets.forEach(({ target, path }) => {
       if (!isReservedTarget(target) && !stageById.has(target)) {
         issues.push({
-          path: path12,
+          path,
           code: "missing_transition_target",
           message: `transition target ${JSON.stringify(target)} does not exist`
         });
@@ -24002,7 +23203,7 @@ function validateFlowDefinitionSemantics(flow) {
   const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   let hasReachableEnd = false;
-  const visit = (stageId, path12, pathBounds) => {
+  const visit = (stageId, path, pathBounds) => {
     reachable.add(stageId);
     if (visited.has(stageId)) return;
     visiting.add(stageId);
@@ -24018,7 +23219,7 @@ function validateFlowDefinitionSemantics(flow) {
         ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
         ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
       ];
-      const currentPath = [...path12, stageId];
+      const currentPath = [...path, stageId];
       for (const edge of edges) {
         const { target } = edge;
         if (target === "$end") {
@@ -24126,18 +23327,18 @@ var FlowPackManifestBaseSchema = external_exports2.object({
   evals: external_exports2.array(ManifestEvalSchema).max(256),
   model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
 }).strict();
-function validateRelativePackPath(path12) {
-  if (path12.startsWith("/") || path12.startsWith("\\")) return "path must be relative";
-  if (/^[A-Za-z]:/.test(path12) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path12)) {
+function validateRelativePackPath(path) {
+  if (path.startsWith("/") || path.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path)) {
     return "drive-qualified paths and URI schemes are not allowed";
   }
-  if (/[\u0000-\u001f\u007f]/.test(path12)) return "control characters are not allowed";
-  if (/%(?:2e|2f|5c)/i.test(path12)) return "encoded path traversal is not allowed";
-  if (path12.includes("\\")) return "path must use forward slashes";
-  if (path12.split("/").some((segment) => segment === ".." || segment === ".")) {
+  if (/[\u0000-\u001f\u007f]/.test(path)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path)) return "encoded path traversal is not allowed";
+  if (path.includes("\\")) return "path must use forward slashes";
+  if (path.split("/").some((segment) => segment === ".." || segment === ".")) {
     return "path traversal and dot segments are not allowed";
   }
-  if (path12.split("/").some((segment) => segment.length === 0)) {
+  if (path.split("/").some((segment) => segment.length === 0)) {
     return "path cannot contain empty segments";
   }
   return null;
@@ -24184,22 +23385,22 @@ function validateFlowPackManifestSemantics(manifest) {
       issues
     );
     role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
-      const path12 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      const path = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
       if (comparedRole === role.id) {
         issues.push({
-          path: path12,
+          path,
           code: "self_referential_model_independence",
           message: "a model role cannot require independence from itself"
         });
       } else if (!modelRolesById.has(comparedRole)) {
         issues.push({
-          path: path12,
+          path,
           code: "missing_independence_model_role",
           message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
         });
       } else if (modelRolesById.get(comparedRole)?.independence !== null) {
         issues.push({
-          path: path12,
+          path,
           code: "independence_reference_not_author",
           message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
         });
@@ -24278,2031 +23479,117 @@ var FlowPackManifestSchema = FlowPackManifestBaseSchema.superRefine((value, ctx)
   }
 });
 
+// packages/shared/dist/needs-you-groups.js
+function needsYouDecisionsPhrase(counts) {
+  const { open, needsYou } = counts;
+  if (needsYou === null) {
+    return open > 0 ? `${open} open decision${open === 1 ? "" : "s"}` : "";
+  }
+  if (needsYou === 0 && open === 0) return "";
+  const head = `${needsYou} decision${needsYou === 1 ? "" : "s"} need${needsYou === 1 ? "s" : ""} you`;
+  return open !== needsYou ? `${head} (${open} open question${open === 1 ? "" : "s"})` : head;
+}
+
 // packages/shared/dist/needs-you-engine.js
 var NEEDS_YOU_HORIZON_DAYS = 14;
 var HORIZON_MS = NEEDS_YOU_HORIZON_DAYS * 24 * 60 * 60 * 1e3;
 var STALLED_GOAL_AGE_MS = 30 * 24 * 60 * 60 * 1e3;
 
-// packages/plugin-core/src/memlin-api-client.ts
-init_auth_refusal();
-import { readFileSync } from "node:fs";
-import crypto3 from "node:crypto";
-import os5 from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-// packages/plugin-core/src/runtime-shared.ts
-var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
-var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
-var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
-var AGENT_CAPABILITIES_HEADER = "Memlin-Agent-Capabilities";
-var AGENT_PLATFORM_HEADER = "Memlin-Agent-Platform";
-var AGENT_ARCHITECTURE_HEADER = "Memlin-Agent-Architecture";
-var AGENT_EXPECTED_CAPABILITIES = {
-  "claude-code": ["cli", "commands", "hooks", "sync", "scribe", "resolve"],
-  cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
-  codex: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
-  windsurf: ["mcp", "cli", "hooks", "rules", "scribe", "resolve"],
-  // VS Code (apps/vscode-extension): MCP + CLI + copilot-instructions; plain
-  // VS Code has no lifecycle-hook or slash-command surface.
-  vscode: ["mcp", "cli", "rules", "resolve"],
-  gemini: ["mcp", "rules", "resolve"],
-  grok: ["mcp", "rules", "resolve"],
-  hermes: ["mcp", "resolve"],
-  openclaw: ["mcp", "rules", "resolve"],
-  antigravity: ["mcp", "cli", "hooks", "commands", "rules", "sync", "scribe", "resolve"],
-  mcp: ["mcp", "resolve"],
-  "claude-ai": ["mcp", "resolve"],
-  // Companion daemon (apps/companion): background token keeper + realtime
-  // plan sync + local IPC socket other agents delegate to. No hooks/commands
-  // of its own.
-  companion: ["cli", "sync", "realtime", "resolve"]
-};
-var PROVIDER_HOSTS = [
-  "github.com",
-  "gitlab.com",
-  "bitbucket.org",
-  "dev.azure.com",
-  "ssh.dev.azure.com",
-  "codeberg.org",
-  "sr.ht",
-  "git.sr.ht"
-];
-function normalizeGitRemote(raw) {
-  if (!raw) return null;
-  let s = raw.trim();
-  if (!s) return null;
-  if (!s.includes("://")) {
-    s = s.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
-  }
-  s = s.replace(/^(?:ssh|git|https?):\/\//, "");
-  s = s.replace(/^[^/@]+@/, "");
-  s = s.replace(/\.git$/, "");
-  s = s.replace(/\/$/, "");
-  const slash = s.indexOf("/");
-  if (slash > 0) {
-    const host = s.slice(0, slash).toLowerCase();
-    const rest = s.slice(slash);
-    s = host + rest;
-    for (const provider of PROVIDER_HOSTS) {
-      if (host === provider) break;
-      if (host.startsWith(provider + "-")) {
-        s = provider + rest;
-        break;
-      }
-    }
-  }
-  return s || null;
+// packages/plugin-core/src/cli/decisions-view.ts
+var NO_OPEN_DECISIONS = "No open decisions \u2014 Memlin has nothing it needs you to decide.\n";
+function label(d, id) {
+  return d.options.find((o) => o.id === id)?.label ?? id ?? "";
 }
-async function closeHttpSockets() {
-  try {
-    const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
-    if (dispatcher && typeof dispatcher.close === "function") {
-      let timer;
-      await Promise.race([
-        dispatcher.close(),
-        new Promise((resolve) => {
-          timer = setTimeout(resolve, 250);
-          timer.unref?.();
-        })
-      ]).finally(() => {
-        if (timer !== void 0) clearTimeout(timer);
-      });
-    }
-  } catch {
-  }
+function labelWithId(d, id) {
+  const l = label(d, id);
+  return l && l !== id ? `${l} (${id})` : id;
 }
-
-// packages/plugin-core/src/host.ts
-import os4 from "node:os";
-import path5 from "node:path";
-var BaseHost = class {
-  constructor(kind, home) {
-    this.kind = kind;
-    this.home = home;
-  }
-  kind;
-  home;
-  homeDir() {
-    return this.home;
-  }
-  plansDir() {
-    return path5.join(this.home, "plans");
-  }
-};
-var ClaudeCodeHost = class extends BaseHost {
-  constructor() {
-    super("claude-code", path5.join(os4.homedir(), ".claude"));
-  }
-};
-var CursorHost = class extends BaseHost {
-  constructor() {
-    super("cursor", path5.join(os4.homedir(), ".config", "memlin"));
-  }
-};
-var CodexHost = class extends BaseHost {
-  constructor() {
-    super("codex", path5.join(os4.homedir(), ".config", "memlin"));
-  }
-};
-var WindsurfHost = class extends BaseHost {
-  constructor() {
-    super("windsurf", path5.join(os4.homedir(), ".config", "memlin"));
-  }
-};
-var AntigravityHost = class extends BaseHost {
-  constructor() {
-    super("antigravity", path5.join(os4.homedir(), ".config", "memlin"));
-  }
-};
-var VSCodeHost = class extends BaseHost {
-  constructor() {
-    super("vscode", path5.join(os4.homedir(), ".config", "memlin"));
-  }
-};
-var CompanionHost = class extends BaseHost {
-  constructor() {
-    super("companion", path5.join(os4.homedir(), ".config", "memlin"));
-  }
-};
-var HOSTS2 = {
-  "claude-code": () => new ClaudeCodeHost(),
-  cursor: () => new CursorHost(),
-  codex: () => new CodexHost(),
-  windsurf: () => new WindsurfHost(),
-  antigravity: () => new AntigravityHost(),
-  vscode: () => new VSCodeHost(),
-  companion: () => new CompanionHost()
-};
-function resolveHost() {
-  const envHost = "windsurf";
-  const make = HOSTS2[envHost];
-  return (make ?? HOSTS2["claude-code"])();
+function prose(d, text) {
+  return labelDecisionOptionIds(d.kind, text);
 }
-
-// packages/plugin-core/src/memlin-api-client.ts
-var DEFAULT_API_URL = "https://memlin.ai/api/v1";
-function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os5.hostname() || "unknown";
+function formatDecisionStatusLine(counts) {
+  const phrase = needsYouDecisionsPhrase(counts);
+  return phrase ? `${phrase} \u2014 memlin decisions` : "none";
 }
-var cachedAgentVersion = null;
-function agentVersion() {
-  if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.46";
-  return cachedAgentVersion;
-}
-function agentCapabilities() {
-  return AGENT_EXPECTED_CAPABILITIES[resolveHost().kind] ?? ["api", "resolve"];
-}
-var DEFAULT_REQUEST_TIMEOUT_MS = 15e3;
-var DEFAULT_MAX_RETRIES = 2;
-var DEFAULT_RETRY_BASE_DELAY_MS = 250;
-var NATIVE_MEMORY_BATCH_SIZE = 20;
-var NATIVE_MEMORY_BATCH_CONCURRENCY = 3;
-var NATIVE_MEMORY_REQUEST_TIMEOUT_MS = 9e4;
-var NATIVE_MEMORY_BATCH_INDEX = "# Native memory satellite batch\n";
-var RESOLVE_V2_MAX_LINE_BYTES = 2 * 1024 * 1024;
-var RETRIABLE_STATUS = /* @__PURE__ */ new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524]);
-var RETRIABLE_NETWORK_CODES = /* @__PURE__ */ new Set([
-  "ECONNRESET",
-  "ECONNREFUSED",
-  "ECONNABORTED",
-  "ETIMEDOUT",
-  "EPIPE",
-  "EHOSTUNREACH",
-  "ENETUNREACH",
-  "EAI_AGAIN",
-  "UND_ERR_CONNECT_TIMEOUT",
-  "UND_ERR_HEADERS_TIMEOUT",
-  "UND_ERR_BODY_TIMEOUT",
-  "UND_ERR_SOCKET"
-]);
-function isRetriableNetworkError(error40) {
-  if (error40 instanceof Error && (error40.name === "TimeoutError" || error40.name === "AbortError")) {
-    return true;
-  }
-  let current = error40;
-  for (let depth = 0; current instanceof Error && depth < 5; depth++) {
-    const code = current.code;
-    if (code && RETRIABLE_NETWORK_CODES.has(code)) return true;
-    current = current.cause;
-  }
-  return false;
-}
-function unreachableError(url2, cause, timeoutMs) {
-  let host = url2;
-  try {
-    host = new URL(url2).host;
-  } catch {
-  }
-  if (cause instanceof Error && (cause.name === "TimeoutError" || cause.name === "AbortError")) {
-    return new Error(
-      `Memlin at ${host} took longer than ${Math.ceil(timeoutMs / 1e3)} seconds to respond. The request was stopped; try again.`,
-      { cause }
-    );
-  }
-  return new Error(
-    `Couldn't reach Memlin at ${host}. Check your internet connection and try again.`,
-    { cause }
-  );
-}
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-function delayWithSignal(ms, signal) {
-  if (!signal) return delay(ms);
-  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("request aborted"));
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(done, ms);
-    function done() {
-      signal?.removeEventListener("abort", aborted2);
-      resolve();
-    }
-    function aborted2() {
-      clearTimeout(timer);
-      reject(signal?.reason ?? new Error("request aborted"));
-    }
-    signal.addEventListener("abort", aborted2, { once: true });
-  });
-}
-function resolveV2Event(value) {
-  if (!value || typeof value !== "object") {
-    throw new Error("Memlin progressive resolver returned a non-object event");
-  }
-  const candidate = value;
-  if (candidate.type !== "hot" && candidate.type !== "full" && candidate.type !== "failed" || typeof candidate.resolve_id !== "string" || typeof candidate.turn_id !== "string" || typeof candidate.trace_id !== "string" || typeof candidate.account_id !== "string" || candidate.project_id !== null && typeof candidate.project_id !== "string" || !candidate.timing || typeof candidate.timing.total_ms !== "number" || !candidate.metrics || typeof candidate.metrics.db_calls !== "number") {
-    throw new Error("Memlin progressive resolver returned a malformed event");
-  }
-  if ((candidate.type === "hot" || candidate.type === "full") && !candidate.payload) {
-    throw new Error(`Memlin progressive resolver returned ${candidate.type} without a payload`);
-  }
-  if (candidate.type === "failed" && !candidate.error) {
-    throw new Error("Memlin progressive resolver returned failed without an error receipt");
-  }
-  return candidate;
-}
-async function* parseNdjsonEvents(body) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    for (; ; ) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      for (; ; ) {
-        const newline = buffer.indexOf("\n");
-        if (newline < 0) break;
-        const rawLine = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        if (Buffer.byteLength(rawLine) > RESOLVE_V2_MAX_LINE_BYTES) {
-          throw new Error("Memlin progressive resolver returned an oversized event");
-        }
-        const line = rawLine.trim();
-        if (!line) continue;
-        let parsed;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          throw new Error("Memlin progressive resolver returned invalid NDJSON");
-        }
-        yield resolveV2Event(parsed);
-      }
-      if (Buffer.byteLength(buffer) > RESOLVE_V2_MAX_LINE_BYTES) {
-        throw new Error("Memlin progressive resolver returned an oversized event");
-      }
-    }
-    buffer += decoder.decode();
-    if (Buffer.byteLength(buffer) > RESOLVE_V2_MAX_LINE_BYTES) {
-      throw new Error("Memlin progressive resolver returned an oversized event");
-    }
-    const tail = buffer.trim();
-    if (tail) {
-      let parsed;
-      try {
-        parsed = JSON.parse(tail);
-      } catch {
-        throw new Error("Memlin progressive resolver returned invalid NDJSON");
-      }
-      yield resolveV2Event(parsed);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-var MemlinApiClient = class {
-  constructor(cfg) {
-    this.cfg = cfg;
-  }
-  cfg;
-  /** The configured account (the light-gate cache key when a call names none). */
-  get defaultAccountId() {
-    return this.cfg.accountId;
-  }
-  // ---------- low-level ----------
-  async authHeaders(includeAccount = true, override = {}) {
-    const token = await this.cfg.getAccessToken();
-    const kind = override.agentKind ?? resolveHost().kind;
-    const version2 = override.agentKind === void 0 ? agentVersion() : override.agentVersion ?? "dev";
-    const h = {
-      Authorization: `Bearer ${token}`,
-      [AGENT_KIND_HEADER]: kind,
-      [AGENT_DEVICE_HEADER]: agentDevice(),
-      [AGENT_VERSION_HEADER]: version2,
-      [AGENT_CAPABILITIES_HEADER]: (override.agentKind ? AGENT_EXPECTED_CAPABILITIES[kind] : agentCapabilities()).join(","),
-      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os5.platform(),
-      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os5.arch()
-    };
-    if (includeAccount && this.cfg.accountId) {
-      h["Memlin-Account-Id"] = this.cfg.accountId;
-    }
-    return h;
-  }
-  async request(method, pathAndQuery, body, opts = {}) {
-    const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
-    const refusalAccountId = this.refusalAccountId(opts.includeAccount ?? true, opts.accountId);
-    await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
-    const baseHeaders = await this.authHeaders(opts.includeAccount ?? true, opts);
-    if (opts.accountId) {
-      baseHeaders["Memlin-Account-Id"] = opts.accountId;
-    }
-    const headers = {
-      ...baseHeaders,
-      Accept: "application/json"
-    };
-    if (body !== void 0) headers["Content-Type"] = "application/json";
-    const idempotent = method === "GET";
-    const maxAttempts = idempotent ? Math.max(0, opts.maxRetries ?? this.cfg.maxRetries ?? DEFAULT_MAX_RETRIES) + 1 : 1;
-    const timeoutMs = Math.max(
-      1,
-      opts.requestTimeoutMs ?? this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
-    );
-    for (let attempt = 1; ; attempt++) {
-      let res;
-      let text;
-      try {
-        const timeoutSignal = AbortSignal.timeout(timeoutMs);
-        res = await fetch(url2, {
-          method,
-          headers,
-          // A dead socket must abort rather than hang the caller forever.
-          signal: opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal,
-          ...body !== void 0 ? { body: JSON.stringify(body) } : {}
-        });
-        text = await res.text();
-      } catch (error40) {
-        if (attempt < maxAttempts && isRetriableNetworkError(error40)) {
-          await delay(this.backoffMs(attempt));
-          continue;
-        }
-        throw unreachableError(url2, error40, timeoutMs);
-      }
-      if (idempotent && attempt < maxAttempts && RETRIABLE_STATUS.has(res.status)) {
-        await delay(this.backoffMs(attempt));
-        continue;
-      }
-      let parsed = null;
-      if (text) {
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-        }
-      }
-      const refusalCode = await this.noteAuthOutcome(res.status, parsed, refusalAccountId);
-      if (!res.ok) {
-        const serverError = parsed?.error;
-        const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
-        throw new MemlinApiError(
-          `${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`,
-          res.status,
-          refusalCode
-        );
-      }
-      return parsed;
-    }
-  }
-  backoffMs(attempt) {
-    const base = this.cfg.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
-    return base * 2 ** (attempt - 1);
-  }
-  /** Accounts whose refusals this client already cleared after a 2xx. */
-  refusalCleared = /* @__PURE__ */ new Set();
-  /** The account a request is scoped to (the Memlin-Account-Id it sends). */
-  refusalAccountId(includeAccount, override) {
-    if (override) return override;
-    return includeAccount && this.cfg.accountId ? this.cfg.accountId : null;
-  }
-  /** Zero-network short circuit while a membership refusal is fresh. */
-  async throwIfAuthRefused(method, pathAndQuery, accountId) {
-    if (!this.cfg.authRefusal || !accountId) return;
-    const entry = await readAuthRefusal(accountId, this.cfg.authRefusal.binding);
-    if (!entry) return;
-    throw new MemlinApiError(
-      `${method} ${pathAndQuery} \u2192 403: ${AUTH_REFUSAL_MESSAGES[entry.reason]} (recently refused; not retried \u2014 run /memlin-link or /memlin-login)`,
-      403,
-      entry.reason
-    );
-  }
-  /**
-   * Keep the refusal cache in step with what the server said: any 2xx for an
-   * account clears its refusals (every binding); a not_member / no_profile
-   * 403 records one. Returns the refusal code, if any. Never throws.
-   */
-  async noteAuthOutcome(status, body, accountId) {
-    if (!accountId) return void 0;
-    if (status >= 200 && status < 300) {
-      if (!this.refusalCleared.has(accountId)) {
-        this.refusalCleared.add(accountId);
-        await clearAuthRefusalsForAccount(accountId);
-      }
-      return void 0;
-    }
-    const reason = classifyAuthRefusal(status, body);
-    if (!reason) return void 0;
-    if (this.cfg.authRefusal) {
-      this.refusalCleared.delete(accountId);
-      await recordAuthRefusal({
-        accountId,
-        binding: this.cfg.authRefusal.binding,
-        reason,
-        accountName: accountId === this.cfg.accountId ? this.cfg.authRefusal.accountName ?? null : null
-      }).catch(() => {
-      });
-    }
-    return reason;
-  }
-  async openResolveV2Stream(method, pathAndQuery, body, opts = {}) {
-    const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
-    const refusalAccountId = this.refusalAccountId(true, opts.accountId);
-    await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
-    const headers = await this.authHeaders(true, opts);
-    if (opts.accountId) headers["Memlin-Account-Id"] = opts.accountId;
-    headers.Accept = "application/x-ndjson";
-    if (body !== void 0) headers["Content-Type"] = "application/json";
-    if (opts.traceId) {
-      const normalized = opts.traceId.replaceAll("-", "").toLowerCase();
-      const traceId = /^[0-9a-f]{32}$/.test(normalized) ? normalized : crypto3.createHash("sha256").update(opts.traceId).digest("hex").slice(0, 32);
-      headers.traceparent = `00-${traceId}-${crypto3.randomBytes(8).toString("hex")}-01`;
-    }
-    const timeoutMs = Math.max(
-      1,
-      opts.requestTimeoutMs ?? this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
-    );
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    const signal = opts.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal;
-    let response;
-    try {
-      response = await fetch(url2, {
-        method,
-        headers,
-        signal,
-        ...body !== void 0 ? { body: JSON.stringify(body) } : {}
-      });
-    } catch (error40) {
-      throw unreachableError(url2, error40, timeoutMs);
-    }
-    if (response.ok) {
-      const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-      if (!contentType.includes("application/x-ndjson")) {
-        await response.body?.cancel().catch(() => void 0);
-        throw new Error("Memlin progressive resolver returned an unexpected response type");
-      }
-      await this.noteAuthOutcome(response.status, null, refusalAccountId);
-      return response;
-    }
-    const text = await response.text().catch(() => "");
-    let serverError;
-    let parsedBody = null;
-    try {
-      const parsed = JSON.parse(text);
-      parsedBody = parsed;
-      serverError = typeof parsed.error === "string" ? parsed.error : parsed.error?.message ?? parsed.error?.code;
-    } catch {
-    }
-    const refusalCode = await this.noteAuthOutcome(response.status, parsedBody, refusalAccountId);
-    const detail = response.status >= 500 ? `HTTP ${response.status} (upstream response suppressed)` : serverError ? singleLine(serverError, 300) : describeOpaqueBody(response.status, text);
-    throw new MemlinApiError(
-      `${method} ${pathAndQuery} \u2192 ${response.status}: ${detail}`,
-      response.status,
-      refusalCode
-    );
-  }
-  async *readResolveV2Response(response) {
-    if (!response.body) {
-      throw new Error("Memlin progressive resolver returned an empty response body");
-    }
-    yield* parseNdjsonEvents(response.body);
-  }
-  // ---------- endpoints ----------
-  /** GET /me — identity + account list. No account header sent (this is the discovery call). */
-  async me() {
-    return this.request("GET", "/me", void 0, { includeAccount: false });
-  }
-  /**
-   * GET /report — account-scoped usage aggregates (tokens saved, resolves,
-   * hit rate). The route nests the window (`window: { from, days }` — no
-   * top-level days field) and clamps days to [1, 31] server-side (default 1);
-   * `projectId` maps to the `?project=` query param. Consumed by the
-   * Companion's Memory panel for its tokens-saved counter.
-   */
-  async report(opts = {}) {
-    const q = new URLSearchParams();
-    if (opts.days !== void 0) q.set("days", String(opts.days));
-    if (opts.projectId) q.set("project", opts.projectId);
-    const qs = q.toString();
-    return this.request("GET", `/report${qs ? `?${qs}` : ""}`);
-  }
-  /**
-   * GET /realtime/config — Supabase connection info for the caller's
-   * effective account. The client config file is deliberately
-   * backend-agnostic (no Supabase URL / anon key), so Realtime subscribers
-   * — the Companion daemon (packages/companion-core) — bootstrap the
-   * connection from here. Dedicated-instance (paid org) accounts get THEIR
-   * instance's values, which is why this rides normal account-header auth.
-   */
-  async getRealtimeConfig(opts = {}) {
-    return this.request("GET", "/realtime/config", void 0, { accountId: opts.accountId });
-  }
-  /**
-   * POST /roles/assign — set a member's functional roles (backend, sre,
-   * ...). Defaults to the caller; pass user_id to assign another member
-   * (owner/admin only). Replaces the member's set wholesale.
-   */
-  async assignRoles(input, opts = {}) {
-    return this.request("POST", "/roles/assign", input, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * POST /roles/tag — tag a document into one or more role packs. The
-   * resolver boosts the document for members holding a matching role.
-   * Replaces the document's role tags wholesale.
-   */
-  async tagDocumentRoles(input, opts = {}) {
-    return this.request("POST", "/roles/tag", input, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * POST /documents/pin — force-include ("pin") a document, or unpin it.
-   * A pinned doc is fetched out-of-band by the resolver on every resolve in
-   * scope (no similarity threshold) and reserved budget off the top — a
-   * standing directive, not a similarity hit. Owner/admin-only server-side.
-   */
-  async setDocumentPinned(input, opts = {}) {
-    return this.request("POST", "/documents/pin", input, {
-      accountId: opts.accountId
-    });
-  }
-  /** GET /decisions/enforce — pull the guardrail rules currently
-   *  in effect for the caller's account (and optionally a project).
-   *  Returns kind='decision' docs whose `metadata.enforce` is set —
-   *  the PreToolUse handler in plugin-core's pre-tool-use-handler
-   *  module is the primary caller. */
-  async listEnforceDecisions(opts = {}, requestOpts = {}) {
-    const qs = new URLSearchParams();
-    if (opts.project_id !== void 0) {
-      qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
-    }
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/decisions/enforce${suffix}`, void 0, {
-      accountId: requestOpts.accountId
-    });
-  }
-  /** POST /usage/event — write a usage_events row from the client.
-   *  Server-side enforces an allowlist of event_types (today:
-   *  tool.guardrail, action.invoke, resolve.outcome, edit.activity,
-   *  resolve.delivery) and re-derives account_id and user_id from the auth
-   *  context so callers can't forge rows for other workspaces.
-   *  `opts.accountId` routes the write to a non-default account
-   *  (multi-account workspaces). */
-  async writeUsageEvent(input, opts = {}) {
-    return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
-  }
-  /** Batched, idempotent editor-agent telemetry. This stream is deliberately
-   * separate from usage_events: it powers live sessions, subagent visibility,
-   * model analytics, and operational timelines without affecting metering. */
-  async writeAgentActivityBatch(events, opts = {}) {
-    return this.request("POST", "/agent/activity", { events }, opts);
-  }
-  /** GET /documents — list, filtered. */
-  async listDocuments(opts = {}, callOpts = {}) {
-    const qs = new URLSearchParams();
-    if (opts.kinds) for (const k of opts.kinds) qs.append("kind", k);
-    if (opts.scopes) for (const s of opts.scopes) qs.append("scope", s);
-    if (opts.statuses) for (const s of opts.statuses) qs.append("status", s);
-    if (opts.project_id !== void 0) {
-      qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
-    }
-    if (opts.has_trigger) qs.set("has_trigger", "true");
-    if (opts.path) qs.set("path", opts.path);
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
-    return res.documents.map((d) => {
-      const { status, ...rest } = d;
-      return status == null ? rest : { ...rest, status };
-    });
-  }
-  async deleteLightMemory(documentId, expectedVersion) {
-    await this.request(
-      "DELETE",
-      "/light/memory",
-      { document_id: documentId, expected_version: expectedVersion },
-      { maxRetries: 0, requestTimeoutMs: 5e3 }
-    );
-  }
-  async recordLightSync(projectId, status) {
-    await this.request(
-      "POST",
-      "/light/sync",
-      { project_id: projectId, status },
-      { maxRetries: 0, requestTimeoutMs: 1500 }
-    );
-  }
-  // ---------- Light native sync (B2) ----------
-  // Writes are never retried by request() (only GET is), so a reset after the
-  // server committed can't duplicate a version. Error bodies carry a stable
-  // `{error: code}`; see lightErrorCode() in light/sync-api.ts.
-  /** POST /light/documents — versioned Light write; identical content is a metadata-only merge. */
-  async lightWriteDocument(input) {
-    return this.request("POST", "/light/documents", input, { requestTimeoutMs: 2e4 });
-  }
-  /** POST /light/lease — acquire or renew the per-host sync lease. */
-  async lightAcquireLease(input) {
-    return this.request("POST", "/light/lease", input, { requestTimeoutMs: 8e3 });
-  }
-  /** DELETE /light/lease — release a lease this holder owns. */
-  async lightReleaseLease(input) {
-    return this.request("DELETE", "/light/lease", input, { requestTimeoutMs: 5e3 });
-  }
-  /** POST /light/sync with per-host agent statuses. */
-  async lightReportSync(input) {
-    return this.request("POST", "/light/sync", input, { requestTimeoutMs: 8e3 });
-  }
-  /** GET /light/suppressions — forgotten items (the same hash never reimports). */
-  async listLightSuppressions() {
-    return (await this.request(
-      "GET",
-      "/light/suppressions",
-      void 0,
-      { requestTimeoutMs: 8e3 }
-    )).suppressions;
-  }
-  /** POST /light/suppressions */
-  async lightSuppress(input) {
-    return this.request("POST", "/light/suppressions", input, { requestTimeoutMs: 8e3 });
-  }
-  /** DELETE /light/suppressions */
-  async lightUnsuppress(id) {
-    return this.request("DELETE", "/light/suppressions", { id }, { requestTimeoutMs: 8e3 });
-  }
-  /**
-   * POST /light/suggestions — upsert this device's suggestions (≤ 100). The
-   * server never reopens a dismissed / accepted row with the same hash. An
-   * older server answers 404/405; callers treat that as "no server store".
-   */
-  async reportLightSuggestions(input) {
-    return this.request("POST", "/light/suggestions", input, { requestTimeoutMs: 8e3 });
-  }
-  /** GET /light/suggestions?status= */
-  async listLightSuggestions(status) {
-    return (await this.request(
-      "GET",
-      `/light/suggestions?status=${encodeURIComponent(status)}`,
-      void 0,
-      { requestTimeoutMs: 8e3 }
-    )).suggestions;
-  }
-  /**
-   * PATCH /light/suggestions — accept or dismiss. Accepting `suppressed_changed`
-   * deletes the suppression server-side; accepting `source_drift` clears
-   * metadata.custom.memlin_frozen (metadata only, no version).
-   */
-  async resolveLightSuggestion(input) {
-    return this.request("PATCH", "/light/suggestions", input, { requestTimeoutMs: 8e3 });
-  }
-  /** POST /documents/<id>/status — archive / unarchive / approve (curation). */
-  async setDocumentStatus(documentId, action) {
-    return this.request(
-      "POST",
-      `/documents/${encodeURIComponent(documentId)}/status`,
-      { action },
-      { requestTimeoutMs: 8e3 }
-    );
-  }
-  /** GET /light/agents — per-host, per-device sync rows. */
-  async listLightAgents() {
-    return (await this.request(
-      "GET",
-      "/light/agents",
-      void 0,
-      { requestTimeoutMs: 8e3 }
-    )).agents;
-  }
-  /**
-   * POST /plans {document_id} — attach a `drafted` plans row to an existing
-   * plan document (a Light plan after an upgrade, D3). Creates no version.
-   */
-  async backfillPlanRow(documentId) {
-    return this.request("POST", "/plans", { document_id: documentId }, { requestTimeoutMs: 8e3 });
-  }
-  async lightStatus(accountId) {
-    try {
-      return (await this.request("GET", "/light", void 0, {
-        accountId,
-        requestTimeoutMs: 1500,
-        maxRetries: 0
-      })).light;
-    } catch (error40) {
-      if (error40.status === 404) return null;
-      throw error40;
-    }
-  }
-  /** POST /documents — create or update a document. */
-  async writeDocument(input, callOpts = {}) {
-    return this.request("POST", "/documents", input, {
-      accountId: callOpts.accountId
-    });
-  }
-  /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
-  async syncWorkspaceContract(input) {
-    return this.request("POST", "/workspace-contract/sync", input);
-  }
-  /** GET /documents/{id} — fetch one doc with body + metadata. */
-  async getDocument(documentId) {
-    return this.request("GET", `/documents/${encodeURIComponent(documentId)}`);
-  }
-  /** POST /documents/{id}/contract-verification — H12. Record a contract
-   *  check. Used by `memlin diff --record`. */
-  async recordContractVerification(documentId, body) {
-    return this.request(
-      "POST",
-      `/documents/${encodeURIComponent(documentId)}/contract-verification`,
-      body
-    );
-  }
-  /** GET /documents/{id}/versions — history. */
-  async listVersions(documentId) {
-    const res = await this.request(
-      "GET",
-      `/documents/${encodeURIComponent(documentId)}/versions`
-    );
-    return res.versions;
-  }
-  /** POST /documents/{id}/revert — non-destructive revert to an older version. */
-  async revertDocument(documentId, targetVersionId, commitMessage) {
-    const light = await this.lightStatus();
-    const expectedVersion = light?.active ? (await this.getDocument(documentId)).version_number : void 0;
-    const res = await this.request(
-      "POST",
-      `/documents/${encodeURIComponent(documentId)}/revert`,
-      {
-        target_version_id: targetVersionId,
-        expected_version: expectedVersion,
-        ...commitMessage ? { commit_message: commitMessage } : {}
-      }
-    );
-    return res.new_version_id;
-  }
-  /** GET /inbox — pending scribe proposals (newest first), plus recently
-   *  auto-activated correction rules (so the user can see what stuck + undo).
-   *  Pass `opts.accountId` to read a different account's inbox than the pinned
-   *  one (e.g. `memlin status` showing the resolver-effective account). */
-  async listInbox(opts = {}) {
-    return this.request("GET", "/inbox", void 0, { accountId: opts.accountId });
-  }
-  /** GET /insights — pending derived insights, including auto-memory proposals. */
-  async listInsights(params = {}, opts = {}) {
-    const search = new URLSearchParams();
-    if (params.kind) search.set("kind", params.kind);
-    if (params.status) search.set("status", params.status);
-    if (params.limit) search.set("limit", String(params.limit));
-    const qs = search.toString();
-    return this.request(
-      "GET",
-      `/insights${qs ? `?${qs}` : ""}`,
-      void 0,
-      { accountId: opts.accountId }
-    );
-  }
-  async resolveInsight(insightId, action) {
-    return this.request("POST", `/insights/${encodeURIComponent(insightId)}/resolve`, { action });
-  }
-  /** POST /inbox/{id} — accept or reject a proposal, optionally with the reviewer's reason. */
-  async resolveProposal(proposalId, action, note) {
-    return this.request("POST", `/inbox/${encodeURIComponent(proposalId)}`, {
-      action,
-      ...note?.trim() ? { note: note.trim() } : {}
-    });
-  }
-  async listHandoffs(opts = {}, callOpts = {}) {
-    const qs = new URLSearchParams();
-    if (opts.project_id) qs.set("project_id", opts.project_id);
-    if (opts.target_agent_kind) qs.set("target_agent_kind", opts.target_agent_kind);
-    if (opts.target_session_id) qs.set("target_session_id", opts.target_session_id);
-    if (opts.target_session_id) qs.set("include_thoughts", "true");
-    if (opts.status) qs.set("status", opts.status);
-    if (opts.limit) qs.set("limit", String(opts.limit));
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/handoffs${suffix}`, void 0, {
-      accountId: callOpts.accountId
-    });
-  }
-  async updateHandoff(handoffId, action, opts = {}) {
-    return this.request(
-      "PATCH",
-      `/handoffs/${encodeURIComponent(handoffId)}`,
-      {
-        action,
-        ...opts.sessionId ? { target_session_id: opts.sessionId } : {},
-        ...opts.resultSummary !== void 0 ? { result_summary: opts.resultSummary } : {}
-      },
-      { accountId: opts.accountId }
-    );
-  }
-  async createHandoff(input) {
-    return this.request("POST", "/handoffs", input);
-  }
-  async listFeatures(opts = {}) {
-    const qs = new URLSearchParams();
-    if (opts.project_id) qs.set("project_id", opts.project_id);
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/features${suffix}`);
-  }
-  async createFeature(input) {
-    return this.request("POST", "/features", input);
-  }
-  async addFeatureMember(featureId, source) {
-    return this.request("POST", `/features/${featureId}/members`, { source });
-  }
-  /** POST /documents/search — semantic + text. */
-  async search(query, opts = {}) {
-    const res = await this.request("POST", "/documents/search", {
-      query,
-      ...opts
-    });
-    return res.hits;
-  }
-  /** GET /documents?q=... — fuzzy title/path lookup. Used by `memlin revert`. */
-  async findDocumentsByName(needle, limit = 10) {
-    const qs = new URLSearchParams({ q: needle, limit: String(limit) });
-    const res = await this.request("GET", `/documents?${qs.toString()}`);
-    return res.documents;
-  }
-  /**
-   * POST /resolve/v2 — one authenticated progressive NDJSON stream.
-   *
-   * A transport reset after the server claimed the id is recovered through
-   * GET replay, never by starting another POST with a fresh identity. Duplicate
-   * events from the replay are suppressed by phase.
-   */
-  async *resolveV2(args, opts = {}) {
-    const seen = /* @__PURE__ */ new Set();
-    let terminal = false;
-    let postError;
-    try {
-      const response = await this.openResolveV2Stream("POST", "/resolve/v2", args, opts);
-      for await (const event of this.readResolveV2Response(response)) {
-        if (event.resolve_id !== args.resolve_id || event.turn_id !== args.turn_id) {
-          throw new Error("Memlin progressive resolver returned an event for another turn");
-        }
-        if (event.type === "failed" && event.error?.code === "RESOLVE_V2_UNAVAILABLE" && !seen.has("hot") && !seen.has("full")) {
-          throw new MemlinApiError("POST /resolve/v2 \u2192 404: progressive resolve unavailable", 404);
-        }
-        if (event.type === "failed" && event.error?.code === "PENDING") continue;
-        if (!seen.has(event.type)) {
-          seen.add(event.type);
-          yield event;
-        }
-        if (event.type === "full" || event.type === "failed") terminal = true;
-      }
-    } catch (error40) {
-      postError = error40;
-    }
-    if (terminal) return;
-    if (opts.signal?.aborted) throw postError ?? opts.signal.reason;
-    if (postError instanceof MemlinApiError && (postError.status === 404 || postError.status === 405 || postError.status === 501)) {
-      throw postError;
-    }
-    const requestedDeadline = Date.parse(args.deadline_at);
-    const replayDeadline = Number.isFinite(requestedDeadline) ? requestedDeadline : Date.now() + (opts.requestTimeoutMs ?? this.cfg.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
-    const replayDelays = [50, 100, 200, 350, 500];
-    const replayIdentity = new URLSearchParams({
-      turn_id: args.turn_id,
-      session_id: args.session_id ?? ""
-    });
-    let replayError;
-    for (let attempt = 0; !terminal && Date.now() < replayDeadline; attempt += 1) {
-      if (opts.signal?.aborted) throw postError ?? opts.signal.reason;
-      try {
-        const response = await this.openResolveV2Stream(
-          "GET",
-          `/resolve/v2/${encodeURIComponent(args.resolve_id)}?${replayIdentity.toString()}`,
-          void 0,
-          {
-            ...opts,
-            requestTimeoutMs: Math.max(1, replayDeadline - Date.now())
-          }
-        );
-        for await (const event of this.readResolveV2Response(response)) {
-          if (event.resolve_id !== args.resolve_id || event.turn_id !== args.turn_id) {
-            throw new Error(
-              "Memlin progressive resolver replay returned an event for another turn"
-            );
-          }
-          if (event.type === "failed" && event.error?.code === "PENDING") continue;
-          if (!seen.has(event.type)) {
-            seen.add(event.type);
-            yield event;
-          }
-          if (event.type === "full" || event.type === "failed") terminal = true;
-        }
-        replayError = void 0;
-      } catch (error40) {
-        replayError = error40;
-        const retryable = !(error40 instanceof MemlinApiError) || error40.status === 408 || error40.status === 429 || error40.status >= 500;
-        if (!retryable) {
-          if (seen.has("hot") || seen.has("full")) {
-            throw new Error(
-              "Memlin progressive resolver replay was rejected after resolution started"
-            );
-          }
-          throw postError ?? error40;
-        }
-      }
-      if (terminal) return;
-      const remaining = replayDeadline - Date.now();
-      if (remaining <= 0) break;
-      await delayWithSignal(
-        Math.min(replayDelays[Math.min(attempt, replayDelays.length - 1)], remaining),
-        opts.signal
+function formatDecisionList(decisions, count, nowMs = Date.now()) {
+  if (decisions.length === 0) return NO_OPEN_DECISIONS;
+  const counts = typeof count === "number" ? { open: count, needsYou: null } : count;
+  const n = counts.needsYou ?? counts.open;
+  const head = needsYouDecisionsPhrase(counts) || needsYouDecisionsPhrase({ open: decisions.length, needsYou: null });
+  const grouped = counts.needsYou !== null && counts.needsYou !== counts.open;
+  const out = [
+    `${head}. Memlin could not settle ${n === 1 ? "this" : "these"} itself; ignoring one is safe \u2014 its default applies at the deadline.
+` + (grouped ? "Related questions (one incident session's runbooks, one doc) count as one decision; every open question is listed below.\n" : "") + "\n"
+  ];
+  for (const d of decisions) {
+    out.push(`  ${d.id.slice(0, 8)}  ${d.kind.padEnd(9)} ${d.question}
+`);
+    out.push(`            Why you: ${d.whyHuman}
+`);
+    out.push(`            Options: ${d.options.map((o) => o.id).join(" \xB7 ")}
+`);
+    if (d.recommendation) {
+      out.push(
+        `            Recommended: ${labelWithId(d, d.recommendation.option)} \u2014 ${prose(d, d.recommendation.rationale)}
+`
       );
     }
-    throw postError ?? replayError ?? new Error("Memlin progressive resolver did not reach a terminal phase before its deadline");
-  }
-  /** Read stored phases without starting a resolver operation. */
-  async *replayResolveV2(resolveId, expected, opts = {}) {
-    const identity = new URLSearchParams({
-      turn_id: expected.turn_id,
-      session_id: expected.session_id ?? ""
-    });
-    const response = await this.openResolveV2Stream(
-      "GET",
-      `/resolve/v2/${encodeURIComponent(resolveId)}?${identity.toString()}`,
-      void 0,
-      opts
-    );
-    for await (const event of this.readResolveV2Response(response)) {
-      if (event.resolve_id !== resolveId || event.turn_id !== expected.turn_id) {
-        throw new Error("Memlin progressive resolver replay returned an event for another turn");
-      }
-      yield event;
-    }
-  }
-  /** Hook-emitted delivery truth for a progressive resolve. The route accepts
-   * only this sanitized detail allowlist; prompts and source content never
-   * enter telemetry. */
-  async reportResolveV2Delivery(resolveId, input, opts = {}) {
-    return this.request("POST", `/resolve/v2/${encodeURIComponent(resolveId)}/delivery`, input, {
-      accountId: opts.accountId,
-      requestTimeoutMs: opts.requestTimeoutMs ?? 2e3,
-      signal: opts.signal,
-      agentKind: opts.agentKind,
-      agentVersion: opts.agentVersion
-    });
-  }
-  /**
-   * POST /resolve — the marquee context-assembly endpoint.
-   *
-   * `cwd` and `git_remote` let the server infer the caller's active component
-   * (when the project has any defined) and apply a soft +0.15 boost to
-   * docs tagged to that component. Both are optional; omitting them yields
-   * the same project-wide ranking we used pre-component-awareness.
-   */
-  async resolve(args, opts = {}) {
-    return this.request("POST", "/resolve", args, {
-      accountId: opts.accountId,
-      requestTimeoutMs: opts.requestTimeoutMs,
-      signal: opts.signal,
-      agentKind: opts.agentKind,
-      agentVersion: opts.agentVersion
-    });
-  }
-  /**
-   * GET /account — name/tier/kind for the current account.
-   *
-   * Pass `opts.accountId` to target an account other than the pinned one.
-   * `memlin status` uses this to show the resolver-effective account in a
-   * multi-account workspace, so the returned `id` and `name` always describe
-   * the same account (no global-default/pinned-name mismatch).
-   */
-  async getAccount(opts = {}) {
-    return this.request("GET", "/account", void 0, {
-      accountId: opts.accountId,
-      requestTimeoutMs: opts.requestTimeoutMs,
-      maxRetries: opts.maxRetries
-    });
-  }
-  /**
-   * POST /projects/resolve — server-side project resolution.
-   *
-   * Returns `account_id` when a project matches in any account the user
-   * has access to (via the JWT's memlin_account_ids claim) — not just the
-   * one pinned in config. Callers use the returned account_id to retarget
-   * the actual resolve / write call to the right backend.
-   */
-  async resolveProject(input) {
-    return this.request("POST", "/projects/resolve", input);
-  }
-  /** GET /account/enforce-done-deployed — the workspace done-deployed gate flag. */
-  async getEnforceDoneDeployed(opts = {}) {
-    return this.request("GET", "/account/enforce-done-deployed", void 0, opts);
-  }
-  /** PUT /account/enforce-done-deployed — owner/admin sets the workspace flag. */
-  async setEnforceDoneDeployed(enabled, opts = {}) {
-    return this.request("PUT", "/account/enforce-done-deployed", { enabled }, opts);
-  }
-  /**
-   * POST /deploy-guard — acquire, release, status, or queue the per-project
-   * deploy lease / waiter line.
-   *
-   * The PreToolUse deploy hook calls `acquire` before a raw deploy command
-   * runs; laptop ship scripts call acquire themselves and wait on collision.
-   * `queue` parks a waiter when acquire misses. `acquired: false` means
-   * another session already holds an active lease.
-   * project_id is passed explicitly — the hook resolves it from cwd first.
-   */
-  async deployGuard(input, opts = {}) {
-    return this.request("POST", "/deploy-guard", input, { accountId: opts.accountId });
-  }
-  /**
-   * POST /edit-guard — real-time, pre-edit file-collision check.
-   *
-   * The PreToolUse hook calls this before an Edit/Write/MultiEdit, passing the
-   * repo-relative path(s) about to change. The server reads the same
-   * `edit.activity` feed the resolver's recent_file_edits uses and returns any
-   * LIVE collisions — other sessions that edited the same path within the last
-   * ~10 min — so the hook can warn or block. Read-only; never mutates.
-   * project_id is passed explicitly (the hook resolves it from cwd first).
-   */
-  async editGuard(input, opts = {}) {
-    return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
-  }
-  /** Transactional edit broker. prepare acquires exact-path ownership or
-   * returns the first holder that still needs compatibility proof. */
-  async editBroker(input, opts = {}) {
-    return this.request("POST", "/edit-guard", input, { accountId: opts.accountId });
-  }
-  /** GET /audit/<id>/replay — reconstruct a past resolve's exact bundle. */
-  async replayAudit(auditId, opts = {}) {
-    return this.request("GET", `/audit/${auditId}/replay`, void 0, {
-      accountId: opts.accountId
-    });
-  }
-  /** GET /audit/<id>/explain — per-item decomposition of a past resolve's
-   *  ranking arithmetic (similarity, kind weight, component boost, rerank,
-   *  decay) plus human-readable reasons. The "homework, shown" companion
-   *  to /replay. */
-  async explainAudit(auditId) {
-    return this.request("GET", `/audit/${auditId}/explain`);
-  }
-  /** GET /actions — list approved actions in the workspace. Same shape
-   *  the memlin_actions_list MCP tool returns. */
-  async listActions(opts = {}) {
-    const q = [];
-    if (opts.filter) q.push(`filter=${encodeURIComponent(opts.filter)}`);
-    if (opts.limit !== void 0) q.push(`limit=${opts.limit}`);
-    const qs = q.length > 0 ? `?${q.join("&")}` : "";
-    const { actions } = await this.request("GET", `/actions${qs}`);
-    return actions;
-  }
-  /** POST /actions/<id>/execute — invoke a callable action by id with
-   *  validated input. Returns the result + audit_id. */
-  async executeAction(actionId, input) {
-    return this.request("POST", `/actions/${actionId}/execute`, { input });
-  }
-  /** POST /prompt-ci — run Prompt CI regression tests for a skill. */
-  async runPromptCi(skillId, content) {
-    return this.request("POST", "/prompt-ci", { skill_id: skillId, content });
-  }
-  /**
-   * POST /memory/propose — extract memory candidates from a recent agent
-   * turn and queue them for user accept/dismiss. Fire-and-forget from the
-   * Stop hook's perspective; the server runs a cheap Haiku extraction and
-   * silently no-ops if it finds nothing worth remembering.
-   */
-  async proposeMemory(input, opts = {}) {
-    return this.request("POST", "/memory/propose", input, { accountId: opts.accountId });
-  }
-  /**
-   * POST /scribe/diff — Phase 2 auto-capture from a single git commit.
-   *
-   * Called by the PostToolUse hook after the agent runs `git commit`.
-   * The server reads the commit message + diff, asks Haiku to extract
-   * any decision/memory/skill baked into the change, and persists the
-   * results. The server may activate or background captures automatically;
-   * only the post-processing `proposals_pending` subset needs inbox review.
-   */
-  async scribeDiff(input, opts = {}) {
-    return this.request("POST", "/scribe/diff", input, { accountId: opts.accountId });
-  }
-  /**
-   * POST /scribe/session — Phase 1 auto-capture from a Claude Code
-   * session transcript. Server slices the transcript (tail-biased
-   * when too large), runs Haiku extraction, persists proposals, and reports
-   * how many still need review after automatic handling.
-   *
-   * Triggered manually by /memlin-scribe today; an auto-triggered
-   * variant on Stop with a 15-min debounce is a fast follow-up.
-   */
-  async scribeSession(input, opts = {}) {
-    const light = await this.lightStatus(opts.accountId);
-    if (light?.active) {
-      const { readFile } = await import("node:fs/promises");
-      const { resolve } = await import("node:path");
-      const { findWorkspaceBinding: findWorkspaceBinding2 } = await Promise.resolve().then(() => (init_workspace_binding(), workspace_binding_exports));
-      const binding = await findWorkspaceBinding2(input.cwd ?? process.cwd());
-      let excluded = [];
-      try {
-        excluded = (await readFile(
-          resolve(binding?.workspaceRoot ?? input.cwd ?? process.cwd(), ".memlin/light-exclude"),
-          "utf8"
-        )).split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith("#"));
-      } catch (error40) {
-        if (error40.code !== "ENOENT") throw error40;
-      }
-      if (lightCaptureExcluded(input.transcript, excluded))
-        return {
-          run_id: "",
-          proposals_extracted: 0,
-          proposals_persisted: 0,
-          proposals_pending: 0,
-          proposal_ids: [],
-          latency_ms: 0,
-          truncated: false
-        };
-      input = {
-        ...input,
-        transcript: boundLightText(redactLightTranscript(input.transcript), 5500)
-      };
-    }
-    return this.request("POST", "/scribe/session", input, {
-      accountId: opts.accountId,
-      ...light?.active ? { maxRetries: 0, requestTimeoutMs: 25e3 } : {}
-    });
-  }
-  /**
-   * POST /memory/ingest-native — ingest a host's native auto-memory.
-   *
-   * Sends the raw native MEMORY.md index (+ the satellite filenames the
-   * adapter already pulls) so the server parses it and runs the entries
-   * through the scribe dedup (corroborate, don't duplicate). Makes turning
-   * off native auto-memory lossless.
-   */
-  async ingestNativeMemory(input, opts = {}) {
-    const satellites = input.satellites ?? [];
-    if (satellites.length <= NATIVE_MEMORY_BATCH_SIZE) {
-      return this.request("POST", "/memory/ingest-native", input, {
-        accountId: opts.accountId,
-        requestTimeoutMs: NATIVE_MEMORY_REQUEST_TIMEOUT_MS
-      });
-    }
-    const satelliteFiles = [
-      .../* @__PURE__ */ new Set([
-        ...input.satellite_files ?? [],
-        ...satellites.map((satellite) => satellite.name)
-      ])
-    ];
-    const batches = [];
-    for (let offset = 0; offset < satellites.length; offset += NATIVE_MEMORY_BATCH_SIZE) {
-      batches.push(satellites.slice(offset, offset + NATIVE_MEMORY_BATCH_SIZE));
-    }
-    const results = [];
-    for (let offset = 0; offset < batches.length; offset += NATIVE_MEMORY_BATCH_CONCURRENCY) {
-      const group = batches.slice(offset, offset + NATIVE_MEMORY_BATCH_CONCURRENCY);
-      const settled = await Promise.allSettled(
-        group.map((batch, groupIndex) => {
-          const batchIndex = offset + groupIndex;
-          return this.request(
-            "POST",
-            "/memory/ingest-native",
-            {
-              ...input,
-              memory_index_md: batchIndex === 0 ? input.memory_index_md : NATIVE_MEMORY_BATCH_INDEX,
-              satellites: batch,
-              satellite_files: satelliteFiles
-            },
-            {
-              accountId: opts.accountId,
-              requestTimeoutMs: NATIVE_MEMORY_REQUEST_TIMEOUT_MS
-            }
-          );
-        })
-      );
-      const rejected = settled.find(
-        (result) => result.status === "rejected"
-      );
-      if (rejected) throw rejected.reason;
-      const groupResults = settled.filter(
-        (result) => result.status === "fulfilled"
-      ).map((result) => result.value);
-      results.push(...groupResults);
-      if (groupResults.some((result) => result.skipped)) break;
-    }
-    const sum = (key) => results.reduce((total, result) => {
-      const value = result[key];
-      return total + (typeof value === "number" ? value : 0);
-    }, 0);
-    const refused = results.find((result) => result.skipped);
-    return {
-      entries_parsed: sum("entries_parsed"),
-      satellites_received: sum("satellites_received"),
-      proposals_built: sum("proposals_built"),
-      run_id: results.find((result) => result.run_id)?.run_id ?? null,
-      proposals_persisted: sum("proposals_persisted"),
-      proposal_ids: results.flatMap((result) => result.proposal_ids),
-      proposals_corroborated: sum("proposals_corroborated"),
-      proposals_auto_promoted: sum("proposals_auto_promoted"),
-      proposals_auto_activated: sum("proposals_auto_activated"),
-      proposals_reconciled: sum("proposals_reconciled"),
-      ...refused ? { skipped: true, reason: refused.reason ?? "skipped" } : {}
-    };
-  }
-  /**
-   * POST /memory/remember — save one user-typed durable memory
-   * (/memlin-remember). Routes through the server-side scribe dedup, tagged
-   * as a provenance-verified directive so it activates immediately and can
-   * supersede the stale fact it corrects.
-   */
-  async rememberMemory(input, opts = {}) {
-    return this.request("POST", "/memory/remember", input, { accountId: opts.accountId });
-  }
-  /**
-   * POST /plans — upload a Claude Code plan as a first-class plan document.
-   *
-   * Server resolves project from cwd/git_remote (when not pinned), writes
-   * the document via writeDocument (auto-embedding), and inserts a
-   * companion plans row with status='drafted'. Returns the document_id
-   * + version metadata for downstream URL construction.
-   */
-  async pushPlan(input, opts = {}) {
-    return this.request("POST", "/plans", input, { accountId: opts.accountId });
-  }
-  /**
-   * GET /plans — list plans for the account, optionally filtered by
-   * `updated_after` (epoch ms) for cheap delta polling. Used by the
-   * UserPromptSubmit + SessionStart hooks to keep ~/.claude/plans/ in
-   * sync with the server.
-   */
-  async listPlans(opts = {}, callOpts = {}) {
-    const qs = new URLSearchParams();
-    if (opts.status) qs.set("status", opts.status);
-    if (opts.project_id !== void 0) {
-      qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
-    }
-    if (opts.updated_after) qs.set("updated_after", opts.updated_after);
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    const res = await this.request(
-      "GET",
-      `/plans${suffix}`,
-      void 0,
-      { accountId: callOpts.accountId }
-    );
-    return res.plans;
-  }
-  /** GET /plans/<id> — full plan detail (status + body + bundle ref). */
-  async getPlan(id, opts = {}) {
-    return this.request("GET", `/plans/${encodeURIComponent(id)}`, void 0, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * PATCH /plans/<id> — replace the plan's body (creates a new
-   * document_version, auto-embeds). Used by the PostToolUse hook to push
-   * Claude Code edits back up to Memlin.
-   */
-  async updatePlan(id, input, opts = {}) {
-    return this.request("PATCH", `/plans/${encodeURIComponent(id)}`, input, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * POST /projects — create a project in the caller's current account.
-   * Used by `memlin init` to register a Claude Code workspace.
-   */
-  async createProject(input, opts = {}) {
-    return this.request("POST", "/projects", input, { accountId: opts.accountId });
-  }
-  /** Atomically create/select a project and register one or more logical
-   * local sources. Device paths are intentionally absent from this wire
-   * contract. */
-  async linkLocalSources(input, opts = {}) {
-    return this.request("POST", "/projects/local-link", input, { accountId: opts.accountId });
-  }
-  /**
-   * PATCH /projects/{id} — attach/detach local paths, set/clear the git
-   * remote, or rename. Owner/admin only; 409 when a path or remote is
-   * already attached to another project in the account. Backs
-   * `memlin attach-path` and add-project's attach-instead-of-fork offer.
-   */
-  async patchProject(projectId, input, opts = {}) {
-    return this.request("PATCH", `/projects/${encodeURIComponent(projectId)}`, input, {
-      accountId: opts.accountId
-    });
-  }
-  /** POST /decisions/{id}/verify — record an outcome on the decision
-   *  ledger. Verdicts surface on every future resolve of the decision. */
-  async verifyDecision(decisionId, input, opts = {}) {
-    return this.request("POST", `/decisions/${encodeURIComponent(decisionId)}/verify`, input, {
-      accountId: opts.accountId
-    });
-  }
-  /** GET /decisions/review-due — decisions whose review date arrived. */
-  async listReviewDueDecisions(opts = {}) {
-    const qs = opts.projectId ? `?project_id=${encodeURIComponent(opts.projectId)}` : "";
-    return this.request("GET", `/decisions/review-due${qs}`, void 0, {
-      accountId: opts.accountId
-    });
-  }
-  /**
-   * GET /decisions — open memory decisions (most consequential first), the raw
-   * open `count`, and the grouped `needs_you_count` + `groups` the web app
-   * shows. The grouped fields are absent on older servers: read them through
-   * decisionCountsOf (@memlin/shared), which falls back to `count`.
-   */
-  async listDecisions(opts = {}) {
-    const qs = opts.limit ? `?limit=${encodeURIComponent(String(opts.limit))}` : "";
-    return this.request("GET", `/decisions${qs}`, void 0, {
-      accountId: opts.accountId,
-      maxRetries: opts.maxRetries,
-      requestTimeoutMs: opts.requestTimeoutMs
-    });
-  }
-  /** GET /decisions/{id} — one decision with its code-built evidence and cached AI explanation. */
-  async getDecision(decisionId, opts = {}) {
-    return this.request("GET", `/decisions/${encodeURIComponent(decisionId)}`, void 0, {
-      accountId: opts.accountId
-    });
-  }
-  /** POST /decisions/{id}/asked — this decision was put to the person (idempotent). */
-  async markDecisionAsked(decisionId, via = "session", opts = {}) {
-    return this.request(
-      "POST",
-      `/decisions/${encodeURIComponent(decisionId)}/asked`,
-      { via },
-      { accountId: opts.accountId, requestTimeoutMs: 1500 }
+    out.push(
+      `            If ignored: ${labelWithId(d, d.defaultOption)} applies ${describeDeadline(d.deadlineAt, nowMs)}
+`
     );
   }
-  /** POST /decisions/{id}/answer — record a person's answer, their reason and their words. */
-  async answerDecision(decisionId, input, opts = {}) {
-    return this.request(
-      "POST",
-      `/decisions/${encodeURIComponent(decisionId)}/answer`,
-      {
-        option: input.option,
-        ...input.note?.trim() ? { note: input.note.trim() } : {},
-        ...input.user_quote?.trim() ? { user_quote: input.user_quote.trim() } : {},
-        via: input.via ?? "cli"
-      },
-      { accountId: opts.accountId }
-    );
-  }
-  /**
-   * POST /ask — natural-language Q&A over the team's workspace memory.
-   * Server resolves a bundle, sends it to Claude, returns answer +
-   * citations + audit_id. Used by `memlin ask` CLI and the web /ask
-   * panel.
-   */
-  async ask(input, opts = {}) {
-    return this.request("POST", "/ask", input, { accountId: opts.accountId });
-  }
-  /** GET /projects — list every project in the current account. */
-  async listProjects(opts = {}) {
-    const res = await this.request("GET", "/projects", void 0, { accountId: opts.accountId });
-    return res.projects;
-  }
-};
-function resolveApiUrl() {
-  return process.env.MEMLIN_API_URL?.trim() || DEFAULT_API_URL;
-}
-
-// packages/plugin-core/src/client.ts
-init_workspace_binding();
-init_auth_refusal();
-function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path7.join(os6.homedir(), ".config", "memlin", "config.json");
-}
-var CONFIG_DIR = path7.join(os6.homedir(), ".config", "memlin");
-var TOKEN_FILE = path7.join(CONFIG_DIR, "token.json");
-async function readConfig() {
-  try {
-    const raw = await fs5.readFile(globalConfigFilePath(), "utf8");
-    const parsed = JSON.parse(raw);
-    if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
-      return null;
-    }
-    return {
-      api_url: typeof parsed.api_url === "string" && parsed.api_url.trim() ? parsed.api_url : DEFAULT_API_URL,
-      account_id: parsed.account_id,
-      user_id: parsed.user_id,
-      auth0_sub: parsed.auth0_sub,
-      project_id: typeof parsed.project_id === "string" || parsed.project_id === null ? parsed.project_id : null
-    };
-  } catch {
-    return null;
-  }
-}
-function accessTokenSubject(accessToken) {
-  try {
-    const subject = decodeJwtPayload(accessToken).sub;
-    return typeof subject === "string" && subject.length > 0 ? subject : null;
-  } catch {
-    return null;
-  }
-}
-function configMatchesAccessToken(config2, accessToken) {
-  const subject = accessTokenSubject(accessToken);
-  return subject !== null && subject === config2.auth0_sub;
-}
-async function getIdentityBoundAccessToken(config2) {
-  const accessToken = await getValidAccessToken();
-  if (!configMatchesAccessToken(config2, accessToken)) {
-    throw new Error("not signed in \u2014 saved Memlin account does not match the saved token");
-  }
-  return accessToken;
-}
-async function getApi(opts = {}) {
-  const config2 = await readConfig();
-  if (!config2) return null;
-  try {
-    await getIdentityBoundAccessToken(config2);
-  } catch {
-    return null;
-  }
-  const cwd = opts.cwd ?? process.cwd();
-  const overlay = await findWorkspaceBinding(cwd);
-  const { workspaceBound, workspaceRoot, workspaceAccountName } = applyWorkspaceOverlay(
-    config2,
-    overlay
+  out.push(
+    '\nExplain one:  memlin decisions <id>   \xB7   Answer:  memlin decide <id> <option> --note "why"\n(<id> is the 8-char prefix shown above)\n'
   );
-  const apiUrl = process.env.MEMLIN_API_URL?.trim() || config2.api_url || resolveApiUrl();
-  const api = new MemlinApiClient({
-    baseUrl: apiUrl,
-    getAccessToken: () => getIdentityBoundAccessToken(config2),
-    accountId: config2.account_id,
-    authRefusal: { binding: workspaceRoot, accountName: workspaceAccountName }
-  });
-  return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName };
+  return out.join("");
 }
-function applyWorkspaceOverlay(config2, overlay) {
-  if (!overlay) return { workspaceBound: false, workspaceRoot: null, workspaceAccountName: null };
-  config2.account_id = overlay.binding.account_id;
-  if (overlay.binding.project_id !== void 0) {
-    config2.project_id = overlay.binding.project_id;
-  }
-  return {
-    workspaceBound: true,
-    workspaceRoot: overlay.workspaceRoot,
-    workspaceAccountName: overlay.binding.account_name ?? null
-  };
-}
-
-// packages/plugin-core/src/cli/cli-runner.ts
-var WATCHDOG_MS = 2e3;
-var CliExit = class extends Error {
-  constructor(code) {
-    super(`CliExit(${code})`);
-    this.code = code;
-    this.name = "CliExit";
-  }
-  code;
-};
-function exitCli(code) {
-  throw new CliExit(code);
-}
-function scheduleProcessExit(code) {
-  process.exitCode = code;
-  void closeHttpSockets();
-  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
-}
-function runCliMain(main2, onError) {
-  main2().then(
-    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
-    (err) => {
-      if (err instanceof CliExit) {
-        scheduleProcessExit(err.code);
-        return;
-      }
-      let code;
-      try {
-        code = onError(err);
-      } catch (handlerErr) {
-        if (handlerErr instanceof CliExit) {
-          scheduleProcessExit(handlerErr.code);
-          return;
-        }
-        console.error("cli error handler failed:", handlerErr);
-        code = 1;
-      }
-      scheduleProcessExit(code);
-    }
-  );
-}
-
-// packages/plugin-core/src/project-resolver.ts
-import { existsSync, readdirSync, readFileSync as readFileSync2, lstatSync } from "node:fs";
-import path8 from "node:path";
-init_workspace_binding();
-var WORKSPACE_ENV_VARS = [
-  // Claude Code exposes the original project dir to hooks/plugin commands.
-  "CLAUDE_PROJECT_DIR",
-  // Cursor/plugin shims and local tests can set this explicitly.
-  "CURSOR_WORKSPACE_ROOT",
-  "CURSOR_PROJECT_ROOT",
-  "MEMLIN_WORKSPACE_ROOT",
-  // npm/pnpm set INIT_CWD to the directory where the user invoked a script.
-  "INIT_CWD"
-];
-function runtimeCwd(fallback = process.cwd()) {
-  for (const name of WORKSPACE_ENV_VARS) {
-    const raw = process.env[name]?.trim();
-    if (raw && path8.isAbsolute(raw)) return path8.resolve(raw);
-  }
-  return path8.resolve(fallback);
-}
-function readGitRemote(cwd) {
-  const read = (file2) => {
-    const stat = lstatSync(file2);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024)
-      throw new Error("Unsupported Git metadata");
-    return readFileSync2(file2, "utf8");
-  };
-  try {
-    let root = path8.resolve(cwd);
-    for (; ; ) {
-      const marker = path8.join(root, ".git");
-      if (existsSync(marker)) {
-        const info = lstatSync(marker);
-        if (info.isSymbolicLink()) return null;
-        let directory = marker;
-        if (info.isFile()) {
-          const match = /^gitdir:\s*(.+)$/m.exec(read(marker));
-          if (!match) return null;
-          directory = path8.resolve(root, match[1].trim());
-        }
-        const common2 = path8.join(directory, "commondir");
-        if (existsSync(common2)) directory = path8.resolve(directory, read(common2).trim());
-        let origin = false;
-        for (const line of read(path8.join(directory, "config")).split(/\r?\n/)) {
-          if (/^\s*\[/.test(line)) origin = /^\s*\[remote\s+"origin"\]\s*(?:[#;].*)?$/.test(line);
-          else if (origin) {
-            const match = /^\s*url\s*=\s*(.*?)\s*$/.exec(line);
-            if (match) return normalizeGitRemote(match[1].replace(/^"(.*)"$/, "$1"));
-          }
-        }
-        return null;
-      }
-      const parent = path8.dirname(root);
-      if (parent === root) return null;
-      root = parent;
-    }
-  } catch {
-    return null;
-  }
-}
-var MAX_WORKSPACE_SCAN = 64;
-function detectGitRemotes(cwd) {
-  const enclosing = readGitRemote(cwd);
-  if (enclosing) return [enclosing];
+function formatDecisionDetail(d, evidence, nowMs = Date.now()) {
   const out = [];
-  try {
-    let scanned = 0;
-    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
-      if (scanned >= MAX_WORKSPACE_SCAN) break;
-      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
-        continue;
-      }
-      scanned++;
-      const child = path8.join(cwd, entry.name);
-      if (!existsSync(path8.join(child, ".git"))) continue;
-      const remote = readGitRemote(child);
-      if (remote && !out.includes(remote)) out.push(remote);
-    }
-  } catch {
+  out.push(`${d.question}`);
+  out.push(`  id ${d.id} \xB7 ${d.kind} \xB7 ${d.state}`);
+  out.push("");
+  out.push(`Why a person is needed: ${d.whyHuman}`);
+  out.push(`Where it came from: ${evidence.origin.summary}`);
+  if (evidence.reason.detail) out.push(`Reason: ${evidence.reason.detail}`);
+  if (evidence.automation.length) {
+    out.push("What automation already did:");
+    for (const step of evidence.automation) out.push(`  - ${step}`);
   }
-  return out;
-}
-function selectAnchorRemote(input) {
-  if (input.enclosingRemote) {
-    return { gitRemote: input.enclosingRemote, umbrella: false, childCount: 0 };
+  if (evidence.diff?.text) {
+    out.push(`Change (+${evidence.diff.added} \u2212${evidence.diff.removed}):`);
+    for (const line of evidence.diff.text.split("\n")) out.push(`  ${line}`);
+    if (evidence.diff.truncated) out.push("  \u2026");
   }
-  if (input.childRemotes.length > 0) {
-    return {
-      gitRemote: input.childRemotes[0],
-      umbrella: true,
-      childCount: input.childRemotes.length
-    };
+  out.push("");
+  if (d.recommendation) {
+    out.push(`Recommended: ${labelWithId(d, d.recommendation.option)}`);
+    out.push(`  ${prose(d, d.recommendation.rationale)}`);
+  } else {
+    out.push("No recommendation for this one \u2014 decide from the facts above.");
   }
-  return { gitRemote: null, umbrella: false, childCount: 0 };
-}
-function shouldReTarget(input) {
-  return Boolean(input.explicitTargetId && input.explicitTargetId !== input.resolvedAccountId);
-}
-
-// packages/plugin-core/src/cli/add-project.ts
-init_workspace_binding();
-
-// packages/plugin-core/src/sibling-detect.ts
-import { readdirSync as readdirSync2, existsSync as existsSync2 } from "node:fs";
-import { execSync } from "node:child_process";
-import path9 from "node:path";
-var MAX_CHILD_DIRS = 32;
-var MAX_REMOTE_PROBES = 5;
-function childGitRemotes(cwd, deps = {}) {
-  const listDirs = deps.listDirs ?? ((p) => {
-    try {
-      return readdirSync2(p, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules").map((e) => e.name);
-    } catch {
-      return [];
-    }
-  });
-  const readRemote = deps.readRemote ?? ((repoPath) => {
-    try {
-      if (!existsSync2(path9.join(repoPath, ".git"))) return null;
-      const url2 = execSync("git remote get-url origin", {
-        windowsHide: true,
-        cwd: repoPath,
-        stdio: ["ignore", "pipe", "ignore"],
-        encoding: "utf8"
-      }).trim();
-      return normalizeGitRemote(url2);
-    } catch {
-      return null;
-    }
-  });
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const dir of listDirs(cwd).slice(0, MAX_CHILD_DIRS)) {
-    const remote = readRemote(path9.join(cwd, dir));
-    if (!remote || seen.has(remote)) continue;
-    seen.add(remote);
-    out.push({ dir, remote });
-    if (out.length >= MAX_REMOTE_PROBES) break;
+  out.push("");
+  out.push("Options:");
+  for (const o of d.options) {
+    out.push(`  ${o.id.padEnd(16)} ${o.label} \u2014 ${o.consequence}${o.reversible ? " (can be undone)" : ""}`);
+    for (const p of o.pros) out.push(`  ${"".padEnd(16)} + ${prose(d, p)}`);
+    for (const c of o.cons) out.push(`  ${"".padEnd(16)} \u2212 ${prose(d, c)}`);
   }
-  return out;
-}
-async function detectSiblingProject(cwd, resolveProject, deps = {}) {
-  for (const { dir, remote } of childGitRemotes(cwd, deps)) {
-    try {
-      const resolved = await resolveProject({ git_remote: remote });
-      if (resolved.project_id && resolved.account_id) {
-        return {
-          project_id: resolved.project_id,
-          account_id: resolved.account_id,
-          name: resolved.name ?? null,
-          via: dir
-        };
-      }
-    } catch {
-    }
-  }
-  return null;
-}
-function decideAddProjectAction(input) {
-  if (input.attachFlag) return { kind: "attach", projectId: input.attachFlag };
-  if (input.createNewFlag) return { kind: "create" };
-  if (!input.sibling) return { kind: "create" };
-  return input.isTTY ? { kind: "prompt" } : { kind: "error-need-flag" };
-}
-
-// packages/plugin-core/src/plugin-install.ts
-import { promises as fs6 } from "node:fs";
-import { existsSync as existsSync3 } from "node:fs";
-import path10 from "node:path";
-import os7 from "node:os";
-var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
-var MEMLIN_MARKETPLACE_KEY = "memlin-ai";
-function defaultUserSettingsPaths() {
-  const claudeDir = path10.join(os7.homedir(), ".claude");
-  return { claudeDir, settingsFile: path10.join(claudeDir, "settings.json") };
-}
-async function readClaudeUserSettings(paths) {
-  const p = paths ?? defaultUserSettingsPaths();
-  if (!existsSync3(p.settingsFile)) return null;
-  let raw;
-  try {
-    raw = await fs6.readFile(p.settingsFile, "utf8");
-  } catch {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-function inspectUserScopePlugin(settings) {
-  if (!settings) return { status: "unconfigured", marketplaceRegistered: false };
-  const enabled = settings.enabledPlugins?.[MEMLIN_PLUGIN_KEY] === true;
-  const market = !!settings.extraKnownMarketplaces?.[MEMLIN_MARKETPLACE_KEY];
-  return { status: enabled ? "enabled" : "disabled", marketplaceRegistered: market };
-}
-
-// packages/plugin-core/src/cli/add-project.ts
-function parseArgs(argv) {
-  const out = { kind: "code" };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--org" || a === "-o") {
-      out.org = argv[++i];
-      if (!out.org) return { error: "--org requires a value" };
-    } else if (a === "--name" || a === "-n") {
-      out.name = argv[++i];
-      if (!out.name) return { error: "--name requires a value" };
-    } else if (a === "--kind") {
-      const v = argv[++i];
-      if (v !== "code" && v !== "general") return { error: "--kind must be 'code' or 'general'" };
-      out.kind = v;
-    } else if (a === "--attach") {
-      out.attach = argv[++i];
-      if (!out.attach) return { error: "--attach requires a project id" };
-    } else if (a === "--create-new") {
-      out.createNew = true;
-    } else if (a === "--help" || a === "-h") {
-      return { error: "help" };
-    } else if (a?.startsWith("--")) {
-      return { error: `unknown flag: ${a}` };
-    }
-  }
-  return out;
-}
-function printHelp() {
-  console.log(
-    [
-      "memlin add-project \u2014 register this Claude Code workspace",
-      "",
-      "Usage:",
-      "  memlin add-project [options]",
-      "",
-      "Options:",
-      "  --org <name|uuid>     Pin to a specific org (default: auto-resolve)",
-      "  --name <string>       Project name (default: derived from repo)",
-      "  --kind code|general   Project kind (default: code)",
-      "  --attach <project-id> Attach this dir to an existing project instead",
-      "  --create-new          Always create, even when a child repo already",
-      "                        belongs to a project (skips the attach offer)",
-      "",
-      "After this command, every Claude Code session in this directory",
-      "auto-binds to the new project. No further setup."
-    ].join("\n")
+  out.push("");
+  out.push(
+    `If nobody answers: ${label(d, d.defaultOption)} applies ${describeDeadline(d.deadlineAt, nowMs)} \u2014 ${evidence.deadline.consequence}`
   );
+  out.push("");
+  out.push(`Answer: memlin decide ${d.id.slice(0, 8)} <option> --note "why"`);
+  return out.join("\n") + "\n";
 }
-function readGitRemote2(cwd) {
-  try {
-    const url2 = execSync2("git remote get-url origin", {
-      windowsHide: true,
-      cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8"
-    }).trim();
-    return normalizeGitRemote(url2);
-  } catch {
-    return null;
-  }
-}
-function pickAccount(accounts, needle, fallback) {
-  if (needle) {
-    const exact = accounts.find((a) => a.id === needle);
-    if (exact) return exact;
-    const lower = needle.toLowerCase();
-    const matches = accounts.filter((a) => a.name.toLowerCase().includes(lower));
-    if (matches.length === 1) return matches[0];
-    return null;
-  }
-  return accounts.find((a) => a.id === fallback) ?? null;
-}
-async function main() {
-  const argv = process.argv.slice(2);
-  const parsed = parseArgs(argv);
-  if ("error" in parsed) {
-    if (parsed.error === "help") {
-      printHelp();
-      exitCli(0);
-    }
-    console.error(`memlin add-project: ${parsed.error}`);
-    printHelp();
-    exitCli(2);
-  }
-  const ctx = await getApi();
-  if (!ctx) {
-    console.error("memlin add-project: not configured. Run `memlin login` first.");
-    exitCli(1);
-  }
-  const { api, config: config2 } = ctx;
-  const cwd = runtimeCwd();
-  const enclosingRemote = readGitRemote2(cwd);
-  const anchor = selectAnchorRemote({
-    enclosingRemote,
-    // Only scan children when there's no enclosing repo — detectGitRemotes does
-    // its own enclosing-first check, so this skips a redundant git call.
-    childRemotes: enclosingRemote ? [] : detectGitRemotes(cwd)
-  });
-  const gitRemote = anchor.gitRemote;
-  if (anchor.umbrella) {
-    console.log(
-      `Umbrella folder detected (${anchor.childCount} child repo${anchor.childCount === 1 ? "" : "s"}); anchoring the project to ${gitRemote} so it resolves by git remote.`
-    );
-  }
-  const me = await api.me();
-  const accounts = me.accounts.map((a) => ({
-    id: a.id,
-    name: a.name,
-    kind: a.kind,
-    role: a.role
-  }));
-  let explicitTarget = null;
-  if (parsed.org) {
-    explicitTarget = pickAccount(accounts, parsed.org, config2.account_id);
-    if (!explicitTarget) {
-      console.error(`memlin add-project: couldn't match --org "${parsed.org}".`);
-      console.error("Your orgs:");
-      for (const a of accounts) {
-        const tag = a.kind === "personal" ? " (personal)" : "";
-        console.error(`  ${a.id}  ${a.name}${tag}  [${a.role}]`);
-      }
-      exitCli(1);
-    }
-  }
-  let resolved;
-  try {
-    resolved = await api.resolveProject({ git_remote: gitRemote, cwd });
-  } catch (err) {
-    console.error(
-      `memlin add-project: project lookup failed: ${err instanceof Error ? err.message : err}`
-    );
-    exitCli(1);
-  }
-  if (resolved.project_id && resolved.account_id) {
-    const reTarget = shouldReTarget({
-      explicitTargetId: explicitTarget?.id ?? null,
-      resolvedAccountId: resolved.account_id
-    });
-    if (!reTarget) {
-      const pin2 = await writeWorkspaceBinding(cwd, {
-        account_id: resolved.account_id,
-        project_id: resolved.project_id
-      });
-      console.log(`Already registered. Pinned ${cwd}`);
-      console.log(`  \u2192 project "${resolved.name ?? "(unnamed)"}" via ${resolved.reason}`);
-      console.log(`  wrote ${pin2}`);
-      return;
-    }
-    console.log(
-      `Re-targeting this workspace to "${explicitTarget.name}" (was resolving to "${resolved.name ?? resolved.project_id}" under another org via ${resolved.reason}).`
-    );
-    if (resolved.reason === "local-path") {
-      try {
-        await api.patchProject(
-          resolved.project_id,
-          { remove_local_paths: [cwd] },
-          { accountId: resolved.account_id }
-        );
-        console.log(`  detached ${cwd} from the old project`);
-      } catch (err) {
-        console.error(
-          `  warning: couldn't auto-detach the old local-path registration (${err instanceof Error ? err.message : err}).`
-        );
-        console.error(
-          `  Remove ${cwd} from that project's local_paths in the web app, or resolution may keep reverting.`
-        );
-      }
-    }
-  }
-  let attachTargetId = null;
-  let attachAccountId = null;
-  if (!explicitTarget) {
-    const sibling = await detectSiblingProject(cwd, (input) => api.resolveProject(input));
-    const action = decideAddProjectAction({
-      attachFlag: parsed.attach ?? null,
-      createNewFlag: parsed.createNew === true,
-      sibling,
-      isTTY: process.stdout.isTTY === true && process.stdin.isTTY === true
-    });
-    attachAccountId = sibling?.account_id ?? null;
-    if (action.kind === "attach") {
-      attachTargetId = action.projectId;
-    } else if (action.kind === "error-need-flag") {
-      console.error(
-        `memlin add-project: this folder's child repo ${sibling.via}/ already belongs to project "${sibling.name ?? sibling.project_id}".`
-      );
-      console.error("Refusing to silently create a second project. Choose explicitly:");
-      console.error(`  memlin add-project --attach ${sibling.project_id}   # attach this root to it`);
-      console.error(
-        "  memlin add-project --create-new                      # really create a new project"
-      );
-      exitCli(2);
-    } else if (action.kind === "prompt") {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await new Promise(
-        (resolve) => rl.question(
-          `Child repo ${sibling.via}/ already belongs to project "${sibling.name ?? sibling.project_id}".
-Attach this folder to it instead of creating a new project? [Y/n] `,
-          resolve
-        )
-      );
-      rl.close();
-      if (answer.trim() === "" || /^y(es)?$/i.test(answer.trim())) {
-        attachTargetId = sibling.project_id;
-      }
-    }
-  }
-  if (attachTargetId) {
-    const attachAcct = attachAccountId ?? config2.account_id;
-    try {
-      const updated = await api.patchProject(
-        attachTargetId,
-        { add_local_paths: [cwd] },
-        { accountId: attachAcct }
-      );
-      const pin2 = await writeWorkspaceBinding(cwd, {
-        account_id: attachAcct,
-        project_id: attachTargetId
-      });
-      console.log(`Attached ${cwd} \u2192 project "${updated.name}"`);
-      console.log(`  local_paths: ${JSON.stringify(updated.local_paths)}`);
-      console.log(`  wrote ${pin2}`);
-      return;
-    } catch (err) {
-      console.error(
-        `memlin add-project: attach failed: ${err instanceof Error ? err.message : err}`
-      );
-      exitCli(1);
-    }
-  }
-  const target = explicitTarget ?? pickAccount(accounts, void 0, config2.account_id);
-  if (!target) {
-    console.error("memlin add-project: couldn't pick a default org.");
-    console.error("Pass --org <name> explicitly. Your orgs:");
-    for (const a of accounts) {
-      const tag = a.kind === "personal" ? " (personal)" : "";
-      console.error(`  ${a.id}  ${a.name}${tag}  [${a.role}]`);
-    }
-    exitCli(1);
-  }
-  if (!parsed.org && gitRemote && accounts.length > 1) {
-    console.log(
-      `Note: this repo's git remote isn't attached to any of your ${accounts.length} orgs yet.`
-    );
-    console.log(
-      `Creating a new project under "${target.name}" (your default). If it belongs to a different org, cancel and pass --org <name>, or run \`memlin login\` to refresh your account list first.`
-    );
-  }
-  const projectName = parsed.name?.trim() || path11.basename(cwd).trim() || "untitled";
-  let project;
-  try {
-    project = await api.createProject(
-      {
-        name: projectName,
-        kind: parsed.kind,
-        git_remote: gitRemote,
-        local_paths: [cwd],
-        auto_bind: true
-      },
-      { accountId: target.id }
-    );
-  } catch (err) {
-    console.error(`memlin add-project: create failed: ${err instanceof Error ? err.message : err}`);
-    exitCli(1);
-  }
-  const pin = await writeWorkspaceBinding(cwd, {
-    account_id: target.id,
-    project_id: project.id,
-    account_name: target.name
-  });
-  console.log(`Registered ${cwd} \u2192 "${target.name}" / project "${project.name}"`);
-  if (gitRemote) console.log(`  git_remote:  ${gitRemote}`);
-  console.log(`  local_paths: ["${cwd}"]`);
-  console.log(`  wrote ${pin}`);
-  console.log(`
-Memlin \u2192 "${target.name}" / project "${project.name}" (workspace pin)`);
-  const presence = inspectUserScopePlugin(await readClaudeUserSettings(defaultUserSettingsPaths()));
-  if (presence.status !== "enabled") {
-    console.log("");
-    console.log(`  ! Memlin plugin not enabled at user scope.`);
-    console.log(
-      `    This bind is recorded, but Claude Code won't load Memlin hooks or slash`
-    );
-    console.log(
-      `    commands here until the plugin is enabled. Quickest fix: re-run \`memlin login\`,`
-    );
-    console.log(`    which writes the enablement once and every workspace picks it up.`);
-  }
-}
-runCliMain(main, (err) => {
-  console.error("memlin add-project failed:", err instanceof Error ? err.message : err);
-  return 1;
-});
+export {
+  NO_OPEN_DECISIONS,
+  formatDecisionDetail,
+  formatDecisionList,
+  formatDecisionStatusLine,
+  labelWithId
+};
 /*! Bundled license information:
 
 is-extendable/index.js:

@@ -3807,7 +3807,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs7 = __require("fs");
+    var fs6 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3891,7 +3891,7 @@ var require_gray_matter = __commonJS({
       return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs7.readFileSync(filepath, "utf8");
+      const str2 = fs6.readFileSync(filepath, "utf8");
       const file2 = matter3(str2, options2);
       file2.path = filepath;
       return file2;
@@ -4221,11 +4221,6 @@ var init_workspace_binding = __esm({
     GIT_POINTER_MAX_BYTES = 8 * 1024;
   }
 });
-
-// packages/plugin-core/src/cli/add-project.ts
-import { execSync as execSync2 } from "node:child_process";
-import path11 from "node:path";
-import readline from "node:readline";
 
 // packages/plugin-core/src/client.ts
 import { promises as fs5 } from "node:fs";
@@ -4952,8 +4947,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path8, errorMaps, issueData } = params;
+  const fullPath = [...path8, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5069,11 +5064,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path8, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path8;
     this._key = key;
   }
   get path() {
@@ -9601,19 +9596,19 @@ var ContextManifestV1Schema = external_exports.object({
       location: `linked_contexts.${index}`
     }))
   ];
-  references.forEach(({ ref, path: path12, location }) => {
+  references.forEach(({ ref, path: path8, location }) => {
     const identity = contextReferenceIdentityKey(ref);
     const prior = seen.get(identity);
     if (prior && prior.revision !== ref.revision) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path12,
+        path: path8,
         message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
       });
     } else if (prior && location.startsWith("linked_contexts.")) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path12,
+        path: path8,
         message: `duplicate linked context ${identity}`
       });
     }
@@ -9927,11 +9922,11 @@ var ContextBundleV1Schema = external_exports.object({
         path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
       }))
     ];
-    for (const { ref, path: path12 } of references) {
+    for (const { ref, path: path8 } of references) {
       if (!contextKeys.has(contextReferenceKey(ref))) {
         ctx.addIssue({
           code: external_exports.ZodIssueCode.custom,
-          path: path12,
+          path: path8,
           message: "provider coverage is outside the exact manifest contexts"
         });
       }
@@ -12805,10 +12800,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path12) {
-  if (!path12)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path12.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -13128,11 +13123,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path12, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path12);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -13269,7 +13264,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path12 = []) => {
+  const processError = (error41, path8 = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -13279,7 +13274,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -13309,9 +13304,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path12) {
+function toDotPath(path8) {
   const segs = [];
-  for (const seg of path12) {
+  for (const seg of path8) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -23969,10 +23964,10 @@ function validateFlowDefinitionSemantics(flow) {
       ],
       ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
     ];
-    targets.forEach(({ target, path: path12 }) => {
+    targets.forEach(({ target, path: path8 }) => {
       if (!isReservedTarget(target) && !stageById.has(target)) {
         issues.push({
-          path: path12,
+          path: path8,
           code: "missing_transition_target",
           message: `transition target ${JSON.stringify(target)} does not exist`
         });
@@ -24002,7 +23997,7 @@ function validateFlowDefinitionSemantics(flow) {
   const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   let hasReachableEnd = false;
-  const visit = (stageId, path12, pathBounds) => {
+  const visit = (stageId, path8, pathBounds) => {
     reachable.add(stageId);
     if (visited.has(stageId)) return;
     visiting.add(stageId);
@@ -24018,7 +24013,7 @@ function validateFlowDefinitionSemantics(flow) {
         ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
         ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
       ];
-      const currentPath = [...path12, stageId];
+      const currentPath = [...path8, stageId];
       for (const edge of edges) {
         const { target } = edge;
         if (target === "$end") {
@@ -24126,18 +24121,18 @@ var FlowPackManifestBaseSchema = external_exports2.object({
   evals: external_exports2.array(ManifestEvalSchema).max(256),
   model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
 }).strict();
-function validateRelativePackPath(path12) {
-  if (path12.startsWith("/") || path12.startsWith("\\")) return "path must be relative";
-  if (/^[A-Za-z]:/.test(path12) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path12)) {
+function validateRelativePackPath(path8) {
+  if (path8.startsWith("/") || path8.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path8) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path8)) {
     return "drive-qualified paths and URI schemes are not allowed";
   }
-  if (/[\u0000-\u001f\u007f]/.test(path12)) return "control characters are not allowed";
-  if (/%(?:2e|2f|5c)/i.test(path12)) return "encoded path traversal is not allowed";
-  if (path12.includes("\\")) return "path must use forward slashes";
-  if (path12.split("/").some((segment) => segment === ".." || segment === ".")) {
+  if (/[\u0000-\u001f\u007f]/.test(path8)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path8)) return "encoded path traversal is not allowed";
+  if (path8.includes("\\")) return "path must use forward slashes";
+  if (path8.split("/").some((segment) => segment === ".." || segment === ".")) {
     return "path traversal and dot segments are not allowed";
   }
-  if (path12.split("/").some((segment) => segment.length === 0)) {
+  if (path8.split("/").some((segment) => segment.length === 0)) {
     return "path cannot contain empty segments";
   }
   return null;
@@ -24184,22 +24179,22 @@ function validateFlowPackManifestSemantics(manifest) {
       issues
     );
     role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
-      const path12 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      const path8 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
       if (comparedRole === role.id) {
         issues.push({
-          path: path12,
+          path: path8,
           code: "self_referential_model_independence",
           message: "a model role cannot require independence from itself"
         });
       } else if (!modelRolesById.has(comparedRole)) {
         issues.push({
-          path: path12,
+          path: path8,
           code: "missing_independence_model_role",
           message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
         });
       } else if (modelRolesById.get(comparedRole)?.independence !== null) {
         issues.push({
-          path: path12,
+          path: path8,
           code: "independence_reference_not_author",
           message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
         });
@@ -24318,42 +24313,6 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
-var PROVIDER_HOSTS = [
-  "github.com",
-  "gitlab.com",
-  "bitbucket.org",
-  "dev.azure.com",
-  "ssh.dev.azure.com",
-  "codeberg.org",
-  "sr.ht",
-  "git.sr.ht"
-];
-function normalizeGitRemote(raw) {
-  if (!raw) return null;
-  let s = raw.trim();
-  if (!s) return null;
-  if (!s.includes("://")) {
-    s = s.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
-  }
-  s = s.replace(/^(?:ssh|git|https?):\/\//, "");
-  s = s.replace(/^[^/@]+@/, "");
-  s = s.replace(/\.git$/, "");
-  s = s.replace(/\/$/, "");
-  const slash = s.indexOf("/");
-  if (slash > 0) {
-    const host = s.slice(0, slash).toLowerCase();
-    const rest = s.slice(slash);
-    s = host + rest;
-    for (const provider of PROVIDER_HOSTS) {
-      if (host === provider) break;
-      if (host.startsWith(provider + "-")) {
-        s = provider + rest;
-        break;
-      }
-    }
-  }
-  return s || null;
-}
 async function closeHttpSockets() {
   try {
     const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
@@ -25767,6 +25726,82 @@ function applyWorkspaceOverlay(config2, overlay) {
   };
 }
 
+// packages/plugin-core/src/cli/args.ts
+function parseSlashArgs(raw) {
+  const tokens = [];
+  let cur = "";
+  let inSingle = false;
+  let inDouble = false;
+  let started = false;
+  let i = 0;
+  const flush = () => {
+    if (started) {
+      tokens.push(cur);
+      cur = "";
+      started = false;
+    }
+  };
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (inSingle) {
+      if (ch === "'") {
+        inSingle = false;
+      } else {
+        cur += ch;
+      }
+      i++;
+      continue;
+    }
+    if (inDouble) {
+      if (ch === "\\" && i + 1 < raw.length) {
+        const next = raw[i + 1];
+        if (next === '"' || next === "\\") {
+          cur += next;
+          i += 2;
+          continue;
+        }
+        cur += ch;
+        i++;
+        continue;
+      }
+      if (ch === '"') {
+        inDouble = false;
+        i++;
+        continue;
+      }
+      cur += ch;
+      i++;
+      continue;
+    }
+    if (ch === "'") {
+      inSingle = true;
+      started = true;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inDouble = true;
+      started = true;
+      i++;
+      continue;
+    }
+    if (ch === " " || ch === "	" || ch === "\n") {
+      flush();
+      i++;
+      continue;
+    }
+    cur += ch;
+    started = true;
+    i++;
+  }
+  flush();
+  return tokens;
+}
+function argvAsSlashArgs() {
+  const raw = process.argv.slice(2).join(" ").trim();
+  return parseSlashArgs(raw);
+}
+
 // packages/plugin-core/src/cli/cli-runner.ts
 var WATCHDOG_MS = 2e3;
 var CliExit = class extends Error {
@@ -25809,498 +25844,107 @@ function runCliMain(main2, onError) {
   );
 }
 
-// packages/plugin-core/src/project-resolver.ts
-import { existsSync, readdirSync, readFileSync as readFileSync2, lstatSync } from "node:fs";
-import path8 from "node:path";
-init_workspace_binding();
-var WORKSPACE_ENV_VARS = [
-  // Claude Code exposes the original project dir to hooks/plugin commands.
-  "CLAUDE_PROJECT_DIR",
-  // Cursor/plugin shims and local tests can set this explicitly.
-  "CURSOR_WORKSPACE_ROOT",
-  "CURSOR_PROJECT_ROOT",
-  "MEMLIN_WORKSPACE_ROOT",
-  // npm/pnpm set INIT_CWD to the directory where the user invoked a script.
-  "INIT_CWD"
-];
-function runtimeCwd(fallback = process.cwd()) {
-  for (const name of WORKSPACE_ENV_VARS) {
-    const raw = process.env[name]?.trim();
-    if (raw && path8.isAbsolute(raw)) return path8.resolve(raw);
-  }
-  return path8.resolve(fallback);
+// packages/plugin-core/src/cli/decide-args.ts
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(value) {
+  return UUID_RE.test(value);
 }
-function readGitRemote(cwd) {
-  const read = (file2) => {
-    const stat = lstatSync(file2);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024)
-      throw new Error("Unsupported Git metadata");
-    return readFileSync2(file2, "utf8");
+function extractNoteFlag(args) {
+  const rest = [];
+  let note = null;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--note") {
+      const value = args[i + 1];
+      if (value === void 0 || value.startsWith("--")) {
+        return { args: rest, note: null, error: 'missing value for --note \u2014 use --note "your reason"' };
+      }
+      note = value;
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--note=")) {
+      note = arg.slice("--note=".length);
+      continue;
+    }
+    rest.push(arg);
+  }
+  const trimmed = note?.trim() ?? "";
+  return { args: rest, note: trimmed ? trimmed : null, error: null };
+}
+var DECIDE_USAGE = 'usage: memlin decide <id> <option> [--note "why"]';
+function parseDecideArgs(args) {
+  const split = extractNoteFlag(args);
+  if (split.error) return { error: split.error };
+  const unknown2 = split.args.find((a) => a.startsWith("--"));
+  if (unknown2) return { error: `unknown flag ${unknown2} \u2014 ${DECIDE_USAGE}` };
+  const [id, option, ...extra] = split.args;
+  if (!id || !option) return { error: DECIDE_USAGE };
+  if (extra.length > 0) {
+    return { error: `unexpected argument "${extra[0]}" \u2014 quote the note: --note "\u2026"` };
+  }
+  return { id, option, note: split.note };
+}
+function matchById(items, needle, noun = "open decision") {
+  const exact = items.find((d) => d.id === needle);
+  if (exact) return exact;
+  const matches = items.filter((d) => d.id.startsWith(needle));
+  if (matches.length === 1) return matches[0];
+  if (matches.length === 0) return { error: `no ${noun} matches "${needle}"` };
+  return {
+    error: `"${needle}" is ambiguous \u2014 matches ${matches.length} ${noun}s; use more characters`
   };
-  try {
-    let root = path8.resolve(cwd);
-    for (; ; ) {
-      const marker = path8.join(root, ".git");
-      if (existsSync(marker)) {
-        const info = lstatSync(marker);
-        if (info.isSymbolicLink()) return null;
-        let directory = marker;
-        if (info.isFile()) {
-          const match = /^gitdir:\s*(.+)$/m.exec(read(marker));
-          if (!match) return null;
-          directory = path8.resolve(root, match[1].trim());
-        }
-        const common2 = path8.join(directory, "commondir");
-        if (existsSync(common2)) directory = path8.resolve(directory, read(common2).trim());
-        let origin = false;
-        for (const line of read(path8.join(directory, "config")).split(/\r?\n/)) {
-          if (/^\s*\[/.test(line)) origin = /^\s*\[remote\s+"origin"\]\s*(?:[#;].*)?$/.test(line);
-          else if (origin) {
-            const match = /^\s*url\s*=\s*(.*?)\s*$/.exec(line);
-            if (match) return normalizeGitRemote(match[1].replace(/^"(.*)"$/, "$1"));
-          }
-        }
-        return null;
-      }
-      const parent = path8.dirname(root);
-      if (parent === root) return null;
-      root = parent;
-    }
-  } catch {
-    return null;
-  }
-}
-var MAX_WORKSPACE_SCAN = 64;
-function detectGitRemotes(cwd) {
-  const enclosing = readGitRemote(cwd);
-  if (enclosing) return [enclosing];
-  const out = [];
-  try {
-    let scanned = 0;
-    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
-      if (scanned >= MAX_WORKSPACE_SCAN) break;
-      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
-        continue;
-      }
-      scanned++;
-      const child = path8.join(cwd, entry.name);
-      if (!existsSync(path8.join(child, ".git"))) continue;
-      const remote = readGitRemote(child);
-      if (remote && !out.includes(remote)) out.push(remote);
-    }
-  } catch {
-  }
-  return out;
-}
-function selectAnchorRemote(input) {
-  if (input.enclosingRemote) {
-    return { gitRemote: input.enclosingRemote, umbrella: false, childCount: 0 };
-  }
-  if (input.childRemotes.length > 0) {
-    return {
-      gitRemote: input.childRemotes[0],
-      umbrella: true,
-      childCount: input.childRemotes.length
-    };
-  }
-  return { gitRemote: null, umbrella: false, childCount: 0 };
-}
-function shouldReTarget(input) {
-  return Boolean(input.explicitTargetId && input.explicitTargetId !== input.resolvedAccountId);
 }
 
-// packages/plugin-core/src/cli/add-project.ts
-init_workspace_binding();
-
-// packages/plugin-core/src/sibling-detect.ts
-import { readdirSync as readdirSync2, existsSync as existsSync2 } from "node:fs";
-import { execSync } from "node:child_process";
-import path9 from "node:path";
-var MAX_CHILD_DIRS = 32;
-var MAX_REMOTE_PROBES = 5;
-function childGitRemotes(cwd, deps = {}) {
-  const listDirs = deps.listDirs ?? ((p) => {
-    try {
-      return readdirSync2(p, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules").map((e) => e.name);
-    } catch {
-      return [];
-    }
-  });
-  const readRemote = deps.readRemote ?? ((repoPath) => {
-    try {
-      if (!existsSync2(path9.join(repoPath, ".git"))) return null;
-      const url2 = execSync("git remote get-url origin", {
-        windowsHide: true,
-        cwd: repoPath,
-        stdio: ["ignore", "pipe", "ignore"],
-        encoding: "utf8"
-      }).trim();
-      return normalizeGitRemote(url2);
-    } catch {
-      return null;
-    }
-  });
-  const out = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const dir of listDirs(cwd).slice(0, MAX_CHILD_DIRS)) {
-    const remote = readRemote(path9.join(cwd, dir));
-    if (!remote || seen.has(remote)) continue;
-    seen.add(remote);
-    out.push({ dir, remote });
-    if (out.length >= MAX_REMOTE_PROBES) break;
-  }
-  return out;
-}
-async function detectSiblingProject(cwd, resolveProject, deps = {}) {
-  for (const { dir, remote } of childGitRemotes(cwd, deps)) {
-    try {
-      const resolved = await resolveProject({ git_remote: remote });
-      if (resolved.project_id && resolved.account_id) {
-        return {
-          project_id: resolved.project_id,
-          account_id: resolved.account_id,
-          name: resolved.name ?? null,
-          via: dir
-        };
-      }
-    } catch {
-    }
-  }
-  return null;
-}
-function decideAddProjectAction(input) {
-  if (input.attachFlag) return { kind: "attach", projectId: input.attachFlag };
-  if (input.createNewFlag) return { kind: "create" };
-  if (!input.sibling) return { kind: "create" };
-  return input.isTTY ? { kind: "prompt" } : { kind: "error-need-flag" };
-}
-
-// packages/plugin-core/src/plugin-install.ts
-import { promises as fs6 } from "node:fs";
-import { existsSync as existsSync3 } from "node:fs";
-import path10 from "node:path";
-import os7 from "node:os";
-var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
-var MEMLIN_MARKETPLACE_KEY = "memlin-ai";
-function defaultUserSettingsPaths() {
-  const claudeDir = path10.join(os7.homedir(), ".claude");
-  return { claudeDir, settingsFile: path10.join(claudeDir, "settings.json") };
-}
-async function readClaudeUserSettings(paths) {
-  const p = paths ?? defaultUserSettingsPaths();
-  if (!existsSync3(p.settingsFile)) return null;
-  let raw;
-  try {
-    raw = await fs6.readFile(p.settingsFile, "utf8");
-  } catch {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-function inspectUserScopePlugin(settings) {
-  if (!settings) return { status: "unconfigured", marketplaceRegistered: false };
-  const enabled = settings.enabledPlugins?.[MEMLIN_PLUGIN_KEY] === true;
-  const market = !!settings.extraKnownMarketplaces?.[MEMLIN_MARKETPLACE_KEY];
-  return { status: enabled ? "enabled" : "disabled", marketplaceRegistered: market };
-}
-
-// packages/plugin-core/src/cli/add-project.ts
-function parseArgs(argv) {
-  const out = { kind: "code" };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--org" || a === "-o") {
-      out.org = argv[++i];
-      if (!out.org) return { error: "--org requires a value" };
-    } else if (a === "--name" || a === "-n") {
-      out.name = argv[++i];
-      if (!out.name) return { error: "--name requires a value" };
-    } else if (a === "--kind") {
-      const v = argv[++i];
-      if (v !== "code" && v !== "general") return { error: "--kind must be 'code' or 'general'" };
-      out.kind = v;
-    } else if (a === "--attach") {
-      out.attach = argv[++i];
-      if (!out.attach) return { error: "--attach requires a project id" };
-    } else if (a === "--create-new") {
-      out.createNew = true;
-    } else if (a === "--help" || a === "-h") {
-      return { error: "help" };
-    } else if (a?.startsWith("--")) {
-      return { error: `unknown flag: ${a}` };
-    }
-  }
-  return out;
-}
-function printHelp() {
-  console.log(
-    [
-      "memlin add-project \u2014 register this Claude Code workspace",
-      "",
-      "Usage:",
-      "  memlin add-project [options]",
-      "",
-      "Options:",
-      "  --org <name|uuid>     Pin to a specific org (default: auto-resolve)",
-      "  --name <string>       Project name (default: derived from repo)",
-      "  --kind code|general   Project kind (default: code)",
-      "  --attach <project-id> Attach this dir to an existing project instead",
-      "  --create-new          Always create, even when a child repo already",
-      "                        belongs to a project (skips the attach offer)",
-      "",
-      "After this command, every Claude Code session in this directory",
-      "auto-binds to the new project. No further setup."
-    ].join("\n")
-  );
-}
-function readGitRemote2(cwd) {
-  try {
-    const url2 = execSync2("git remote get-url origin", {
-      windowsHide: true,
-      cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8"
-    }).trim();
-    return normalizeGitRemote(url2);
-  } catch {
-    return null;
-  }
-}
-function pickAccount(accounts, needle, fallback) {
-  if (needle) {
-    const exact = accounts.find((a) => a.id === needle);
-    if (exact) return exact;
-    const lower = needle.toLowerCase();
-    const matches = accounts.filter((a) => a.name.toLowerCase().includes(lower));
-    if (matches.length === 1) return matches[0];
-    return null;
-  }
-  return accounts.find((a) => a.id === fallback) ?? null;
-}
+// packages/plugin-core/src/cli/decide.ts
 async function main() {
-  const argv = process.argv.slice(2);
-  const parsed = parseArgs(argv);
+  const parsed = parseDecideArgs(argvAsSlashArgs());
   if ("error" in parsed) {
-    if (parsed.error === "help") {
-      printHelp();
-      exitCli(0);
-    }
-    console.error(`memlin add-project: ${parsed.error}`);
-    printHelp();
-    exitCli(2);
+    process.stderr.write(`${parsed.error}
+`);
+    exitCli(1);
   }
   const ctx = await getApi();
   if (!ctx) {
-    console.error("memlin add-project: not configured. Run `memlin login` first.");
+    process.stderr.write("not signed in \u2014 run /memlin-login first\n");
     exitCli(1);
   }
-  const { api, config: config2 } = ctx;
-  const cwd = runtimeCwd();
-  const enclosingRemote = readGitRemote2(cwd);
-  const anchor = selectAnchorRemote({
-    enclosingRemote,
-    // Only scan children when there's no enclosing repo — detectGitRemotes does
-    // its own enclosing-first check, so this skips a redundant git call.
-    childRemotes: enclosingRemote ? [] : detectGitRemotes(cwd)
-  });
-  const gitRemote = anchor.gitRemote;
-  if (anchor.umbrella) {
-    console.log(
-      `Umbrella folder detected (${anchor.childCount} child repo${anchor.childCount === 1 ? "" : "s"}); anchoring the project to ${gitRemote} so it resolves by git remote.`
-    );
-  }
-  const me = await api.me();
-  const accounts = me.accounts.map((a) => ({
-    id: a.id,
-    name: a.name,
-    kind: a.kind,
-    role: a.role
-  }));
-  let explicitTarget = null;
-  if (parsed.org) {
-    explicitTarget = pickAccount(accounts, parsed.org, config2.account_id);
-    if (!explicitTarget) {
-      console.error(`memlin add-project: couldn't match --org "${parsed.org}".`);
-      console.error("Your orgs:");
-      for (const a of accounts) {
-        const tag = a.kind === "personal" ? " (personal)" : "";
-        console.error(`  ${a.id}  ${a.name}${tag}  [${a.role}]`);
-      }
-      exitCli(1);
-    }
-  }
-  let resolved;
-  try {
-    resolved = await api.resolveProject({ git_remote: gitRemote, cwd });
-  } catch (err) {
-    console.error(
-      `memlin add-project: project lookup failed: ${err instanceof Error ? err.message : err}`
-    );
-    exitCli(1);
-  }
-  if (resolved.project_id && resolved.account_id) {
-    const reTarget = shouldReTarget({
-      explicitTargetId: explicitTarget?.id ?? null,
-      resolvedAccountId: resolved.account_id
-    });
-    if (!reTarget) {
-      const pin2 = await writeWorkspaceBinding(cwd, {
-        account_id: resolved.account_id,
-        project_id: resolved.project_id
-      });
-      console.log(`Already registered. Pinned ${cwd}`);
-      console.log(`  \u2192 project "${resolved.name ?? "(unnamed)"}" via ${resolved.reason}`);
-      console.log(`  wrote ${pin2}`);
-      return;
-    }
-    console.log(
-      `Re-targeting this workspace to "${explicitTarget.name}" (was resolving to "${resolved.name ?? resolved.project_id}" under another org via ${resolved.reason}).`
-    );
-    if (resolved.reason === "local-path") {
-      try {
-        await api.patchProject(
-          resolved.project_id,
-          { remove_local_paths: [cwd] },
-          { accountId: resolved.account_id }
-        );
-        console.log(`  detached ${cwd} from the old project`);
-      } catch (err) {
-        console.error(
-          `  warning: couldn't auto-detach the old local-path registration (${err instanceof Error ? err.message : err}).`
-        );
-        console.error(
-          `  Remove ${cwd} from that project's local_paths in the web app, or resolution may keep reverting.`
-        );
-      }
-    }
-  }
-  let attachTargetId = null;
-  let attachAccountId = null;
-  if (!explicitTarget) {
-    const sibling = await detectSiblingProject(cwd, (input) => api.resolveProject(input));
-    const action = decideAddProjectAction({
-      attachFlag: parsed.attach ?? null,
-      createNewFlag: parsed.createNew === true,
-      sibling,
-      isTTY: process.stdout.isTTY === true && process.stdin.isTTY === true
-    });
-    attachAccountId = sibling?.account_id ?? null;
-    if (action.kind === "attach") {
-      attachTargetId = action.projectId;
-    } else if (action.kind === "error-need-flag") {
-      console.error(
-        `memlin add-project: this folder's child repo ${sibling.via}/ already belongs to project "${sibling.name ?? sibling.project_id}".`
-      );
-      console.error("Refusing to silently create a second project. Choose explicitly:");
-      console.error(`  memlin add-project --attach ${sibling.project_id}   # attach this root to it`);
-      console.error(
-        "  memlin add-project --create-new                      # really create a new project"
-      );
+  let id = parsed.id;
+  if (!isUuid(id)) {
+    const { decisions } = await ctx.api.listDecisions({ limit: 200 });
+    const match = matchById(decisions, id);
+    if ("error" in match) {
+      process.stderr.write(`${match.error}
+`);
       exitCli(2);
-    } else if (action.kind === "prompt") {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await new Promise(
-        (resolve) => rl.question(
-          `Child repo ${sibling.via}/ already belongs to project "${sibling.name ?? sibling.project_id}".
-Attach this folder to it instead of creating a new project? [Y/n] `,
-          resolve
-        )
-      );
-      rl.close();
-      if (answer.trim() === "" || /^y(es)?$/i.test(answer.trim())) {
-        attachTargetId = sibling.project_id;
-      }
     }
-  }
-  if (attachTargetId) {
-    const attachAcct = attachAccountId ?? config2.account_id;
-    try {
-      const updated = await api.patchProject(
-        attachTargetId,
-        { add_local_paths: [cwd] },
-        { accountId: attachAcct }
-      );
-      const pin2 = await writeWorkspaceBinding(cwd, {
-        account_id: attachAcct,
-        project_id: attachTargetId
-      });
-      console.log(`Attached ${cwd} \u2192 project "${updated.name}"`);
-      console.log(`  local_paths: ${JSON.stringify(updated.local_paths)}`);
-      console.log(`  wrote ${pin2}`);
-      return;
-    } catch (err) {
-      console.error(
-        `memlin add-project: attach failed: ${err instanceof Error ? err.message : err}`
+    const valid = match.options.map((o) => o.id);
+    if (!valid.includes(parsed.option)) {
+      process.stderr.write(
+        `"${parsed.option}" is not an option for this ${match.kind} decision \u2014 choose one of: ${valid.join(", ")}
+`
       );
       exitCli(1);
     }
+    id = match.id;
   }
-  const target = explicitTarget ?? pickAccount(accounts, void 0, config2.account_id);
-  if (!target) {
-    console.error("memlin add-project: couldn't pick a default org.");
-    console.error("Pass --org <name> explicitly. Your orgs:");
-    for (const a of accounts) {
-      const tag = a.kind === "personal" ? " (personal)" : "";
-      console.error(`  ${a.id}  ${a.name}${tag}  [${a.role}]`);
-    }
-    exitCli(1);
-  }
-  if (!parsed.org && gitRemote && accounts.length > 1) {
-    console.log(
-      `Note: this repo's git remote isn't attached to any of your ${accounts.length} orgs yet.`
-    );
-    console.log(
-      `Creating a new project under "${target.name}" (your default). If it belongs to a different org, cancel and pass --org <name>, or run \`memlin login\` to refresh your account list first.`
-    );
-  }
-  const projectName = parsed.name?.trim() || path11.basename(cwd).trim() || "untitled";
-  let project;
-  try {
-    project = await api.createProject(
-      {
-        name: projectName,
-        kind: parsed.kind,
-        git_remote: gitRemote,
-        local_paths: [cwd],
-        auto_bind: true
-      },
-      { accountId: target.id }
-    );
-  } catch (err) {
-    console.error(`memlin add-project: create failed: ${err instanceof Error ? err.message : err}`);
-    exitCli(1);
-  }
-  const pin = await writeWorkspaceBinding(cwd, {
-    account_id: target.id,
-    project_id: project.id,
-    account_name: target.name
+  const result = await ctx.api.answerDecision(id, {
+    option: parsed.option,
+    note: parsed.note,
+    via: "cli"
   });
-  console.log(`Registered ${cwd} \u2192 "${target.name}" / project "${project.name}"`);
-  if (gitRemote) console.log(`  git_remote:  ${gitRemote}`);
-  console.log(`  local_paths: ["${cwd}"]`);
-  console.log(`  wrote ${pin}`);
-  console.log(`
-Memlin \u2192 "${target.name}" / project "${project.name}" (workspace pin)`);
-  const presence = inspectUserScopePlugin(await readClaudeUserSettings(defaultUserSettingsPaths()));
-  if (presence.status !== "enabled") {
-    console.log("");
-    console.log(`  ! Memlin plugin not enabled at user scope.`);
-    console.log(
-      `    This bind is recorded, but Claude Code won't load Memlin hooks or slash`
-    );
-    console.log(
-      `    commands here until the plugin is enabled. Quickest fix: re-run \`memlin login\`,`
-    );
-    console.log(`    which writes the enablement once and every workspace picks it up.`);
-  }
+  const verb = result.replayed ? "Already recorded" : "Recorded";
+  process.stdout.write(`\u2713 ${verb}: ${result.option.label} \u2014 ${result.decision.question}
+`);
+  process.stdout.write(`  ${result.consequence}
+`);
+  if (parsed.note) process.stdout.write(`  Note kept with the answer: "${parsed.note}"
+`);
+  if (result.reversible) process.stdout.write("  Can be undone from the Handled page.\n");
 }
 runCliMain(main, (err) => {
-  console.error("memlin add-project failed:", err instanceof Error ? err.message : err);
+  process.stderr.write(`memlin decide failed: ${err instanceof Error ? err.message : String(err)}
+`);
   return 1;
 });
 /*! Bundled license information:
