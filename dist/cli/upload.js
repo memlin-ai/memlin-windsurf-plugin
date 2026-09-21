@@ -41,47 +41,6 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// packages/plugin-core/dist/atomic-rename.js
-import { promises as fs } from "node:fs";
-import path from "node:path";
-async function renameWithRetry(from, to, rename) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await rename(from, to);
-      return;
-    } catch (error40) {
-      const code = error40.code;
-      if (attempt >= MAX_ATTEMPTS || !code || !RETRYABLE_CODES.has(code)) throw error40;
-      const cap = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
-      const delay2 = cap / 2 + Math.random() * (cap / 2);
-      await new Promise((resolve) => setTimeout(resolve, delay2));
-    }
-  }
-}
-async function atomicRename(from, to, dependencies = {}) {
-  const rename = dependencies.rename ?? fs.rename;
-  const queueKey = path.resolve(to);
-  const previous = renameQueues.get(queueKey) ?? Promise.resolve();
-  const run = previous.catch(() => void 0).then(() => renameWithRetry(from, to, rename));
-  renameQueues.set(queueKey, run);
-  try {
-    await run;
-  } finally {
-    if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
-  }
-}
-var RETRYABLE_CODES, MAX_ATTEMPTS, BASE_DELAY_MS, MAX_DELAY_MS, renameQueues;
-var init_atomic_rename = __esm({
-  "packages/plugin-core/dist/atomic-rename.js"() {
-    "use strict";
-    RETRYABLE_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
-    MAX_ATTEMPTS = 10;
-    BASE_DELAY_MS = 10;
-    MAX_DELAY_MS = 100;
-    renameQueues = /* @__PURE__ */ new Map();
-  }
-});
-
 // node_modules/.pnpm/kind-of@6.0.3/node_modules/kind-of/index.js
 var require_kind_of = __commonJS({
   "node_modules/.pnpm/kind-of@6.0.3/node_modules/kind-of/index.js"(exports2, module2) {
@@ -377,9 +336,9 @@ var require_common = __commonJS({
       }
       return target;
     }
-    function repeat(string4, count2) {
+    function repeat(string4, count) {
       var result = "", cycle;
-      for (cycle = 0; cycle < count2; cycle += 1) {
+      for (cycle = 0; cycle < count; cycle += 1) {
         result += string4;
       }
       return result;
@@ -1761,11 +1720,11 @@ var require_loader = __commonJS({
       }
       return false;
     }
-    function writeFoldedLines(state, count2) {
-      if (count2 === 1) {
+    function writeFoldedLines(state, count) {
+      if (count === 1) {
         state.result += " ";
-      } else if (count2 > 1) {
-        state.result += common2.repeat("\n", count2 - 1);
+      } else if (count > 1) {
+        state.result += common2.repeat("\n", count - 1);
       }
     }
     function readPlainScalar(state, nodeIndent, withinFlowCollection) {
@@ -3565,11 +3524,52 @@ var require_gray_matter = __commonJS({
   }
 });
 
-// packages/plugin-core/dist/auth-refusal.js
-import crypto3 from "node:crypto";
-import { promises as fs4 } from "node:fs";
-import os4 from "node:os";
-import path5 from "node:path";
+// packages/plugin-core/src/atomic-rename.ts
+import { promises as fs } from "node:fs";
+import path from "node:path";
+async function renameWithRetry(from, to, rename) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error40) {
+      const code = error40.code;
+      if (attempt >= MAX_ATTEMPTS || !code || !RETRYABLE_CODES.has(code)) throw error40;
+      const cap = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
+      const delay2 = cap / 2 + Math.random() * (cap / 2);
+      await new Promise((resolve) => setTimeout(resolve, delay2));
+    }
+  }
+}
+async function atomicRename(from, to, dependencies = {}) {
+  const rename = dependencies.rename ?? fs.rename;
+  const queueKey = path.resolve(to);
+  const previous = renameQueues.get(queueKey) ?? Promise.resolve();
+  const run = previous.catch(() => void 0).then(() => renameWithRetry(from, to, rename));
+  renameQueues.set(queueKey, run);
+  try {
+    await run;
+  } finally {
+    if (renameQueues.get(queueKey) === run) renameQueues.delete(queueKey);
+  }
+}
+var RETRYABLE_CODES, MAX_ATTEMPTS, BASE_DELAY_MS, MAX_DELAY_MS, renameQueues;
+var init_atomic_rename = __esm({
+  "packages/plugin-core/src/atomic-rename.ts"() {
+    "use strict";
+    RETRYABLE_CODES = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
+    MAX_ATTEMPTS = 10;
+    BASE_DELAY_MS = 10;
+    MAX_DELAY_MS = 100;
+    renameQueues = /* @__PURE__ */ new Map();
+  }
+});
+
+// packages/plugin-core/src/auth-refusal.ts
+import crypto from "node:crypto";
+import { promises as fs2 } from "node:fs";
+import os from "node:os";
+import path2 from "node:path";
 function isReason(value) {
   return value === "not_member" || value === "no_profile";
 }
@@ -3590,19 +3590,19 @@ function classifyAuthRefusal(status, body) {
   return null;
 }
 function authRefusalDir() {
-  return process.env.MEMLIN_AUTH_REFUSAL_DIR ?? path5.join(os4.homedir(), ".config", "memlin", "auth-refusal");
+  return process.env.MEMLIN_AUTH_REFUSAL_DIR ?? path2.join(os.homedir(), ".config", "memlin", "auth-refusal");
 }
 function sha(value) {
-  return crypto3.createHash("sha256").update(value).digest("hex").slice(0, 32);
+  return crypto.createHash("sha256").update(value).digest("hex").slice(0, 32);
 }
 function normalizeBinding(binding) {
-  return binding ? path5.resolve(binding) : null;
+  return binding ? path2.resolve(binding) : null;
 }
 function accountDir(accountId) {
-  return path5.join(authRefusalDir(), sha(accountId));
+  return path2.join(authRefusalDir(), sha(accountId));
 }
 function entryPath(accountId, binding) {
-  return path5.join(accountDir(accountId), `${sha(binding ?? "(global)")}.json`);
+  return path2.join(accountDir(accountId), `${sha(binding ?? "(global)")}.json`);
 }
 function isEntry(value) {
   if (typeof value !== "object" || value === null) return false;
@@ -3611,7 +3611,7 @@ function isEntry(value) {
 }
 async function readRaw(file2) {
   try {
-    const parsed = JSON.parse(await fs4.readFile(file2, "utf8"));
+    const parsed = JSON.parse(await fs2.readFile(file2, "utf8"));
     return isEntry(parsed) ? parsed : null;
   } catch {
     return null;
@@ -3619,9 +3619,9 @@ async function readRaw(file2) {
 }
 async function writeEntry(entry) {
   const file2 = entryPath(entry.account_id, entry.binding);
-  await fs4.mkdir(path5.dirname(file2), { recursive: true });
-  const tmp = `${file2}.${process.pid}.${crypto3.randomUUID()}.tmp`;
-  await fs4.writeFile(tmp, JSON.stringify(entry), { mode: 384 });
+  await fs2.mkdir(path2.dirname(file2), { recursive: true });
+  const tmp = `${file2}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await fs2.writeFile(tmp, JSON.stringify(entry), { mode: 384 });
   await atomicRename(tmp, file2);
 }
 async function recordAuthRefusal(input) {
@@ -3645,42 +3645,27 @@ async function readAuthRefusal(accountId, binding, now = Date.now()) {
   const entry = await readRaw(file2);
   if (!entry) return null;
   if (now >= entry.expires_at) {
-    await fs4.rm(file2, { force: true }).catch(() => {
+    await fs2.rm(file2, { force: true }).catch(() => {
     });
     return null;
   }
   return entry;
 }
 async function clearAuthRefusalsForAccount(accountId) {
-  await fs4.rm(accountDir(accountId), { recursive: true, force: true }).catch(() => {
+  await fs2.rm(accountDir(accountId), { recursive: true, force: true }).catch(() => {
   });
 }
 async function clearAllAuthRefusals() {
-  await fs4.rm(authRefusalDir(), { recursive: true, force: true }).catch(() => {
+  await fs2.rm(authRefusalDir(), { recursive: true, force: true }).catch(() => {
   });
-}
-function formatAuthRefusalNotice(entry) {
-  const label = entry.account_name?.trim() || entry.account_id.slice(0, 8);
-  return `Memlin can't use account ${label}: you're not a member (or not signed in to the web app). Run /memlin-link to pick an account or /memlin-login.`;
-}
-async function claimAuthRefusalNotice(entry, sessionId) {
-  const key = sessionId || NO_SESSION;
-  if (entry.notified_sessions.includes(key)) return null;
-  const updated = {
-    ...entry,
-    notified_sessions: [...entry.notified_sessions, key].slice(-MAX_NOTIFIED_SESSIONS)
-  };
-  await writeEntry(updated).catch(() => {
-  });
-  return formatAuthRefusalNotice(entry);
 }
 function accountIdsChanged(before, after) {
   const normalize = (value) => Array.isArray(value) ? value.filter((v) => typeof v === "string").sort().join(",") : "";
   return normalize(before) !== normalize(after);
 }
-var AUTH_REFUSAL_MESSAGES, AUTH_REFUSAL_TTL_MS, MAX_NOTIFIED_SESSIONS, NO_SESSION;
+var AUTH_REFUSAL_MESSAGES, AUTH_REFUSAL_TTL_MS;
 var init_auth_refusal = __esm({
-  "packages/plugin-core/dist/auth-refusal.js"() {
+  "packages/plugin-core/src/auth-refusal.ts"() {
     "use strict";
     init_atomic_rename();
     AUTH_REFUSAL_MESSAGES = {
@@ -3688,12 +3673,10 @@ var init_auth_refusal = __esm({
       no_profile: "no Memlin profile for this user \u2014 sign in to the web app first"
     };
     AUTH_REFUSAL_TTL_MS = 15 * 60 * 1e3;
-    MAX_NOTIFIED_SESSIONS = 50;
-    NO_SESSION = "(no-session)";
   }
 });
 
-// packages/plugin-core/dist/companion-client.js
+// packages/plugin-core/src/companion-client.ts
 var companion_client_exports = {};
 __export(companion_client_exports, {
   CODEX_ADDITIONAL_CONTEXT_MAX_BYTES: () => CODEX_ADDITIONAL_CONTEXT_MAX_BYTES,
@@ -3731,22 +3714,22 @@ __export(companion_client_exports, {
   resetCompanionClientCache: () => resetCompanionClientCache
 });
 import http from "node:http";
-import crypto4 from "node:crypto";
-import os5 from "node:os";
-import path6 from "node:path";
+import crypto2 from "node:crypto";
+import os2 from "node:os";
+import path3 from "node:path";
 function companionSocketPath(env = process.env) {
   const override = env[COMPANION_SOCKET_ENV];
   if (override) return override;
   if (process.platform === "win32") {
-    return `\\\\.\\pipe\\memlin-companion-${os5.userInfo().username}`;
+    return `\\\\.\\pipe\\memlin-companion-${os2.userInfo().username}`;
   }
-  return path6.join(os5.homedir(), ".config", "memlin", "run", "companion.sock");
+  return path3.join(os2.homedir(), ".config", "memlin", "run", "companion.sock");
 }
 function companionRunDir() {
-  return path6.join(os5.homedir(), ".config", "memlin", "run");
+  return path3.join(os2.homedir(), ".config", "memlin", "run");
 }
 function deriveResolveId(input) {
-  const digest = crypto4.createHash("sha256").update("memlin.resolve.v2\0").update(JSON.stringify([input.accountId, input.host, input.sessionId ?? null, input.turnId])).digest().subarray(0, 16);
+  const digest = crypto2.createHash("sha256").update("memlin.resolve.v2\0").update(JSON.stringify([input.accountId, input.host, input.sessionId ?? null, input.turnId])).digest().subarray(0, 16);
   digest[6] = digest[6] & 15 | 80;
   digest[8] = digest[8] & 63 | 128;
   const hex = digest.toString("hex");
@@ -3903,7 +3886,7 @@ function resetCompanionClientCache() {
 }
 var COMPANION_PROTOCOL, MIN_COMPANION_PROTOCOL, MAX_COMPANION_PROTOCOL, NO_COMPANION_ENV, IS_COMPANION_ENV, COMPANION_SOCKET_ENV, CODEX_HOOK_RESOLVE_PROFILE, CODEX_ADDITIONAL_CONTEXT_MAX_BYTES, CONNECT_TIMEOUT_MS, DEFAULT_CALL_TIMEOUT_MS, CALL_TIMEOUTS, socketDeadUntil, SOCKET_DEAD_TTL_MS, USE_COMPANION_ENV;
 var init_companion_client = __esm({
-  "packages/plugin-core/dist/companion-client.js"() {
+  "packages/plugin-core/src/companion-client.ts"() {
     "use strict";
     COMPANION_PROTOCOL = 1;
     MIN_COMPANION_PROTOCOL = 1;
@@ -3936,7 +3919,7 @@ var init_companion_client = __esm({
   }
 });
 
-// packages/plugin-core/dist/workspace-binding.js
+// packages/plugin-core/src/workspace-binding.ts
 var workspace_binding_exports = {};
 __export(workspace_binding_exports, {
   WORKSPACE_BINDING_FILE: () => WORKSPACE_BINDING_FILE,
@@ -3947,14 +3930,14 @@ __export(workspace_binding_exports, {
   writeWorkspaceBinding: () => writeWorkspaceBinding
 });
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { constants, promises as fs6 } from "node:fs";
-import path9 from "node:path";
+import { constants, promises as fs4 } from "node:fs";
+import path6 from "node:path";
 async function walkForWorkspaceBinding(startDir) {
-  let dir = path9.resolve(startDir);
+  let dir = path6.resolve(startDir);
   for (let i = 0; i < 64; i++) {
-    const candidate = path9.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
+    const candidate = path6.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
     try {
-      const raw = await fs6.readFile(candidate, "utf8");
+      const raw = await fs4.readFile(candidate, "utf8");
       const parsed = JSON.parse(raw);
       if (typeof parsed.account_id === "string" && parsed.account_id) {
         return {
@@ -3968,7 +3951,7 @@ async function walkForWorkspaceBinding(startDir) {
       }
     } catch {
     }
-    const parent = path9.dirname(dir);
+    const parent = path6.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
@@ -3977,7 +3960,7 @@ async function walkForWorkspaceBinding(startDir) {
 async function readSmallRegularFile(file2) {
   let before;
   try {
-    before = await fs6.lstat(file2);
+    before = await fs4.lstat(file2);
   } catch (error40) {
     return isFileNotFound(error40) ? { kind: "missing" } : { kind: "invalid" };
   }
@@ -3986,14 +3969,14 @@ async function readSmallRegularFile(file2) {
       return { kind: "invalid" };
     }
     const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-    const handle = await fs6.open(file2, constants.O_RDONLY | noFollow);
+    const handle = await fs4.open(file2, constants.O_RDONLY | noFollow);
     try {
       const opened = await handle.stat();
       if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size || opened.size > GIT_POINTER_MAX_BYTES) {
         return { kind: "invalid" };
       }
       const bytes = await handle.readFile();
-      const [after, afterPath] = await Promise.all([handle.stat(), fs6.lstat(file2)]);
+      const [after, afterPath] = await Promise.all([handle.stat(), fs4.lstat(file2)]);
       if (afterPath.isSymbolicLink() || !afterPath.isFile() || after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size || bytes.byteLength !== opened.size || bytes.includes(0)) {
         return { kind: "invalid" };
       }
@@ -4006,16 +3989,16 @@ async function readSmallRegularFile(file2) {
   }
 }
 function containedBy(parent, child) {
-  const relative = path9.relative(parent, child);
-  return relative === "" || relative !== ".." && !relative.startsWith(`..${path9.sep}`) && !path9.isAbsolute(relative);
+  const relative = path6.relative(parent, child);
+  return relative === "" || relative !== ".." && !relative.startsWith(`..${path6.sep}`) && !path6.isAbsolute(relative);
 }
 async function canonicalSafeDirectory(candidate) {
   try {
-    const before = await fs6.lstat(candidate);
+    const before = await fs4.lstat(candidate);
     if (before.isSymbolicLink() || !before.isDirectory()) return null;
-    await fs6.access(candidate, constants.R_OK | constants.X_OK);
-    const canonical = await fs6.realpath(candidate);
-    const after = await fs6.lstat(candidate);
+    await fs4.access(candidate, constants.R_OK | constants.X_OK);
+    const canonical = await fs4.realpath(candidate);
+    const after = await fs4.lstat(candidate);
     if (after.isSymbolicLink() || !after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) {
       return null;
     }
@@ -4032,24 +4015,24 @@ function gitIdentity(checkoutRoot, state, repositoryRoot = checkoutRoot) {
   };
 }
 async function resolveGitWorkspaceIdentity(startDir) {
-  const requested = path9.resolve(startDir);
+  const requested = path6.resolve(startDir);
   let canonicalStart;
   try {
-    canonicalStart = await fs6.realpath(requested);
-    const startEntry = await fs6.stat(canonicalStart);
+    canonicalStart = await fs4.realpath(requested);
+    const startEntry = await fs4.stat(canonicalStart);
     if (!startEntry.isDirectory()) return gitIdentity(canonicalStart, "unknown");
   } catch {
     return gitIdentity(requested, "unknown");
   }
   let dir = canonicalStart;
   for (let i = 0; i < 64; i++) {
-    const gitEntry = path9.join(dir, ".git");
+    const gitEntry = path6.join(dir, ".git");
     let entry;
     try {
-      entry = await fs6.lstat(gitEntry);
+      entry = await fs4.lstat(gitEntry);
     } catch (error40) {
       if (!isFileNotFound(error40)) return gitIdentity(dir, "unknown");
-      const parent = path9.dirname(dir);
+      const parent = path6.dirname(dir);
       if (parent === dir) return gitIdentity(canonicalStart, "none");
       dir = parent;
       continue;
@@ -4070,16 +4053,16 @@ async function resolveGitWorkspaceIdentity(startDir) {
     if (!pointerValue) return gitIdentity(checkoutRoot, "unknown");
     let gitDirCandidate;
     try {
-      gitDirCandidate = path9.isAbsolute(pointerValue) ? pointerValue : path9.resolve(checkoutRoot, pointerValue);
+      gitDirCandidate = path6.isAbsolute(pointerValue) ? pointerValue : path6.resolve(checkoutRoot, pointerValue);
     } catch {
       return gitIdentity(checkoutRoot, "unknown");
     }
     const gitDir = await canonicalSafeDirectory(gitDirCandidate);
     if (!gitDir) return gitIdentity(checkoutRoot, "unknown");
-    const commonRead = await readSmallRegularFile(path9.join(gitDir, "commondir"));
+    const commonRead = await readSmallRegularFile(path6.join(gitDir, "commondir"));
     if (commonRead.kind === "missing") {
-      const gitDirParent = path9.dirname(gitDir);
-      const looksLikeWorktreeAdmin = path9.basename(gitDirParent) === "worktrees" && path9.basename(path9.dirname(gitDirParent)) === ".git";
+      const gitDirParent = path6.dirname(gitDir);
+      const looksLikeWorktreeAdmin = path6.basename(gitDirParent) === "worktrees" && path6.basename(path6.dirname(gitDirParent)) === ".git";
       if (looksLikeWorktreeAdmin) return gitIdentity(checkoutRoot, "unknown");
       return gitIdentity(checkoutRoot, "main");
     }
@@ -4091,22 +4074,22 @@ async function resolveGitWorkspaceIdentity(startDir) {
     if (!commonValue) return gitIdentity(checkoutRoot, "unknown");
     let commonCandidate;
     try {
-      commonCandidate = path9.isAbsolute(commonValue) ? commonValue : path9.resolve(gitDir, commonValue);
+      commonCandidate = path6.isAbsolute(commonValue) ? commonValue : path6.resolve(gitDir, commonValue);
     } catch {
       return gitIdentity(checkoutRoot, "unknown");
     }
     const commonDir = await canonicalSafeDirectory(commonCandidate);
     if (!commonDir) return gitIdentity(checkoutRoot, "unknown");
-    const worktreesDir = path9.join(commonDir, "worktrees");
-    if (path9.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
+    const worktreesDir = path6.join(commonDir, "worktrees");
+    if (path6.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
       return gitIdentity(checkoutRoot, "unknown");
     }
-    const repositoryRoot = path9.dirname(commonDir);
-    const repositoryGitDir = await canonicalSafeDirectory(path9.join(repositoryRoot, ".git"));
+    const repositoryRoot = path6.dirname(commonDir);
+    const repositoryGitDir = await canonicalSafeDirectory(path6.join(repositoryRoot, ".git"));
     if (!repositoryGitDir || repositoryGitDir !== commonDir) {
       return gitIdentity(checkoutRoot, "unknown");
     }
-    const reverseRead = await readSmallRegularFile(path9.join(gitDir, "gitdir"));
+    const reverseRead = await readSmallRegularFile(path6.join(gitDir, "gitdir"));
     if (reverseRead.kind !== "ok" || reverseRead.value.includes("\0")) {
       return gitIdentity(checkoutRoot, "unknown");
     }
@@ -4114,10 +4097,10 @@ async function resolveGitWorkspaceIdentity(startDir) {
     const reverseValue = reverseMatch?.[1];
     if (!reverseValue) return gitIdentity(checkoutRoot, "unknown");
     try {
-      const reverseCandidate = path9.isAbsolute(reverseValue) ? reverseValue : path9.resolve(gitDir, reverseValue);
+      const reverseCandidate = path6.isAbsolute(reverseValue) ? reverseValue : path6.resolve(gitDir, reverseValue);
       const [reverseTarget, checkoutGitFile] = await Promise.all([
-        fs6.realpath(reverseCandidate),
-        fs6.realpath(gitEntry)
+        fs4.realpath(reverseCandidate),
+        fs4.realpath(gitEntry)
       ]);
       if (reverseTarget !== checkoutGitFile) return gitIdentity(checkoutRoot, "unknown");
     } catch {
@@ -4132,7 +4115,7 @@ async function findWorkspaceBinding(startDir) {
   const gitIdentity2 = await resolveGitWorkspaceIdentity(startDir);
   if (gitIdentity2.state !== "worktree") return direct;
   if (direct) {
-    const bindingRoot = await fs6.realpath(direct.workspaceRoot).catch(() => path9.resolve(direct.workspaceRoot));
+    const bindingRoot = await fs4.realpath(direct.workspaceRoot).catch(() => path6.resolve(direct.workspaceRoot));
     if (containedBy(gitIdentity2.checkout_root, bindingRoot)) return direct;
   }
   return walkForWorkspaceBinding(gitIdentity2.repository_root);
@@ -4141,26 +4124,26 @@ async function writeWorkspaceBinding(workspaceRoot, binding) {
   if (typeof binding.account_id !== "string" || binding.account_id.length === 0) {
     throw new Error("Workspace binding account_id is required.");
   }
-  const root = await fs6.realpath(path9.resolve(workspaceRoot));
-  const rootEntry = await fs6.stat(root);
+  const root = await fs4.realpath(path6.resolve(workspaceRoot));
+  const rootEntry = await fs4.stat(root);
   if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
-  const dir = path9.join(root, WORKSPACE_DIR_NAME);
+  const dir = path6.join(root, WORKSPACE_DIR_NAME);
   try {
-    const entry = await fs6.lstat(dir);
+    const entry = await fs4.lstat(dir);
     if (!entry.isDirectory() || entry.isSymbolicLink()) {
       throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
     }
   } catch (error40) {
     if (!isFileNotFound(error40)) throw error40;
-    await fs6.mkdir(dir, { mode: 448, recursive: true });
-    const entry = await fs6.lstat(dir);
+    await fs4.mkdir(dir, { mode: 448, recursive: true });
+    const entry = await fs4.lstat(dir);
     if (!entry.isDirectory() || entry.isSymbolicLink()) {
       throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
     }
   }
-  const file2 = path9.join(dir, WORKSPACE_BINDING_FILE);
+  const file2 = path6.join(dir, WORKSPACE_BINDING_FILE);
   try {
-    const existing = await fs6.lstat(file2);
+    const existing = await fs4.lstat(file2);
     if (!existing.isFile() || existing.isSymbolicLink()) {
       throw new Error(`Refusing to replace an unsafe workspace binding at ${file2}`);
     }
@@ -4176,16 +4159,16 @@ async function writeWorkspaceBinding(workspaceRoot, binding) {
     null,
     2
   );
-  const temporary = path9.join(dir, `.config.${randomUUID2()}.tmp`);
+  const temporary = path6.join(dir, `.config.${randomUUID2()}.tmp`);
   let handle;
   try {
-    handle = await fs6.open(temporary, "wx", 384);
+    handle = await fs4.open(temporary, "wx", 384);
     await handle.writeFile(body + "\n", "utf8");
     await handle.sync();
     await handle.close();
     handle = void 0;
     await atomicRename(temporary, file2);
-    const installed = await fs6.lstat(file2);
+    const installed = await fs4.lstat(file2);
     if (!installed.isFile() || installed.isSymbolicLink()) {
       throw new Error(`Workspace binding verification failed at ${file2}`);
     }
@@ -4193,16 +4176,16 @@ async function writeWorkspaceBinding(workspaceRoot, binding) {
     return file2;
   } finally {
     await handle?.close().catch(() => void 0);
-    await fs6.unlink(temporary).catch(() => void 0);
+    await fs4.unlink(temporary).catch(() => void 0);
   }
 }
 async function clearWorkspaceBinding(workspaceRoot) {
-  const root = await fs6.realpath(path9.resolve(workspaceRoot));
-  const rootEntry = await fs6.stat(root);
+  const root = await fs4.realpath(path6.resolve(workspaceRoot));
+  const rootEntry = await fs4.stat(root);
   if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
-  const dir = path9.join(root, WORKSPACE_DIR_NAME);
+  const dir = path6.join(root, WORKSPACE_DIR_NAME);
   try {
-    const entry = await fs6.lstat(dir);
+    const entry = await fs4.lstat(dir);
     if (!entry.isDirectory() || entry.isSymbolicLink()) {
       throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
     }
@@ -4210,13 +4193,13 @@ async function clearWorkspaceBinding(workspaceRoot) {
     if (isFileNotFound(error40)) return false;
     throw error40;
   }
-  const file2 = path9.join(dir, WORKSPACE_BINDING_FILE);
+  const file2 = path6.join(dir, WORKSPACE_BINDING_FILE);
   try {
-    const entry = await fs6.lstat(file2);
+    const entry = await fs4.lstat(file2);
     if (!entry.isFile() || entry.isSymbolicLink()) {
       throw new Error(`Refusing to remove an unsafe workspace binding at ${file2}`);
     }
-    await fs6.unlink(file2);
+    await fs4.unlink(file2);
     await clearAllAuthRefusals();
     return true;
   } catch (error40) {
@@ -4229,7 +4212,7 @@ function isFileNotFound(error40) {
 }
 var WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE, GIT_POINTER_MAX_BYTES;
 var init_workspace_binding = __esm({
-  "packages/plugin-core/dist/workspace-binding.js"() {
+  "packages/plugin-core/src/workspace-binding.ts"() {
     "use strict";
     init_atomic_rename();
     init_auth_refusal();
@@ -4239,531 +4222,9 @@ var init_workspace_binding = __esm({
   }
 });
 
-// apps/windsurf-plugin/src/hooks/user-prompt-submit.ts
-import { promises as fs8 } from "node:fs";
-import os10 from "node:os";
+// packages/plugin-core/src/cli/upload.ts
 import path11 from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
-
-// apps/windsurf-plugin/src/hook-io.ts
-function readHookInput() {
-  return new Promise((resolve) => {
-    let data = "";
-    const done = () => {
-      try {
-        resolve(data.trim() ? JSON.parse(data) : null);
-      } catch {
-        resolve(null);
-      }
-    };
-    const timer = setTimeout(done, 1e3);
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => {
-      data += chunk;
-    });
-    process.stdin.on("end", () => {
-      clearTimeout(timer);
-      done();
-    });
-    process.stdin.on("error", () => {
-      clearTimeout(timer);
-      done();
-    });
-  });
-}
-
-// packages/plugin-core/dist/state.js
-init_atomic_rename();
-import { promises as fs2 } from "node:fs";
-import path2 from "node:path";
-import os from "node:os";
-import crypto from "node:crypto";
-var STATE_FILE = path2.join(os.homedir(), ".config", "memlin", "state.json");
-var EMPTY = { documents: {} };
-async function readState() {
-  try {
-    const raw = await fs2.readFile(STATE_FILE, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return { ...EMPTY };
-  }
-}
-async function writeState(state) {
-  await fs2.mkdir(path2.dirname(STATE_FILE), { recursive: true });
-  const tmp = `${STATE_FILE}.${process.pid}.tmp`;
-  await fs2.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
-  await atomicRename(tmp, STATE_FILE);
-}
-var LOCK_DIR = `${STATE_FILE}.lock`;
-var LOCK_STALE_MS = 2e3;
-var LOCK_WAIT_MS = 2e3;
-var LOCK_RETRY_MS = 50;
-async function acquireStateLock() {
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  await fs2.mkdir(path2.dirname(LOCK_DIR), { recursive: true }).catch(() => {
-  });
-  for (; ; ) {
-    try {
-      await fs2.mkdir(LOCK_DIR);
-      return true;
-    } catch {
-      try {
-        const stat = await fs2.stat(LOCK_DIR);
-        if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-          await fs2.rmdir(LOCK_DIR).catch(() => {
-          });
-          continue;
-        }
-      } catch {
-        continue;
-      }
-      if (Date.now() >= deadline) return false;
-      await new Promise((r) => setTimeout(r, LOCK_RETRY_MS));
-    }
-  }
-}
-async function releaseStateLock() {
-  await fs2.rmdir(LOCK_DIR).catch(() => {
-  });
-}
-async function updateState(mutate) {
-  const locked = await acquireStateLock();
-  try {
-    const state = await readState();
-    await mutate(state);
-    await writeState(state);
-    return state;
-  } finally {
-    if (locked) await releaseStateLock();
-  }
-}
-function getLastResolveForSession(state, sessionId) {
-  if (sessionId) {
-    return state.last_resolves?.[sessionId] ?? (state.last_resolve?.session_id === sessionId ? state.last_resolve : void 0);
-  }
-  return state.last_resolve?.session_id ? void 0 : state.last_resolve;
-}
-async function markLastResolveDelivered(input) {
-  if (!input.auditId) return;
-  try {
-    await updateState((state) => {
-      const entry = getLastResolveForSession(state, input.sessionId);
-      if (entry?.audit_id !== input.auditId || entry.host !== input.host || entry.cwd !== input.cwd) {
-        return;
-      }
-      entry.delivered = true;
-      if (state.last_resolve?.audit_id === input.auditId && state.last_resolve.session_id === entry.session_id) {
-        state.last_resolve.delivered = true;
-      }
-    });
-  } catch {
-  }
-}
-
-// packages/plugin-core/dist/deploy-broker.js
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import os2 from "node:os";
-import path3 from "node:path";
-function deployWaiterDir() {
-  const override = process.env.MEMLIN_DEPLOY_WAITER_DIR?.trim();
-  if (override) return override;
-  return path3.join(os2.homedir(), ".config", "memlin", "deploy-waiters");
-}
-function waiterPath(sessionId) {
-  const safe = sessionId.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 180);
-  return path3.join(deployWaiterDir(), `${safe}.json`);
-}
-function clearLocalDeployWaiter(sessionId) {
-  try {
-    unlinkSync(waiterPath(sessionId));
-  } catch {
-  }
-}
-function readLocalDeployWaiter(sessionId) {
-  try {
-    const raw = readFileSync(waiterPath(sessionId), "utf8");
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed.session_id !== "string") return null;
-    if (parsed.session_id !== sessionId) return null;
-    if (parsed.status !== "waiting" && parsed.status !== "ready") return null;
-    const expiresAt = parsed.expires_at ? new Date(parsed.expires_at).getTime() : new Date(parsed.queued_at).getTime() + 60 * 60 * 1e3;
-    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-      clearLocalDeployWaiter(sessionId);
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-function hasPendingDeployWaiter(sessionId) {
-  if (!sessionId) return false;
-  if (!existsSync(waiterPath(sessionId))) return false;
-  return readLocalDeployWaiter(sessionId) != null;
-}
-
-// packages/plugin-core/dist/continuity.js
-var CONTINUITY_WINDOW_MS = 10 * 60 * 1e3;
-var CONTINUATION_PATTERNS = [
-  /^\s*(and|also|then|now|next|plus|but|or|so)\b(?=\s+\S)/i,
-  /^\s*(what about|how about|tell me more|go on|continue|keep going)\b/i,
-  /^\s*(explain|show me|expand|elaborate)\s+(that|this|it|the|more)\b/i,
-  /^\s*(yes|yeah|yep|ok|okay|sure|right|sounds good)[,;:]?\s+(now|and|so|continue|keep|do|ship|merge|apply|proceed)\b/i,
-  /^\s*(can you|could you)\s+(also|now|then|continue|elaborate)\b/i,
-  /^\s*(can|could|would|will)\s+you\s+(please\s+)?(do|fix|change|update|ship|merge|apply|open|show|explain|retry|run|test)\s+(it|that|this|them|those|these)\b/i,
-  /^\s*(do|fix|change|update|ship|merge|apply|open|show|explain|expand|remove|delete|revert|retry|run|test|review|check)\s+(it|that|this|them|those|these|the same)\b/i,
-  /^\s*(go ahead|please do|do it|ship it|merge it|apply it|try again|same (for|with)|one more time)\b/i,
-  /^\s*(why|how|how so|where|when|what next|which one|show me|more)\s*[?.!]*$/i,
-  /^\s*(the (first|second|third|last|other) one|option\s+(one|two|three|[1-3]))\s*[?.!]*$/i,
-  /^\s*(actually|instead|rather|to clarify|i mean|correction:)\b/i,
-  /^\s*(here(?:'s| is) (the|that|it|what)|here you go)\b/i,
-  /\b(the one|that|those|these)\b.*\?$/i
-];
-var IGNORABLE_PROMPT_PATTERNS = [
-  /^\s*(hi|hey|hello|yo|sup|thanks?|thx|ty|ok|okay|cool|nice|got it|sounds good)[!.\s]*$/i,
-  /^\s*(yes|no|yep|nope|sure|maybe|idk)[!.\s]*$/i,
-  /^\s*\/[a-z-]+(?:\s|$)/i,
-  // slash commands are handled by the host/agent
-  /^\s*[<>][a-z]/i
-  // partial host tags / XML envelopes
-];
-function isIgnorablePrompt(prompt) {
-  const trimmed = prompt.trim();
-  if (!trimmed) return true;
-  return IGNORABLE_PROMPT_PATTERNS.some((re) => re.test(trimmed));
-}
-function isContinuation(prompt, cwd, host, last, sessionId) {
-  if (last.host !== host) return false;
-  if ((sessionId ?? null) !== (last.session_id ?? null)) return false;
-  if (last.delivered === false) return false;
-  if (last.cwd !== cwd) return false;
-  if (Date.now() - last.resolved_at > CONTINUITY_WINDOW_MS) return false;
-  if (!last.had_content) return false;
-  const trimmed = prompt.trim();
-  for (const re of CONTINUATION_PATTERNS) {
-    if (re.test(trimmed)) return true;
-  }
-  return false;
-}
-function continuationForPrompt(state, prompt, cwd, host, sessionId) {
-  if (hasPendingDeployWaiter(sessionId)) return null;
-  const last = getLastResolveForSession(state, sessionId);
-  return last && isContinuation(prompt, cwd, host, last, sessionId) ? last : null;
-}
-function buildContinuityMarker(auditId) {
-  return [
-    "<memlin-context-unchanged>",
-    `# This turn is a follow-up to the prior turn. The same Memlin context applies.`,
-    `# Refer to the bundle injected on the previous turn (audit_id: ${auditId}).`,
-    "# Do not invoke memlin_resolve_task automatically for this follow-up.",
-    "</memlin-context-unchanged>"
-  ].join("\n");
-}
-
-// packages/plugin-core/dist/pending-bundle.js
-init_atomic_rename();
-import { spawn } from "node:child_process";
-import crypto2 from "node:crypto";
-import { promises as fs3 } from "node:fs";
-import path4 from "node:path";
-import os3 from "node:os";
-var PENDING_BUNDLE_MAX_AGE_MS = 10 * 60 * 1e3;
-function pendingBundlePath() {
-  return process.env.MEMLIN_RESOLVE_OUT ?? path4.join(os3.homedir(), ".config", "memlin", "pending-bundle.json");
-}
-var PENDING_BUNDLE_DIR = "pending-bundles";
-function pendingBundleSpoolDir() {
-  return process.env.MEMLIN_PENDING_BUNDLE_DIR ?? path4.join(os3.homedir(), ".config", "memlin", PENDING_BUNDLE_DIR);
-}
-function pendingBundleKey(cwd, host, sessionId, task) {
-  return crypto2.createHash("sha256").update(JSON.stringify([cwd, host, sessionId ?? null, task])).digest("hex");
-}
-function canonicalPendingBundlePathFor(cwd, host, sessionId, task) {
-  return path4.join(pendingBundleSpoolDir(), `${pendingBundleKey(cwd, host, sessionId, task)}.json`);
-}
-function pendingBundleTurnIndexPath(cwd, host, sessionId) {
-  const key = crypto2.createHash("sha256").update(JSON.stringify([cwd, host, sessionId ?? null])).digest("hex");
-  return path4.join(pendingBundleSpoolDir(), `turn-${key}.json`);
-}
-function pendingBundlePathFor(cwd, host, sessionId, task) {
-  return process.env.MEMLIN_RESOLVE_OUT ?? canonicalPendingBundlePathFor(cwd, host, sessionId, task);
-}
-async function takePendingBundle(cwd, host, match) {
-  const explicitFile = process.env.MEMLIN_RESOLVE_OUT;
-  const spoolDir = pendingBundleSpoolDir();
-  let files;
-  if (explicitFile) {
-    files = [explicitFile];
-  } else if (match?.task !== void 0) {
-    files = [pendingBundlePathFor(cwd, host, match.sessionId ?? null, match.task)];
-  } else {
-    const indexFile = pendingBundleTurnIndexPath(cwd, host, match?.sessionId ?? null);
-    try {
-      const parsed = JSON.parse(await fs3.readFile(indexFile, "utf8"));
-      files = /^[a-f0-9]{64}\.json$/.test(parsed.file ?? "") ? [path4.join(spoolDir, parsed.file)] : [];
-    } catch {
-      files = [];
-    }
-    files.push(pendingBundlePath());
-  }
-  const matches = [];
-  for (const file2 of [...new Set(files)]) {
-    let bundle;
-    try {
-      await fs3.chmod(file2, 384).catch(() => {
-      });
-      bundle = JSON.parse(await fs3.readFile(file2, "utf8"));
-    } catch {
-      continue;
-    }
-    if (typeof bundle !== "object" || bundle === null || typeof bundle.rendered !== "string" || bundle.rendered.length === 0 || typeof bundle.completed_at !== "number") {
-      await fs3.rm(file2, { force: true }).catch(() => {
-      });
-      continue;
-    }
-    if (Date.now() - bundle.completed_at > PENDING_BUNDLE_MAX_AGE_MS) {
-      await fs3.rm(file2, { force: true }).catch(() => {
-      });
-      continue;
-    }
-    if (bundle.cwd !== cwd || bundle.host !== host) continue;
-    if ((bundle.session_id ?? null) !== (match?.sessionId ?? null)) {
-      continue;
-    }
-    if (match?.task !== void 0 && bundle.task !== match.task) continue;
-    matches.push({ file: file2, bundle });
-  }
-  matches.sort((a, b) => b.bundle.completed_at - a.bundle.completed_at);
-  const selected = matches[0];
-  if (!selected) return null;
-  const claimed = `${selected.file}.${process.pid}.${Date.now()}.claim`;
-  try {
-    await fs3.rename(selected.file, claimed);
-    await fs3.chmod(claimed, 384).catch(() => {
-    });
-  } catch {
-    return null;
-  }
-  if (!explicitFile) {
-    const indexFile = pendingBundleTurnIndexPath(cwd, host, match?.sessionId ?? null);
-    try {
-      const pointer = JSON.parse(await fs3.readFile(indexFile, "utf8"));
-      if (pointer.file === path4.basename(selected.file)) {
-        await fs3.rm(indexFile, { force: true });
-      }
-    } catch {
-    }
-  }
-  if (match?.task === void 0) {
-    await Promise.all(
-      matches.slice(1).map(({ file: file2 }) => fs3.rm(file2, { force: true }).catch(() => void 0))
-    );
-  }
-  await fs3.rm(claimed, { force: true }).catch(() => {
-  });
-  return selected.bundle;
-}
-var DEFAULT_RESOLVE_BUDGET_MS = 6e3;
-function resolveBudgetMs(defaultMs = DEFAULT_RESOLVE_BUDGET_MS) {
-  const v = Number(process.env.MEMLIN_RESOLVE_BUDGET_MS);
-  const fallback = Number.isFinite(defaultMs) && defaultMs >= 1e3 ? Math.floor(defaultMs) : DEFAULT_RESOLVE_BUDGET_MS;
-  return Number.isFinite(v) && v >= 1e3 ? Math.floor(v) : fallback;
-}
-function runResolveWithBudget(opts) {
-  const budget = opts.budgetMs ?? resolveBudgetMs();
-  const outputFile = pendingBundlePathFor(opts.cwd, opts.host, opts.sessionId ?? null, opts.task);
-  return new Promise((resolve) => {
-    let child;
-    try {
-      child = spawn(process.execPath, [opts.resolveBin, opts.task], {
-        windowsHide: true,
-        cwd: opts.cwd,
-        env: {
-          ...process.env,
-          MEMLIN_HOST: opts.host,
-          // Handoff contract with cli/resolve.ts: write the compiled bundle
-          // to this file (atomic), and report a resolve.delivery telemetry
-          // row when the deadline was missed.
-          MEMLIN_RESOLVE_OUT: outputFile,
-          MEMLIN_RESOLVE_DEADLINE_MS: String(budget),
-          // Forward the agent's session id so the resolve's usage_event is
-          // attributable to this session (concurrent-work awareness).
-          ...opts.sessionId ? { MEMLIN_SESSION_ID: opts.sessionId } : {},
-          ...opts.turnId ? { MEMLIN_TURN_ID: opts.turnId } : {}
-        },
-        // Detached + no shared stdio: when the caller stops waiting, the
-        // child owns its own lifetime and finishes in the background.
-        detached: true,
-        stdio: "ignore"
-      });
-    } catch {
-      resolve({ bundle: null, stillRunning: false });
-      return;
-    }
-    let settled = false;
-    let claimInFlight = null;
-    const claimBundle = () => {
-      if (claimInFlight) return claimInFlight;
-      claimInFlight = takePendingBundle(opts.cwd, opts.host, {
-        sessionId: opts.sessionId ?? null,
-        task: opts.task
-      }).finally(() => {
-        claimInFlight = null;
-      });
-      return claimInFlight;
-    };
-    const settleFromBundle = async () => {
-      const bundle = await claimBundle();
-      if (!bundle || settled) return false;
-      settled = true;
-      clearTimeout(timer);
-      clearInterval(bundlePoll);
-      child.unref();
-      resolve({ bundle, stillRunning: false });
-      return true;
-    };
-    const timer = setTimeout(() => {
-      if (settled) return;
-      clearInterval(bundlePoll);
-      void claimBundle().then((bundle) => {
-        if (settled) return;
-        settled = true;
-        child.unref();
-        resolve(bundle ? { bundle, stillRunning: false } : { bundle: null, stillRunning: true });
-      });
-    }, budget);
-    const bundlePoll = setInterval(() => {
-      if (!settled) void settleFromBundle();
-    }, 40);
-    child.on("exit", () => {
-      if (settled) return;
-      void settleFromBundle().then((found) => {
-        if (found || settled) return;
-        settled = true;
-        clearTimeout(timer);
-        clearInterval(bundlePoll);
-        resolve({ bundle: null, stillRunning: false });
-      });
-    });
-    child.on("error", () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearInterval(bundlePoll);
-      resolve({ bundle: null, stillRunning: false });
-    });
-  });
-}
-function buildLateDeliveryEnvelope(bundle, opts = {}) {
-  return [
-    "<memlin-late-context>",
-    "# Memlin context resolved for the PREVIOUS prompt \u2014 it finished after that",
-    `# turn's delivery deadline. It is not fresh context for the current prompt.`,
-    ...bundle.stale ? [
-      `# ADDITIONALLY: the backend was unreachable (${bundle.stale.reason}) \u2014 this is a STALE`,
-      "# fallback bundle, not a live resolve. Weigh it accordingly."
-    ] : [],
-    opts.currentResolvePending ? "# Treat as background context. The current prompt resolve is already in flight; do not invoke memlin_resolve_task again." : "# Treat as background context; invoke memlin_resolve_task if this turn needs fresh context.",
-    "",
-    bundle.rendered,
-    "</memlin-late-context>"
-  ].join("\n");
-}
-function buildInlineDeliveryEnvelope(bundle) {
-  if (bundle.stale) {
-    return [
-      "<memlin-stale-context>",
-      `# Memlin backend unreachable (${bundle.stale.reason}) \u2014 this is the LAST SUCCESSFUL bundle`,
-      "# for this project, not a live resolve. Treat as possibly out of date; retry",
-      "# memlin_resolve_task later for fresh context. Memory writes are unavailable.",
-      "",
-      bundle.rendered,
-      "</memlin-stale-context>"
-    ].join("\n");
-  }
-  return [
-    "<memlin-resolved-context>",
-    "# Auto-resolved by Memlin \u2014 authoritative project context. Apply skills; honor",
-    "# approved goals and required/pinned decisions/directives; use other decisions as cited",
-    "# context; validate schemas; cite sources; do not re-invoke memlin_resolve_task.",
-    "",
-    bundle.rendered,
-    "</memlin-resolved-context>"
-  ].join("\n");
-}
-
-// packages/plugin-core/dist/scribe-notice.js
-function count(value) {
-  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
-}
-function buildScribeNotice(capturedValue, pendingValue) {
-  const captured = count(capturedValue);
-  if (captured === 0) return "";
-  const pending = Math.min(captured, count(pendingValue ?? captured));
-  const handled = captured - pending;
-  const proposalLabel = captured === 1 ? "proposal" : "proposals";
-  const reviewLabel = pending === 1 ? "needs" : "need";
-  let status;
-  if (pending === 0) {
-    status = `Memlin auto-captured ${captured} new ${proposalLabel} and handled ${captured === 1 ? "it" : "them"} automatically; no inbox review is needed for this batch.`;
-  } else if (handled === 0) {
-    status = `Memlin auto-captured ${captured} new ${proposalLabel}; ${pending} ${reviewLabel} review with /memlin-inbox.`;
-  } else {
-    status = `Memlin auto-captured ${captured} new ${proposalLabel}; ${handled} handled automatically and ${pending} ${reviewLabel} review with /memlin-inbox.`;
-  }
-  return [
-    "<memlin-notice>",
-    "# Status line for the user \u2014 surface it, do not act on it.",
-    status,
-    "</memlin-notice>",
-    ""
-  ].join("\n");
-}
-async function takeScribeNotice(currentSessionId) {
-  let state;
-  try {
-    state = await readState();
-  } catch {
-    return "";
-  }
-  const notice = state.scribe_notice;
-  const n = notice?.unsurfaced ?? 0;
-  if (n <= 0) return "";
-  try {
-    delete state.scribe_notice;
-    await writeState(state);
-  } catch {
-  }
-  if (currentSessionId && notice?.session_id && notice.session_id !== currentSessionId) {
-    return "";
-  }
-  return buildScribeNotice(n, notice?.pending);
-}
-async function takeCorrectionNotice(currentSessionId) {
-  let state;
-  try {
-    state = await readState();
-  } catch {
-    return "";
-  }
-  const notice = state.correction_notice;
-  if (!notice || !notice.rule_title) return "";
-  try {
-    delete state.correction_notice;
-    await writeState(state);
-  } catch {
-  }
-  if (currentSessionId && notice.session_id && notice.session_id !== currentSessionId) {
-    return "";
-  }
-  return [
-    "<memlin-notice>",
-    "# Status line for the user \u2014 surface it, do not act on it.",
-    `\u26A1 Memlin captured a correction \u2192 rule: "${notice.rule_title}". It's active now; review or undo with /memlin-inbox.`,
-    "</memlin-notice>",
-    ""
-  ].join("\n");
-}
+import { promises as fs8 } from "node:fs";
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
@@ -9266,6 +8727,33 @@ for (const p of REDACTION_PATTERNS) {
 var SECRET_REDACTION_PATTERNS = REDACTION_PATTERNS.filter(
   (p) => !p.validate
 );
+var SECRET_REDACTION_MAX_PASSES = 64;
+function applyRedaction(input, builtIns, extraPatterns) {
+  if (!input) {
+    return { redacted: input, hits: [], changed: false };
+  }
+  const counts = /* @__PURE__ */ new Map();
+  const apply = (text, p) => {
+    p.regex.lastIndex = 0;
+    return text.replaceAll(p.regex, (match) => {
+      if (p.validate && !p.validate(match)) return match;
+      counts.set(p, (counts.get(p) ?? 0) + 1);
+      return `[REDACTED-${p.name}]`;
+    });
+  };
+  let out = input;
+  for (let pass = 0; pass < SECRET_REDACTION_MAX_PASSES; pass++) {
+    const before = out;
+    for (const p of builtIns) out = apply(out, p);
+    if (out === before) break;
+  }
+  for (const p of extraPatterns) out = apply(out, p);
+  const hits = [...builtIns, ...extraPatterns].filter((p) => counts.has(p)).map((p) => ({ name: p.name, count: counts.get(p) }));
+  return { redacted: out, hits, changed: hits.length > 0 };
+}
+function redactSecretShapes(input, extraPatterns = []) {
+  return applyRedaction(input, SECRET_REDACTION_PATTERNS, extraPatterns);
+}
 
 // packages/shared/dist/action-metadata.js
 var ActionNameSchema = external_exports.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9._-]*$/, {
@@ -12406,308 +11894,8 @@ var ExperienceHarnessRunControlV2Schema = external_exports.discriminatedUnion("a
 // packages/shared/dist/light-provenance.js
 var HOSTS = new Set(LIGHT_HOSTS);
 
-// packages/shared/dist/memory-decisions.js
-var DECISION_KINDS = {
-  replace: {
-    id: "replace",
-    label: "Replace live memory",
-    raisedWhen: "A new capture would retire or rewrite a live doc that governs agents: a decision, a correction, a verified directive, or anything a person wrote.",
-    whyHuman: "Agents follow the existing doc today. Replacing it changes what every agent is told, and the evidence alone cannot say the new version is right.",
-    options: [
-      {
-        id: "replace",
-        label: "Replace",
-        consequence: "The new capture goes live and the existing doc is retired.",
-        reversible: true
-      },
-      {
-        id: "keep_both",
-        label: "Keep both",
-        consequence: "Both stay live. Agents may be given both.",
-        reversible: true
-      },
-      {
-        id: "keep_existing",
-        label: "Keep existing",
-        consequence: "Nothing changes for agents. The new capture stays searchable only.",
-        reversible: true
-      }
-    ],
-    defaultOption: "keep_existing",
-    deadlineDays: 7,
-    urgent: true,
-    aiExplanation: true
-  },
-  conflict: {
-    id: "conflict",
-    label: "Two live docs disagree",
-    raisedWhen: "Two live docs contradict, at least one was served to agents in the last 30 days, and at least one is a decision or was written by a person.",
-    whyHuman: "Agents are being given both answers. Which one is current is a judgement about your project that neither doc settles.",
-    options: [
-      {
-        id: "a_wins",
-        label: "First is current",
-        consequence: "The first doc stays live and the second is retired.",
-        reversible: true
-      },
-      {
-        id: "b_wins",
-        label: "Second is current",
-        consequence: "The second doc stays live and the first is retired.",
-        reversible: true
-      },
-      {
-        id: "both_valid",
-        label: "Both are valid",
-        consequence: "Both stay live; the pair is marked as not a conflict and is not raised again.",
-        reversible: true
-      }
-    ],
-    defaultOption: "both_valid",
-    deadlineDays: 14,
-    urgent: false,
-    aiExplanation: true
-  },
-  sensitive: {
-    id: "sensitive",
-    label: "Sensitive content",
-    raisedWhen: "A capture matches a sensitive topic: compensation, HR, personal data or banking.",
-    whyHuman: "Whether this should be remembered, and who may see it, is not something automation should decide.",
-    options: [
-      {
-        id: "keep",
-        label: "Keep for the team",
-        consequence: "It goes live at its captured scope.",
-        reversible: true
-      },
-      {
-        id: "private",
-        label: "Keep private to me",
-        consequence: "It goes live, visible only to you.",
-        reversible: true
-      },
-      {
-        id: "discard",
-        label: "Discard",
-        consequence: "It is removed and will not be captured again.",
-        reversible: true
-      }
-    ],
-    defaultOption: "discard",
-    deadlineDays: 7,
-    urgent: true,
-    aiExplanation: false
-  },
-  runbook: {
-    id: "runbook",
-    label: "Incident runbook",
-    raisedWhen: "A session that handled an incident produced a runbook.",
-    whyHuman: "A runbook steers future incident response. You were there; you know whether it is what should happen next time.",
-    options: [
-      {
-        id: "keep_live",
-        label: "Keep live",
-        consequence: "Agents are given it for similar incidents.",
-        reversible: true
-      },
-      {
-        id: "searchable_only",
-        label: "Searchable only",
-        consequence: "It is kept and findable, but not given to agents unprompted.",
-        reversible: true
-      },
-      {
-        id: "discard",
-        label: "Discard",
-        consequence: "It is removed.",
-        reversible: true
-      }
-    ],
-    defaultOption: "searchable_only",
-    deadlineDays: 7,
-    urgent: false,
-    aiExplanation: true
-  },
-  goal: {
-    id: "goal",
-    label: "Goal approval",
-    raisedWhen: "A goal was proposed and needs approval before agents work toward it.",
-    whyHuman: "Goals direct what agents optimise for. Only a person can commit the team to one.",
-    options: [
-      {
-        id: "approve",
-        label: "Approve",
-        consequence: "Agents are given the goal.",
-        reversible: true
-      },
-      {
-        id: "not_now",
-        label: "Not now",
-        consequence: "It stays a draft that agents are not given.",
-        reversible: true
-      },
-      {
-        id: "reject",
-        label: "Reject",
-        consequence: "It is closed.",
-        reversible: true
-      }
-    ],
-    defaultOption: "not_now",
-    deadlineDays: 14,
-    urgent: false,
-    aiExplanation: true
-  }
-};
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function labelDecisionOptionIds(kind, text) {
-  const spec = DECISION_KINDS[kind];
-  if (!spec || !text) return text;
-  let out = text;
-  const options2 = [...spec.options].sort((a, b) => b.id.length - a.id.length);
-  for (const o of options2) {
-    const id = escapeRegExp(o.id);
-    const bare = o.id.includes("_") ? `|(?<![\\w-])${id}(?![\\w-])` : "";
-    out = out.replace(new RegExp(`\`${id}\`${bare}`, "gi"), o.label);
-  }
-  return out;
-}
-var DECISION_CAPS = {
-  /** Decisions a single capture (one scribe run) may raise. */
-  perCapture: 3,
-  /** Open questions of a session-grouped kind (runbook, sensitive) one agent
-   *  session may hold. Later captures of that kind from the same session are
-   *  attached to the open question instead of raising another. */
-  openPerSession: 1,
-  /** Captures one session-grouped question may cover. Past it the raise is
-   *  capped, like perCapture. */
-  capturesPerDecision: 100,
-  /** Questions injected into one user turn. */
-  perTurn: 1,
-  /** Questions asked in one session before the rest wait for the web list. */
-  perSession: 3,
-  /** Urgent end-of-turn interruptions in one session. */
-  urgentPerSession: 1
-};
-
 // packages/shared/dist/decision-prompt.js
 var encoder = new TextEncoder();
-function utf8Bytes(value) {
-  return encoder.encode(value).length;
-}
-function utf8Truncate(value, maxBytes) {
-  if (utf8Bytes(value) <= maxBytes) return value;
-  let out = "";
-  let bytes = 0;
-  for (const ch of value) {
-    const size = utf8Bytes(ch);
-    if (bytes + size > maxBytes) break;
-    out += ch;
-    bytes += size;
-  }
-  return out;
-}
-function oneLine(value, max = 400) {
-  const s = value.replace(/\s+/g, " ").trim();
-  return s.length > max ? `${s.slice(0, max - 1).trimEnd()}\u2026` : s;
-}
-function optionLabel(decision, id) {
-  return decision.options.find((o) => o.id === id)?.label ?? DECISION_KINDS[decision.kind]?.options.find((o) => o.id === id)?.label ?? id;
-}
-function describeDeadline(deadlineAt, nowMs = Date.now()) {
-  const t = Date.parse(deadlineAt);
-  if (!Number.isFinite(t)) return "at its deadline";
-  const date5 = new Date(t).toISOString().slice(0, 10);
-  const days = Math.ceil((t - nowMs) / 864e5);
-  if (days <= 0) return `on ${date5} (due now)`;
-  return `on ${date5} (in ${days} day${days === 1 ? "" : "s"})`;
-}
-function askLine(host, decision) {
-  switch (host) {
-    case "claude-code":
-      return `1. Ask with your AskUserQuestion tool: one question, one choice per option (${decision.options.map((o) => `"${o.label}"`).join(", ")}), each choice described by its consequence. Put why a person is needed and the recommendation in the question text.`;
-    case "codex":
-      return "1. The user was shown a one-line notice about this. Ask the question in your reply, in plain language, listing the options.";
-    case "mcp":
-      return "1. Ask me in your reply, in plain language, listing the options.";
-    default:
-      return "1. Ask the question in your reply, in plain language, listing the options.";
-  }
-}
-function renderAt(decision, host, detail, nowMs) {
-  const prose = (text, max) => oneLine(labelDecisionOptionIds(decision.kind, text), max);
-  const lines = [];
-  lines.push(`<memlin-decision id="${decision.id}" kind="${decision.kind}">`);
-  lines.push(
-    "# Memlin needs ONE decision from the user. Finish the user's current request first; do not let this interrupt or change that work."
-  );
-  lines.push(`Question: ${oneLine(decision.question, 300)}`);
-  if (detail !== "minimal") {
-    lines.push(`Why a person is needed: ${oneLine(decision.why_human, 400)}`);
-  }
-  const rec = decision.recommendation;
-  if (rec) {
-    const reason = detail === "minimal" ? "" : ` \u2014 ${prose(rec.rationale, detail === "full" ? 500 : 240)}`;
-    lines.push(`Recommendation: ${optionLabel(decision, rec.option)} (${rec.option})${reason}`);
-  } else if (detail !== "minimal") {
-    lines.push(
-      DECISION_KINDS[decision.kind]?.aiExplanation === false ? "Recommendation: none \u2014 this kind is never sent to an AI model, so present the facts only." : "Recommendation: none yet \u2014 present the options evenly."
-    );
-  }
-  lines.push("Options:");
-  for (const o of decision.options) {
-    if (detail === "minimal") {
-      lines.push(`- ${o.label} (${o.id})`);
-      continue;
-    }
-    lines.push(
-      `- ${o.label} (${o.id}): ${oneLine(o.consequence, 200)}${o.reversible ? " Can be undone." : " Cannot be undone."}`
-    );
-    if (detail === "full") {
-      for (const p of o.pros) lines.push(`  + ${prose(p, 200)}`);
-      for (const c of o.cons) lines.push(`  - ${prose(c, 200)}`);
-    }
-  }
-  lines.push(
-    `If unanswered: ${optionLabel(decision, decision.default_option)} (${decision.default_option}) applies automatically ${describeDeadline(decision.deadline_at, nowMs)}. Ignoring it is safe.`
-  );
-  lines.push("How to ask, after the current request is done:");
-  lines.push(askLine(host, decision));
-  lines.push(
-    "2. Say why a person is needed, the recommendation and its reason, what each option does with its pros and cons, and what happens if they do not answer."
-  );
-  lines.push(
-    `3. Offer to explain more. If they want to know where it came from, what automation already did or the diff, call memlin_explain_decision {"decision_id":"${decision.id}"} and answer from it.`
-  );
-  lines.push(
-    `4. When they choose, call memlin_decide {"decision_id":"${decision.id}","option":"<option id>","note":"<their reason>","user_quote":"<their exact words>"}.`
-  );
-  lines.push(
-    "5. Never choose for them. If they decline, change the subject or do not answer, do nothing: the default applies."
-  );
-  lines.push("</memlin-decision>");
-  return lines.join("\n") + "\n";
-}
-function renderDecisionBlock(decision, opts) {
-  const nowMs = opts.nowMs ?? Date.now();
-  for (const detail of ["full", "compact", "minimal"]) {
-    const block = renderAt(decision, opts.host, detail, nowMs);
-    if (opts.maxBytes === void 0 || utf8Bytes(block) <= opts.maxBytes) return block;
-  }
-  return "";
-}
-function decisionNoticeLine(decision, maxBytes = 700, nowMs = Date.now()) {
-  const options2 = decision.options.map((o) => o.label).join(" / ");
-  const tail = ` \u2014 options: ${options2}. If you do not answer, ${optionLabel(decision, decision.default_option)} applies ${describeDeadline(decision.deadline_at, nowMs)}. Your agent will ask after this request.`;
-  const head = "Memlin needs a decision: ";
-  const room = maxBytes - utf8Bytes(head) - utf8Bytes(tail);
-  if (room >= 40) {
-    return head + utf8Truncate(oneLine(decision.question, 300), room) + tail;
-  }
-  return utf8Truncate(head + oneLine(decision.question, 300), maxBytes);
-}
 
 // packages/shared/dist/thought-handoff-v2.js
 var ThoughtHandoffRequestV2Schema = external_exports.object({
@@ -16610,8 +15798,8 @@ function az_default() {
 }
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/be.js
-function getBelarusianPlural(count2, one, few, many) {
-  const absCount = Math.abs(count2);
+function getBelarusianPlural(count, one, few, many) {
+  const absCount = Math.abs(count);
   const lastDigit = absCount % 10;
   const lastTwoDigits = absCount % 100;
   if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
@@ -19756,8 +18944,8 @@ function pt_default() {
 }
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/locales/ru.js
-function getRussianPlural(count2, one, few, many) {
-  const absCount = Math.abs(count2);
+function getRussianPlural(count, one, few, many) {
+  const absCount = Math.abs(count);
   const lastDigit = absCount % 10;
   const lastTwoDigits = absCount % 100;
   if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
@@ -24951,6 +24139,20 @@ var FileProvenanceSchema = external_exports.object({
   agent_installation_id: external_exports.string().max(200).optional(),
   session_id: external_exports.string().max(200).optional()
 }).strict();
+var parseFileUploadRequest = (raw) => {
+  const extra = external_exports.object({
+    purpose: external_exports.enum(["source", "artifact"]).default("artifact"),
+    role: external_exports.enum(RESOURCE_ATTACHMENT_ROLES).default("reference"),
+    provenance: FileProvenanceSchema.default({})
+  }).parse(raw);
+  const {
+    purpose: _purpose,
+    role: _role,
+    provenance: _provenance,
+    ...base
+  } = external_exports.record(external_exports.unknown()).parse(raw);
+  return { ...ResourceUploadRequestV2Schema.parse(base), ...extra };
+};
 var FileUploadPreparedResponseV1Schema = external_exports.object({
   receipt: ResourceUploadReceiptV2Schema,
   upload_url: external_exports.string().url().nullable(),
@@ -25059,6 +24261,143 @@ var KIND_MAX_BYTES = {
   audio: 25 * 1024 * 1024,
   video: 25 * 1024 * 1024
 };
+var FILE_FORMATS = [
+  {
+    kind: "document",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    extension: "docx",
+    acceptedMimeTypes: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    acceptedExtensions: ["docx"]
+  },
+  {
+    kind: "document",
+    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    extension: "pptx",
+    acceptedMimeTypes: [
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    ],
+    acceptedExtensions: ["pptx"]
+  },
+  {
+    kind: "pdf",
+    mimeType: "application/pdf",
+    extension: "pdf",
+    acceptedMimeTypes: ["application/pdf"],
+    acceptedExtensions: ["pdf"]
+  },
+  {
+    kind: "image",
+    mimeType: "image/png",
+    extension: "png",
+    acceptedMimeTypes: ["image/png"],
+    acceptedExtensions: ["png"]
+  },
+  {
+    kind: "image",
+    mimeType: "image/jpeg",
+    extension: "jpg",
+    acceptedMimeTypes: ["image/jpeg", "image/jpg"],
+    acceptedExtensions: ["jpg", "jpeg"]
+  },
+  {
+    kind: "image",
+    mimeType: "image/webp",
+    extension: "webp",
+    acceptedMimeTypes: ["image/webp"],
+    acceptedExtensions: ["webp"]
+  },
+  {
+    kind: "image",
+    mimeType: "image/gif",
+    extension: "gif",
+    acceptedMimeTypes: ["image/gif"],
+    acceptedExtensions: ["gif"]
+  },
+  {
+    kind: "audio",
+    mimeType: "audio/mpeg",
+    extension: "mp3",
+    acceptedMimeTypes: ["audio/mpeg", "audio/mp3"],
+    acceptedExtensions: ["mp3"]
+  },
+  {
+    kind: "audio",
+    mimeType: "audio/wav",
+    extension: "wav",
+    acceptedMimeTypes: ["audio/wav", "audio/x-wav", "audio/wave"],
+    acceptedExtensions: ["wav"]
+  },
+  {
+    kind: "audio",
+    mimeType: "audio/ogg",
+    extension: "ogg",
+    acceptedMimeTypes: ["audio/ogg"],
+    acceptedExtensions: ["ogg", "oga"]
+  },
+  {
+    kind: "audio",
+    mimeType: "audio/mp4",
+    extension: "m4a",
+    acceptedMimeTypes: ["audio/mp4", "audio/x-m4a"],
+    acceptedExtensions: ["m4a"]
+  },
+  {
+    kind: "audio",
+    mimeType: "audio/webm",
+    extension: "weba",
+    acceptedMimeTypes: ["audio/webm"],
+    acceptedExtensions: ["weba"]
+  },
+  {
+    kind: "video",
+    mimeType: "video/mp4",
+    extension: "mp4",
+    acceptedMimeTypes: ["video/mp4"],
+    acceptedExtensions: ["mp4", "m4v"]
+  },
+  {
+    kind: "video",
+    mimeType: "video/webm",
+    extension: "webm",
+    acceptedMimeTypes: ["video/webm"],
+    acceptedExtensions: ["webm"]
+  },
+  {
+    kind: "video",
+    mimeType: "video/quicktime",
+    extension: "mov",
+    acceptedMimeTypes: ["video/quicktime"],
+    acceptedExtensions: ["mov"]
+  },
+  {
+    kind: "text",
+    mimeType: "text/plain",
+    extension: "txt",
+    acceptedMimeTypes: ["text/plain"],
+    acceptedExtensions: ["txt"]
+  },
+  {
+    kind: "text",
+    mimeType: "text/plain",
+    extension: "log",
+    acceptedMimeTypes: ["text/plain"],
+    acceptedExtensions: ["log"]
+  },
+  {
+    kind: "markdown",
+    mimeType: "text/markdown",
+    extension: "md",
+    acceptedMimeTypes: ["text/markdown"],
+    acceptedExtensions: ["md"]
+  },
+  {
+    kind: "dataset",
+    mimeType: "application/json",
+    extension: "json",
+    acceptedMimeTypes: ["application/json"],
+    acceptedExtensions: ["json"]
+  }
+];
 
 // packages/shared/dist/feature-binding.js
 var FeatureCaptureFieldsSchema = external_exports.object({
@@ -25066,6 +24405,10 @@ var FeatureCaptureFieldsSchema = external_exports.object({
   git_branch: external_exports.string().trim().min(1).max(300).nullish(),
   feature_id: external_exports.string().uuid().nullish()
 });
+function featureBranch(branch) {
+  const value = branch?.trim().replace(/^(refs\/heads\/|refs\/remotes\/[^/]+\/|origin\/)/i, "");
+  return value && !["main", "master", "develop", "trunk", "head"].includes(value.toLowerCase()) ? value : null;
+}
 
 // packages/shared/dist/feature-work.js
 var Receipt = external_exports.object({
@@ -25083,20 +24426,20 @@ var Receipt = external_exports.object({
   reason: external_exports.string().optional()
 });
 
-// packages/plugin-core/dist/client.js
-import { promises as fs7 } from "node:fs";
-import path10 from "node:path";
-import os9 from "node:os";
-import { randomUUID as randomUUID3 } from "node:crypto";
-
-// packages/plugin-core/dist/auth.js
-init_atomic_rename();
+// packages/plugin-core/src/client.ts
 import { promises as fs5 } from "node:fs";
 import path7 from "node:path";
 import os6 from "node:os";
+import { randomUUID as randomUUID3 } from "node:crypto";
+
+// packages/plugin-core/src/auth.ts
+init_atomic_rename();
+import { promises as fs3 } from "node:fs";
+import path4 from "node:path";
+import os3 from "node:os";
 import { randomUUID } from "node:crypto";
 
-// packages/plugin-core/dist/backend-error.js
+// packages/plugin-core/src/backend-error.ts
 var MemlinApiError = class extends Error {
   constructor(message, status, code) {
     super(message);
@@ -25124,8 +24467,48 @@ function describeOpaqueBody(status, text) {
   }
   return `HTTP ${status}: ${singleLine(trimmed)}`;
 }
+function backendUnreachableLine(detail) {
+  return `memlin: backend unreachable (${detail}), no memory available`;
+}
+var ROUTING_PATTERN = /account routing (unavailable|lookup failed)/i;
+var CLOUDFLARE_STATUS = /\b(52[0-7])\b/;
+function statusOf(err) {
+  if (err instanceof MemlinApiError) return err.status;
+  const status = err?.status;
+  if (typeof status === "number" && status >= 100 && status <= 599) return status;
+  const message = err instanceof Error ? err.message : String(err);
+  const arrow = message.match(/→ (\d{3}):/);
+  if (arrow) return Number(arrow[1]);
+  return null;
+}
+function summarizeBackendFailure(err) {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const status = statusOf(err);
+  if (ROUTING_PATTERN.test(message)) {
+    const embedded = message.match(CLOUDFLARE_STATUS)?.[1];
+    const code = embedded ?? (status !== null && status >= 500 ? String(status) : null);
+    const detail = code ? `routing ${code}` : "routing unavailable";
+    return { kind: "routing", status: code ? Number(code) : status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (status !== null && status >= 500) {
+    const detail = `HTTP ${status}`;
+    return { kind: "http", status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (/took longer than \d+ seconds/i.test(message)) {
+    return { kind: "network", status: null, detail: "timeout", line: backendUnreachableLine("timeout") };
+  }
+  if (/couldn'?t reach|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|network/i.test(message)) {
+    return {
+      kind: "network",
+      status: null,
+      detail: "network unreachable",
+      line: backendUnreachableLine("network unreachable")
+    };
+  }
+  return null;
+}
 
-// packages/plugin-core/dist/auth.js
+// packages/plugin-core/src/auth.ts
 init_auth_refusal();
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
@@ -25133,7 +24516,7 @@ var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
 function persistedTokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path7.join(os6.homedir(), ".config", "memlin", "token.json");
+  return process.env.MEMLIN_TOKEN_FILE || path4.join(os3.homedir(), ".config", "memlin", "token.json");
 }
 var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
 var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
@@ -25144,18 +24527,18 @@ function authFileLockPath() {
 async function acquireAuthFileLock() {
   const file2 = authFileLockPath();
   const owner = `${process.pid}:${randomUUID()}`;
-  await fs5.mkdir(path7.dirname(file2), { recursive: true });
+  await fs3.mkdir(path4.dirname(file2), { recursive: true });
   const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
-      const handle = await fs5.open(file2, "wx", 384);
+      const handle = await fs3.open(file2, "wx", 384);
       try {
         await handle.writeFile(owner, "utf8");
         await handle.sync();
       } catch (error40) {
         await handle.close().catch(() => {
         });
-        await fs5.rm(file2, { force: true }).catch(() => {
+        await fs3.rm(file2, { force: true }).catch(() => {
         });
         throw error40;
       }
@@ -25165,16 +24548,16 @@ async function acquireAuthFileLock() {
         released = true;
         await handle.close().catch(() => {
         });
-        const currentOwner = await fs5.readFile(file2, "utf8").catch(() => null);
-        if (currentOwner === owner) await fs5.rm(file2, { force: true }).catch(() => {
+        const currentOwner = await fs3.readFile(file2, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs3.rm(file2, { force: true }).catch(() => {
         });
       };
     } catch (error40) {
       if (error40.code !== "EEXIST") throw error40;
       try {
-        const stat = await fs5.stat(file2);
+        const stat = await fs3.stat(file2);
         if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
-          await fs5.rm(file2, { force: true });
+          await fs3.rm(file2, { force: true });
           continue;
         }
       } catch (statError) {
@@ -25198,7 +24581,7 @@ async function withAuthFileLock(operation) {
 }
 async function readPersistedToken() {
   try {
-    const raw = await fs5.readFile(persistedTokenFilePath(), "utf8");
+    const raw = await fs3.readFile(persistedTokenFilePath(), "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -25206,14 +24589,14 @@ async function readPersistedToken() {
 }
 async function writePersistedToken(t) {
   const file2 = persistedTokenFilePath();
-  await fs5.mkdir(path7.dirname(file2), { recursive: true });
-  const tmp = path7.join(
-    path7.dirname(file2),
-    `${path7.basename(file2)}.tmp-${process.pid}-${randomUUID()}`
+  await fs3.mkdir(path4.dirname(file2), { recursive: true });
+  const tmp = path4.join(
+    path4.dirname(file2),
+    `${path4.basename(file2)}.tmp-${process.pid}-${randomUUID()}`
   );
   const previous = await readPersistedToken().catch(() => null);
-  await fs5.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
-  await fs5.chmod(tmp, 384).catch(() => {
+  await fs3.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
+  await fs3.chmod(tmp, 384).catch(() => {
   });
   await atomicRename(tmp, file2);
   await clearRefusalsIfAccountsChanged(previous?.access_token ?? null, t.access_token);
@@ -25327,18 +24710,18 @@ function decodeJwtPayload(jwt2) {
   return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
 }
 
-// packages/plugin-core/dist/client.js
+// packages/plugin-core/src/client.ts
 init_atomic_rename();
 
-// packages/plugin-core/dist/memlin-api-client.js
+// packages/plugin-core/src/memlin-api-client.ts
 init_auth_refusal();
-import { readFileSync as readFileSync2 } from "node:fs";
-import crypto5 from "node:crypto";
-import os8 from "node:os";
+import { readFileSync } from "node:fs";
+import crypto3 from "node:crypto";
+import os5 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// packages/plugin-core/dist/runtime-shared.js
+// packages/plugin-core/src/runtime-shared.ts
 var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
 var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
 var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
@@ -25365,19 +24748,41 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
-async function withTimeout(promise2, ms, fallback) {
-  let timer;
-  try {
-    return await Promise.race([
-      promise2,
-      new Promise((resolve) => {
-        timer = setTimeout(() => resolve(fallback), ms);
-        timer.unref?.();
-      })
-    ]);
-  } finally {
-    if (timer !== void 0) clearTimeout(timer);
+var PROVIDER_HOSTS = [
+  "github.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "dev.azure.com",
+  "ssh.dev.azure.com",
+  "codeberg.org",
+  "sr.ht",
+  "git.sr.ht"
+];
+function normalizeGitRemote(raw) {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  if (!s.includes("://")) {
+    s = s.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
   }
+  s = s.replace(/^(?:ssh|git|https?):\/\//, "");
+  s = s.replace(/^[^/@]+@/, "");
+  s = s.replace(/\.git$/, "");
+  s = s.replace(/\/$/, "");
+  const slash = s.indexOf("/");
+  if (slash > 0) {
+    const host = s.slice(0, slash).toLowerCase();
+    const rest = s.slice(slash);
+    s = host + rest;
+    for (const provider of PROVIDER_HOSTS) {
+      if (host === provider) break;
+      if (host.startsWith(provider + "-")) {
+        s = provider + rest;
+        break;
+      }
+    }
+  }
+  return s || null;
 }
 async function closeHttpSockets() {
   try {
@@ -25398,9 +24803,9 @@ async function closeHttpSockets() {
   }
 }
 
-// packages/plugin-core/dist/host.js
-import os7 from "node:os";
-import path8 from "node:path";
+// packages/plugin-core/src/host.ts
+import os4 from "node:os";
+import path5 from "node:path";
 var BaseHost = class {
   constructor(kind, home) {
     this.kind = kind;
@@ -25412,42 +24817,42 @@ var BaseHost = class {
     return this.home;
   }
   plansDir() {
-    return path8.join(this.home, "plans");
+    return path5.join(this.home, "plans");
   }
 };
 var ClaudeCodeHost = class extends BaseHost {
   constructor() {
-    super("claude-code", path8.join(os7.homedir(), ".claude"));
+    super("claude-code", path5.join(os4.homedir(), ".claude"));
   }
 };
 var CursorHost = class extends BaseHost {
   constructor() {
-    super("cursor", path8.join(os7.homedir(), ".config", "memlin"));
+    super("cursor", path5.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var CodexHost = class extends BaseHost {
   constructor() {
-    super("codex", path8.join(os7.homedir(), ".config", "memlin"));
+    super("codex", path5.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var WindsurfHost = class extends BaseHost {
   constructor() {
-    super("windsurf", path8.join(os7.homedir(), ".config", "memlin"));
+    super("windsurf", path5.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var AntigravityHost = class extends BaseHost {
   constructor() {
-    super("antigravity", path8.join(os7.homedir(), ".config", "memlin"));
+    super("antigravity", path5.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var VSCodeHost = class extends BaseHost {
   constructor() {
-    super("vscode", path8.join(os7.homedir(), ".config", "memlin"));
+    super("vscode", path5.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var CompanionHost = class extends BaseHost {
   constructor() {
-    super("companion", path8.join(os7.homedir(), ".config", "memlin"));
+    super("companion", path5.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var HOSTS2 = {
@@ -25460,15 +24865,15 @@ var HOSTS2 = {
   companion: () => new CompanionHost()
 };
 function resolveHost() {
-  const envHost = process.env.MEMLIN_HOST ?? (process.env.CURSOR_AGENT ? "cursor" : "claude-code");
+  const envHost = "windsurf";
   const make = HOSTS2[envHost];
   return (make ?? HOSTS2["claude-code"])();
 }
 
-// packages/plugin-core/dist/memlin-api-client.js
+// packages/plugin-core/src/memlin-api-client.ts
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os8.hostname() || "unknown";
+  return process.env.MEMLIN_AGENT_DEVICE || os5.hostname() || "unknown";
 }
 var cachedAgentVersion = null;
 function agentVersion() {
@@ -25635,8 +25040,8 @@ var MemlinApiClient = class {
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: version2,
       [AGENT_CAPABILITIES_HEADER]: (override.agentKind ? AGENT_EXPECTED_CAPABILITIES[kind] : agentCapabilities()).join(","),
-      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os8.platform(),
-      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os8.arch()
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os5.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os5.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h["Memlin-Account-Id"] = this.cfg.accountId;
@@ -25766,8 +25171,8 @@ var MemlinApiClient = class {
     if (body !== void 0) headers["Content-Type"] = "application/json";
     if (opts.traceId) {
       const normalized = opts.traceId.replaceAll("-", "").toLowerCase();
-      const traceId = /^[0-9a-f]{32}$/.test(normalized) ? normalized : crypto5.createHash("sha256").update(opts.traceId).digest("hex").slice(0, 32);
-      headers.traceparent = `00-${traceId}-${crypto5.randomBytes(8).toString("hex")}-01`;
+      const traceId = /^[0-9a-f]{32}$/.test(normalized) ? normalized : crypto3.createHash("sha256").update(opts.traceId).digest("hex").slice(0, 32);
+      headers.traceparent = `00-${traceId}-${crypto3.randomBytes(8).toString("hex")}-01`;
     }
     const timeoutMs = Math.max(
       1,
@@ -26810,36 +26215,17 @@ function resolveApiUrl() {
   return process.env.MEMLIN_API_URL?.trim() || DEFAULT_API_URL;
 }
 
-// packages/plugin-core/dist/client.js
+// packages/plugin-core/src/client.ts
 init_workspace_binding();
-
-// packages/plugin-core/dist/hook-exit.js
-var HOOK_WATCHDOG_MS = 2e3;
-function releaseStdin() {
-  try {
-    const stdin = process.stdin;
-    stdin.pause();
-    stdin.unref?.();
-  } catch {
-  }
-}
-function exitHook(code) {
-  process.exitCode = code;
-  releaseStdin();
-  void closeHttpSockets();
-  setTimeout(() => process.exit(), HOOK_WATCHDOG_MS).unref();
-}
-
-// packages/plugin-core/dist/client.js
 init_auth_refusal();
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path10.join(os9.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path7.join(os6.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path10.join(os9.homedir(), ".config", "memlin");
-var TOKEN_FILE = path10.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path7.join(os6.homedir(), ".config", "memlin");
+var TOKEN_FILE = path7.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
-    const raw = await fs7.readFile(globalConfigFilePath(), "utf8");
+    const raw = await fs5.readFile(globalConfigFilePath(), "utf8");
     const parsed = JSON.parse(raw);
     if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
       return null;
@@ -26897,24 +26283,6 @@ async function getApi(opts = {}) {
   });
   return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName };
 }
-async function hookAuthRefusal(opts) {
-  try {
-    const config2 = await readConfig();
-    if (!config2) return { refused: false, notice: "" };
-    const overlay = await findWorkspaceBinding(opts.cwd ?? process.cwd());
-    const { workspaceRoot, workspaceAccountName } = applyWorkspaceOverlay(config2, overlay);
-    const entry = await readAuthRefusal(config2.account_id, workspaceRoot);
-    if (!entry) return { refused: false, notice: "" };
-    if (!opts.notify) return { refused: true, notice: "" };
-    const notice = await claimAuthRefusalNotice(
-      { ...entry, account_name: entry.account_name ?? workspaceAccountName },
-      opts.sessionId ?? null
-    );
-    return { refused: true, notice: notice ?? "" };
-  } catch {
-    return { refused: false, notice: "" };
-  }
-}
 function applyWorkspaceOverlay(config2, overlay) {
   if (!overlay) return { workspaceBound: false, workspaceRoot: null, workspaceAccountName: null };
   config2.account_id = overlay.binding.account_id;
@@ -26928,154 +26296,774 @@ function applyWorkspaceOverlay(config2, overlay) {
   };
 }
 
-// packages/plugin-core/dist/session-decisions.js
-var MARK_ASKED_TIMEOUT_MS = 1500;
-function queueFor(state, sessionId) {
-  const map2 = state.session_decisions ?? {};
-  if (sessionId) return map2[sessionId];
-  return Object.values(map2).sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0];
+// packages/plugin-core/src/project-resolver.ts
+import { existsSync, readdirSync, readFileSync as readFileSync2, lstatSync } from "node:fs";
+import path8 from "node:path";
+init_workspace_binding();
+var ALLOW_ACCOUNT_MISMATCH_ENV = "MEMLIN_ALLOW_ACCOUNT_MISMATCH";
+function allowAccountMismatch(env = process.env) {
+  const v = env[ALLOW_ACCOUNT_MISMATCH_ENV];
+  return v === "1" || v === "true" || v === "yes";
 }
-function takeTurnDecisions(state, sessionId, at = Date.now()) {
-  const queue = queueFor(state, sessionId);
-  if (!queue || !Array.isArray(queue.pending) || queue.pending.length === 0) {
-    return { decisions: [], accountId: null };
+function accountBindingHazard(r, opts = {}) {
+  if (!r.hasGitRemote || !r.project_id) return "none";
+  if (r.reason === "local-path") return opts.allowMismatch ? "warn" : "block";
+  if (r.reason === "config") return "warn";
+  return "none";
+}
+var WORKSPACE_ENV_VARS = [
+  // Claude Code exposes the original project dir to hooks/plugin commands.
+  "CLAUDE_PROJECT_DIR",
+  // Cursor/plugin shims and local tests can set this explicitly.
+  "CURSOR_WORKSPACE_ROOT",
+  "CURSOR_PROJECT_ROOT",
+  "MEMLIN_WORKSPACE_ROOT",
+  // npm/pnpm set INIT_CWD to the directory where the user invoked a script.
+  "INIT_CWD"
+];
+function runtimeCwd(fallback = process.cwd()) {
+  for (const name of WORKSPACE_ENV_VARS) {
+    const raw = process.env[name]?.trim();
+    if (raw && path8.isAbsolute(raw)) return path8.resolve(raw);
   }
-  queue.asked_ids ??= [];
-  const room = Math.min(DECISION_CAPS.perTurn, DECISION_CAPS.perSession - queue.asked_ids.length);
-  if (room <= 0) {
-    queue.pending = [];
-    return { decisions: [], accountId: null };
-  }
-  const decisions = queue.pending.splice(0, room);
-  queue.asked_ids.push(...decisions.map((d) => d.id));
-  queue.at = at;
-  return { decisions, accountId: queue.account_id ?? null };
+  return path8.resolve(fallback);
 }
-var NONE = { decisions: [], block: "", systemMessage: "" };
-function defaultMarkAsked(cwd) {
-  let ctx = null;
-  return async (decisionId, accountId) => {
-    ctx ??= getApi(cwd ? { cwd } : {});
-    const api = await ctx;
-    if (!api) return;
-    await api.api.markDecisionAsked(decisionId, "session", accountId ? { accountId } : {});
-  };
-}
-async function markAsked(decisions, accountId, mark) {
-  await withTimeout(
-    Promise.allSettled(decisions.map((d) => mark(d.id, accountId))),
-    MARK_ASKED_TIMEOUT_MS,
-    []
-  ).catch(() => void 0);
-}
-async function takeSessionDecisions(opts) {
-  const nowMs = opts.nowMs ?? Date.now();
-  let taken = {
-    decisions: [],
-    accountId: null
-  };
+async function resolveProject(api, cwd, configProjectId) {
+  const absCwd = path8.resolve(cwd);
+  const remotes = detectGitRemotes(cwd);
+  const hasGitRemote = remotes.length > 0;
+  let serverFailure;
   try {
-    await updateState((state) => {
-      taken = takeTurnDecisions(state, opts.sessionId ?? null, nowMs);
+    const result = await api.resolveProject({
+      // Primary remote (back-compat with the single-remote server path).
+      git_remote: remotes[0] ?? null,
+      // All detected remotes — for the workspace-root-of-repos case, this is
+      // every sibling repo so the server resolves to the owning project.
+      git_remotes: remotes,
+      cwd: absCwd
     });
-  } catch {
-    return NONE;
+    if (result.project_id) {
+      return {
+        project_id: result.project_id,
+        project_name: result.name,
+        account_id: result.account_id,
+        reason: result.reason === "none" ? "config" : result.reason,
+        hasGitRemote,
+        enforce_done_deployed: result.enforce_done_deployed
+      };
+    }
+  } catch (e) {
+    serverFailure = summarizeBackendFailure(e) ?? void 0;
   }
-  if (taken.decisions.length === 0) return NONE;
-  const block = taken.decisions.map((d) => renderDecisionBlock(d, { host: opts.host, nowMs, maxBytes: opts.maxBytes })).join("");
-  const systemMessage = decisionNoticeLine(taken.decisions[0], 700, nowMs);
-  await markAsked(taken.decisions, taken.accountId, opts.markAsked ?? defaultMarkAsked(opts.cwd ?? void 0));
-  return { decisions: taken.decisions, block, systemMessage };
+  if (configProjectId) {
+    const localBinding = await findWorkspaceBinding(absCwd).catch(() => null);
+    if (localBinding?.binding.project_id === configProjectId) {
+      return {
+        project_id: configProjectId,
+        project_name: null,
+        account_id: null,
+        reason: "config",
+        hasGitRemote,
+        server_failure: serverFailure
+      };
+    }
+  }
+  return {
+    project_id: null,
+    project_name: null,
+    account_id: null,
+    reason: "none",
+    hasGitRemote,
+    server_failure: serverFailure
+  };
 }
-
-// apps/windsurf-plugin/src/hooks/user-prompt-submit.ts
-var HOOK_DIR = path11.dirname(fileURLToPath2(import.meta.url));
-var RESOLVE_BIN = path11.resolve(HOOK_DIR, "../cli/resolve.js");
-function allow() {
-  process.stdout.write(JSON.stringify({ continue: true }));
-}
-async function hasToken() {
+function readGitRemote(cwd) {
+  const read = (file2) => {
+    const stat = lstatSync(file2);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024)
+      throw new Error("Unsupported Git metadata");
+    return readFileSync2(file2, "utf8");
+  };
   try {
-    const raw = await fs8.readFile(
-      path11.join(os10.homedir(), ".config", "memlin", "token.json"),
-      "utf8"
-    );
-    return Boolean(JSON.parse(raw).access_token);
+    let root = path8.resolve(cwd);
+    for (; ; ) {
+      const marker = path8.join(root, ".git");
+      if (existsSync(marker)) {
+        const info = lstatSync(marker);
+        if (info.isSymbolicLink()) return null;
+        let directory = marker;
+        if (info.isFile()) {
+          const match = /^gitdir:\s*(.+)$/m.exec(read(marker));
+          if (!match) return null;
+          directory = path8.resolve(root, match[1].trim());
+        }
+        const common2 = path8.join(directory, "commondir");
+        if (existsSync(common2)) directory = path8.resolve(directory, read(common2).trim());
+        let origin = false;
+        for (const line of read(path8.join(directory, "config")).split(/\r?\n/)) {
+          if (/^\s*\[/.test(line)) origin = /^\s*\[remote\s+"origin"\]\s*(?:[#;].*)?$/.test(line);
+          else if (origin) {
+            const match = /^\s*url\s*=\s*(.*?)\s*$/.exec(line);
+            if (match) return normalizeGitRemote(match[1].replace(/^"(.*)"$/, "$1"));
+          }
+        }
+        return null;
+      }
+      const parent = path8.dirname(root);
+      if (parent === root) return null;
+      root = parent;
+    }
   } catch {
-    return false;
+    return null;
   }
 }
-function emitAdditionalContext(additional) {
-  process.stdout.write(
-    JSON.stringify({
-      continue: true,
-      additional_context: additional,
-      hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: additional }
-    })
-  );
-}
-async function main() {
-  const input = await readHookInput();
-  const prompt = input?.prompt ?? "";
-  const cwd = input?.cwd ?? input?.workspace_roots?.[0] ?? process.cwd();
-  const sessionId = input?.session_id ?? input?.conversation_id ?? null;
-  if (isIgnorablePrompt(prompt) || !await hasToken()) {
-    allow();
-    return;
-  }
-  const refusal = await hookAuthRefusal({ cwd, sessionId, notify: true });
-  if (refusal.refused) {
-    if (refusal.notice) emitAdditionalContext(refusal.notice);
-    else allow();
-    return;
-  }
-  const scribeNotice = (await takeSessionDecisions({ sessionId, host: "windsurf", cwd })).block + await takeCorrectionNotice(sessionId ?? void 0) + await takeScribeNotice(sessionId ?? void 0);
+var MAX_WORKSPACE_SCAN = 64;
+function detectGitRemotes(cwd) {
+  const enclosing = readGitRemote(cwd);
+  if (enclosing) return [enclosing];
+  const out = [];
   try {
-    const state = await readState();
-    const continuation = continuationForPrompt(state, prompt, cwd, "windsurf", sessionId);
-    if (continuation) {
-      emitAdditionalContext(scribeNotice + buildContinuityMarker(continuation.audit_id));
-      return;
+    let scanned = 0;
+    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
+      if (scanned >= MAX_WORKSPACE_SCAN) break;
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+      scanned++;
+      const child = path8.join(cwd, entry.name);
+      if (!existsSync(path8.join(child, ".git"))) continue;
+      const remote = readGitRemote(child);
+      if (remote && !out.includes(remote)) out.push(remote);
     }
   } catch {
   }
-  const lateBundle = await takePendingBundle(cwd, "windsurf", { sessionId });
-  const outcome = await runResolveWithBudget({
-    resolveBin: RESOLVE_BIN,
-    task: prompt,
-    cwd,
-    host: "windsurf",
-    sessionId
-  });
-  if (outcome.bundle?.rendered) {
-    const block = outcome.bundle.stale ? buildInlineDeliveryEnvelope(outcome.bundle) : [
-      "<memlin-resolved-context>",
-      "# Auto-resolved by Memlin for the prompt below. Authoritative project",
-      "# context \u2014 apply skills; honor approved goals and required/pinned decisions/directives;",
-      "# use other decisions as cited context; validate schemas; cite sources.",
-      "",
-      outcome.bundle.rendered,
-      "</memlin-resolved-context>"
-    ].join("\n");
-    emitAdditionalContext(scribeNotice + block);
-    return;
-  }
-  if (lateBundle) {
-    emitAdditionalContext(scribeNotice + buildLateDeliveryEnvelope(lateBundle));
-    await markLastResolveDelivered({
-      auditId: lateBundle.audit_id,
-      sessionId,
-      host: "windsurf",
-      cwd
-    });
-    return;
-  }
-  if (scribeNotice) emitAdditionalContext(scribeNotice);
-  else allow();
+  return out;
 }
-main().catch(() => {
-  allow();
-  exitHook(0);
+function effectiveAccountId(input) {
+  return input.resolvedAccountId ?? input.configAccountId;
+}
+
+// packages/plugin-core/src/session-feature.ts
+import { execFileSync } from "node:child_process";
+
+// packages/plugin-core/src/state.ts
+init_atomic_rename();
+import { promises as fs6 } from "node:fs";
+import path9 from "node:path";
+import os7 from "node:os";
+import crypto4 from "node:crypto";
+var STATE_FILE = path9.join(os7.homedir(), ".config", "memlin", "state.json");
+var LOCK_DIR = `${STATE_FILE}.lock`;
+
+// packages/plugin-core/src/session-feature.ts
+var TTL = 14 * 864e5;
+function readFeatureBranch(cwd) {
+  try {
+    const raw = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2e3
+    }).trim();
+    return raw.length <= 300 ? featureBranch(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+// packages/plugin-core/src/file-upload.ts
+import { constants as constants2, promises as fs7 } from "node:fs";
+import path10 from "node:path";
+import os8 from "node:os";
+import { createHash, randomUUID as randomUUID4 } from "node:crypto";
+function validateFileUploadId(value) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
+    throw new FileUploadRefusal("Expected a UUID.");
+  return value;
+}
+var FileUploadRefusal = class extends Error {
+  exitCode = 2;
+};
+var FileUploadFailure = class extends Error {
+  constructor(message, uploadId) {
+    super(message);
+    this.uploadId = uploadId;
+  }
+  uploadId;
+};
+var inside = (root, file2) => {
+  const relative = path10.relative(root, file2);
+  return relative === "" || !relative.startsWith(`..${path10.sep}`) && relative !== ".." && !path10.isAbsolute(relative);
+};
+function denyPath(file2) {
+  const pieces = path10.resolve(file2).split(path10.sep).map((x) => x.toLowerCase());
+  const name = pieces.at(-1);
+  if (pieces.some((x) => [".git", ".ssh", ".aws", ".memlin"].includes(x)) || pieces.some((x, i) => x === ".config" && pieces[i + 1] === "memlin") || /^\.env/i.test(name) || /\.(pem|key|p12|pfx)$/i.test(name) || /^id_/i.test(name) || ["token.json", "auth.json", "credentials", ".netrc", ".npmrc"].includes(name))
+    throw new FileUploadRefusal(
+      "Refusing a credential, configuration, or repository-internal file."
+    );
+}
+async function prepareLocalFile(input) {
+  const lexical = path10.resolve(input.filePath);
+  denyPath(lexical);
+  let file2, workspace, temporary;
+  try {
+    [file2, workspace, temporary] = await Promise.all([
+      fs7.realpath(lexical),
+      fs7.realpath(input.workspaceRoot),
+      fs7.realpath(input.tmpRoot ?? os8.tmpdir())
+    ]);
+  } catch {
+    throw new FileUploadRefusal("The file or workspace could not be opened.");
+  }
+  denyPath(file2);
+  if (inside(path10.resolve(input.workspaceRoot), lexical) && !inside(workspace, file2))
+    throw new FileUploadRefusal("Refusing a symlink that leaves the workspace.");
+  if (!inside(workspace, file2) && !inside(temporary, file2))
+    throw new FileUploadRefusal("Files must be inside the workspace or temporary directory.");
+  const fileName = path10.basename(file2);
+  const extension = fileName.split(".").at(-1)?.toLowerCase() ?? "";
+  const format = FILE_FORMATS.find((x) => x.acceptedExtensions.includes(extension));
+  if (!format)
+    throw new FileUploadRefusal(
+      "Unsupported file format. Use text, Markdown, JSON, an image, PDF, Office document, or recording."
+    );
+  let handle;
+  try {
+    const expected = await fs7.stat(file2);
+    if (!expected.isFile()) throw new FileUploadRefusal("Only regular files can be uploaded.");
+    handle = await fs7.open(
+      file2,
+      constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0) | (constants2.O_NONBLOCK ?? 0)
+    );
+    const before = await handle.stat();
+    if (!before.isFile() || before.dev !== expected.dev || before.ino !== expected.ino)
+      throw new FileUploadRefusal("The file changed while being opened; retry.");
+    if (before.size < 1 || before.size > KIND_MAX_BYTES[format.kind])
+      throw new FileUploadRefusal("The file is empty or exceeds the format size limit.");
+    const hash = createHash("sha256");
+    const chunks = [];
+    let total = 0;
+    for await (const chunk of handle.createReadStream({ autoClose: false })) {
+      const data = Buffer.from(chunk);
+      total += data.length;
+      if (total > KIND_MAX_BYTES[format.kind])
+        throw new FileUploadRefusal("The file exceeds the format size limit.");
+      hash.update(data);
+      chunks.push(data);
+    }
+    const after = await handle.stat();
+    if (before.size !== after.size || total !== before.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || await fs7.realpath(lexical) !== file2)
+      throw new FileUploadRefusal("The file changed while being read; retry.");
+    const bytes = Buffer.concat(chunks);
+    verifyLocalContent(bytes, format.mimeType);
+    return {
+      fileName,
+      mimeType: format.mimeType,
+      kind: format.kind,
+      byteSize: total,
+      sha256: hash.digest("hex"),
+      bytes
+    };
+  } catch (error40) {
+    if (error40 instanceof FileUploadRefusal) throw error40;
+    throw new FileUploadRefusal("The file could not be safely read.");
+  } finally {
+    await handle?.close();
+  }
+}
+function verifyLocalContent(bytes, mime) {
+  const ascii = (offset, length) => Buffer.from(bytes.subarray(offset, offset + length)).toString("ascii");
+  const prefix = (values) => values.every((value, index) => bytes[index] === value);
+  if (["text/plain", "text/markdown", "application/json"].includes(mime)) {
+    let text;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new FileUploadRefusal("Text files must contain valid UTF-8.");
+    }
+    if (text.includes("\0")) throw new FileUploadRefusal("Text files cannot contain NUL bytes.");
+    if (redactSecretShapes(text).changed)
+      throw new FileUploadRefusal("Refusing text that contains a secret or access token.");
+    if (mime === "application/json")
+      try {
+        JSON.parse(text);
+      } catch {
+        throw new FileUploadRefusal("The JSON file is invalid.");
+      }
+    return;
+  }
+  const matches = mime === "image/png" ? prefix([137, 80, 78, 71, 13, 10, 26, 10]) : mime === "image/jpeg" ? prefix([255, 216, 255]) : mime === "image/gif" ? ["GIF87a", "GIF89a"].includes(ascii(0, 6)) : mime === "image/webp" ? ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP" : mime === "application/pdf" ? ascii(0, 5) === "%PDF-" : mime.includes("openxmlformats") ? prefix([80, 75, 3, 4]) : mime === "audio/mpeg" ? ascii(0, 3) === "ID3" || bytes[0] === 255 && ((bytes[1] ?? 0) & 224) === 224 : mime === "audio/wav" ? ascii(0, 4) === "RIFF" && ascii(8, 4) === "WAVE" : mime === "audio/ogg" ? ascii(0, 4) === "OggS" : ["audio/mp4", "video/mp4", "video/quicktime"].includes(mime) ? ascii(4, 4) === "ftyp" : ["audio/webm", "video/webm"].includes(mime) ? prefix([26, 69, 223, 163]) : false;
+  if (!matches) throw new FileUploadRefusal("The file content does not match its extension.");
+}
+async function uploadLocalFile(input) {
+  const uploadId = validateFileUploadId(input.uploadId ?? randomUUID4());
+  const role = input.role ?? "reference";
+  if (input.host && !input.api.attachFile)
+    throw new FileUploadRefusal("This client cannot attach files. Update the Memlin CLI.");
+  const attachmentInput = input.host ? FileAttachmentInputSchema.parse({
+    host: input.host,
+    role,
+    caption: input.caption,
+    provenance: { client: "cli" }
+  }) : null;
+  if (input.file.kind === "markdown" && role === "report" && input.file.byteSize > 1048576)
+    throw new FileUploadRefusal(
+      "Editable reports are limited to 1 MiB; use --role reference for larger Markdown."
+    );
+  const scope = input.scope ?? (input.projectId ? "project" : "private");
+  if (scope === "project" && !input.projectId)
+    throw new FileUploadRefusal("Choose a linked project or use --scope private.");
+  const manifest = parseFileUploadRequest({
+    version: 2,
+    upload_id: uploadId,
+    home: {
+      account_id: input.accountId,
+      project_id: scope === "project" ? input.projectId : null,
+      scope
+    },
+    file_name: input.file.fileName,
+    mime_type: input.file.mimeType,
+    byte_size: input.file.byteSize,
+    sha256: input.file.sha256,
+    title: input.title ?? "",
+    rights_confirmed: true,
+    role,
+    purpose: "artifact",
+    provenance: { client: "cli" }
+  });
+  try {
+    const prepared = FileUploadPrepareResponseV1Schema.parse(
+      await input.api.prepareFileUpload(manifest)
+    );
+    let saved;
+    if ("deduplicated" in prepared) {
+      saved = FileUploadFinalizeResponseV1Schema.parse({
+        resource_id: prepared.resource_id,
+        version_id: prepared.version_id,
+        sha256: prepared.sha256,
+        idempotent_replay: true,
+        ...prepared.document_id ? { document_id: prepared.document_id } : {}
+      });
+    } else {
+      if (prepared.receipt.upload_id !== uploadId || prepared.receipt.mime_type !== input.file.mimeType)
+        throw Error("Upload receipt does not match this file.");
+      if (prepared.receipt.upload_required) {
+        if (!prepared.upload_url) throw Error("Upload URL is missing.");
+        const url2 = new URL(prepared.upload_url);
+        if (url2.username || url2.password || url2.protocol !== "https:" && !(url2.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url2.hostname)))
+          throw Error("Upload URL must use HTTPS.");
+        if (prepared.upload_headers["content-type"] !== input.file.mimeType)
+          throw Error("Upload headers do not match this file.");
+        const response = await (input.fetch ?? fetch)(url2, {
+          method: "PUT",
+          headers: prepared.upload_headers,
+          body: new Uint8Array(input.file.bytes),
+          redirect: "error",
+          signal: AbortSignal.timeout(12e4)
+        });
+        if (!response.ok) {
+          await response.body?.cancel();
+          throw Error(`File upload failed (${response.status}).`);
+        }
+        await response.body?.cancel();
+      }
+      saved = FileUploadFinalizeResponseV1Schema.parse(
+        await input.api.finalizeFileUpload(uploadId)
+      );
+    }
+    if (saved.sha256 !== input.file.sha256)
+      throw Error("Saved file hash does not match the original.");
+    let attachmentId;
+    if (attachmentInput && input.api.attachFile) {
+      try {
+        const attached = FileAttachmentReceiptSchema.parse(
+          await input.api.attachFile(saved.resource_id, {
+            ...attachmentInput,
+            pinned_version_id: saved.version_id
+          })
+        );
+        if (attached.resource_id !== saved.resource_id || attached.version_id !== saved.version_id)
+          throw Error("Attachment receipt does not match the saved version.");
+        attachmentId = attached.attachment_id;
+      } catch (error40) {
+        throw Error(
+          `File saved to Library (${saved.resource_id}), but attachment failed: ${error40 instanceof Error ? error40.message : "unavailable"}`
+        );
+      }
+    }
+    return {
+      ...saved,
+      ...attachmentId ? { attachment_id: attachmentId } : {},
+      role,
+      upload_id: uploadId,
+      artifact_ref: ArtifactRefSchema.parse({
+        artifact_id: saved.resource_id,
+        version_id: saved.version_id,
+        kind: role === "screenshot" && input.file.kind === "image" ? "interface_capture" : "file",
+        label: (input.title || input.file.fileName).slice(0, 280),
+        uri: `memlin-resource:${saved.resource_id}`,
+        media_type: input.file.mimeType,
+        digest: `sha256:${saved.sha256}`
+      }),
+      embed: `![${(input.title ?? input.file.fileName).replace(/[\]\\\n\r]/g, " ")}](memlin-resource:${saved.resource_id}?v=${saved.version_id})`
+    };
+  } catch (error40) {
+    throw new FileUploadFailure(
+      error40 instanceof Error ? error40.message : "File upload failed.",
+      uploadId
+    );
+  }
+}
+
+// packages/plugin-core/src/upload-target.ts
+var UUID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function parseFeature(value) {
+  const row = value;
+  if (!row || typeof row.id !== "string" || !UUID2.test(row.id) || typeof row.project_id !== "string" || !UUID2.test(row.project_id))
+    throw new FileUploadRefusal("Feature response is invalid.");
+  return { id: row.id, project_id: row.project_id };
+}
+async function resolveUploadFeature(api, input) {
+  if (input.feature === "none") return null;
+  if (!input.feature || input.feature === "auto") {
+    if (!input.projectId || !input.sessionId && !input.gitBranch) return null;
+    const { binding, auto_link } = await api.getFeatureBinding(
+      {
+        project_id: input.projectId,
+        ...input.sessionId ? { session_id: input.sessionId } : {},
+        ...input.gitBranch ? { git_branch: input.gitBranch } : {}
+      },
+      { accountId: input.accountId }
+    );
+    return binding && auto_link ? { id: binding.feature_id, project_id: input.projectId } : null;
+  }
+  if (UUID2.test(input.feature)) {
+    const result = await api.getFeature(input.feature, { accountId: input.accountId });
+    const target = parseFeature(result.feature);
+    if (target.id !== input.feature)
+      throw new FileUploadRefusal("Feature response did not match the requested ID.");
+    return target;
+  }
+  if (!/^[0-9a-f-]{4,35}$/i.test(input.feature))
+    throw new FileUploadRefusal("Use a feature ID, an unambiguous ID prefix, auto, or none.");
+  let cursor;
+  const matches = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (let page = 0; page < 10; page++) {
+    const result = await api.listFeatures({
+      accountId: input.accountId,
+      project_id: input.projectId,
+      limit: 100,
+      cursor
+    });
+    for (const raw of result.features) {
+      const target = parseFeature(raw);
+      if (target.id.startsWith(input.feature) && !seen.has(target.id)) {
+        seen.add(target.id);
+        matches.push(target);
+      }
+    }
+    if (matches.length > 1)
+      throw new FileUploadRefusal("Feature prefix is ambiguous. Use its full ID.");
+    if (!result.next_cursor) {
+      if (!matches.length) throw new FileUploadRefusal("Feature is unavailable.");
+      return matches[0];
+    }
+    if (cursor === result.next_cursor) break;
+    cursor = result.next_cursor;
+  }
+  throw new FileUploadRefusal("Use the full feature ID for this workspace.");
+}
+
+// packages/plugin-core/src/cli/upload.ts
+init_workspace_binding();
+
+// packages/plugin-core/src/cli/args.ts
+function parseSlashArgs(raw) {
+  const tokens = [];
+  let cur = "";
+  let inSingle = false;
+  let inDouble = false;
+  let started = false;
+  let i = 0;
+  const flush = () => {
+    if (started) {
+      tokens.push(cur);
+      cur = "";
+      started = false;
+    }
+  };
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (inSingle) {
+      if (ch === "'") {
+        inSingle = false;
+      } else {
+        cur += ch;
+      }
+      i++;
+      continue;
+    }
+    if (inDouble) {
+      if (ch === "\\" && i + 1 < raw.length) {
+        const next = raw[i + 1];
+        if (next === '"' || next === "\\") {
+          cur += next;
+          i += 2;
+          continue;
+        }
+        cur += ch;
+        i++;
+        continue;
+      }
+      if (ch === '"') {
+        inDouble = false;
+        i++;
+        continue;
+      }
+      cur += ch;
+      i++;
+      continue;
+    }
+    if (ch === "'") {
+      inSingle = true;
+      started = true;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inDouble = true;
+      started = true;
+      i++;
+      continue;
+    }
+    if (ch === " " || ch === "	" || ch === "\n") {
+      flush();
+      i++;
+      continue;
+    }
+    cur += ch;
+    started = true;
+    i++;
+  }
+  flush();
+  return tokens;
+}
+
+// packages/plugin-core/src/cli/cli-runner.ts
+var WATCHDOG_MS = 2e3;
+var CliExit = class extends Error {
+  constructor(code) {
+    super(`CliExit(${code})`);
+    this.code = code;
+    this.name = "CliExit";
+  }
+  code;
+};
+function scheduleProcessExit(code) {
+  process.exitCode = code;
+  void closeHttpSockets();
+  setTimeout(() => process.exit(), WATCHDOG_MS).unref();
+}
+function runCliMain(main2, onError) {
+  main2().then(
+    (code) => scheduleProcessExit(typeof code === "number" ? code : 0),
+    (err) => {
+      if (err instanceof CliExit) {
+        scheduleProcessExit(err.code);
+        return;
+      }
+      let code;
+      try {
+        code = onError(err);
+      } catch (handlerErr) {
+        if (handlerErr instanceof CliExit) {
+          scheduleProcessExit(handlerErr.code);
+          return;
+        }
+        console.error("cli error handler failed:", handlerErr);
+        code = 1;
+      }
+      scheduleProcessExit(code);
+    }
+  );
+}
+
+// packages/plugin-core/src/cli/upload.ts
+async function main() {
+  const cwd = runtimeCwd();
+  let args = process.argv.slice(2);
+  if (args.length === 1 && !await fs8.lstat(path11.resolve(cwd, args[0])).then(
+    () => true,
+    () => false
+  ))
+    args = parseSlashArgs(args[0]);
+  if (args.includes("--help") || args.length === 0) {
+    process.stdout.write(
+      "memlin upload <path>... [--role screenshot|log|report|output|reference] [--title TEXT] [--scope project|private] [--project UUID] [--upload-id UUID] [--feature auto|none|ID|--work-item ID|--flow-stage ID|--thought ID] [--caption TEXT] [--json]\n"
+    );
+    return args.length === 0 ? 2 : 0;
+  }
+  const paths = [];
+  let role = "reference", title, scope, project, uploadId, json2 = false, flags = true;
+  let feature, host, caption;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (flags && arg === "--") {
+      flags = false;
+      continue;
+    }
+    if (flags && arg === "--json") {
+      json2 = true;
+      continue;
+    }
+    if (flags && [
+      "--role",
+      "--title",
+      "--scope",
+      "--project",
+      "--upload-id",
+      "--feature",
+      "--work-item",
+      "--flow-stage",
+      "--thought",
+      "--caption"
+    ].includes(arg)) {
+      const value = args[++i];
+      if (!value || value.startsWith("--"))
+        throw new FileUploadRefusal(`Missing value for ${arg}.`);
+      if (arg === "--caption") caption = value;
+      else if (["--feature", "--work-item", "--flow-stage", "--thought"].includes(arg)) {
+        if (feature || host) throw new FileUploadRefusal("Choose one attachment target.");
+        if (arg === "--feature") feature = value;
+        else
+          host = {
+            kind: arg === "--work-item" ? "project_work_item" : arg === "--flow-stage" ? "flow_stage_run" : "thought",
+            id: validateFileUploadId(value)
+          };
+      } else if (arg === "--role") role = value;
+      else if (arg === "--title") title = value;
+      else if (arg === "--scope") {
+        if (!["project", "private"].includes(value))
+          throw new FileUploadRefusal("Scope must be project or private.");
+        scope = value;
+      } else if (arg === "--project") project = validateFileUploadId(value);
+      else uploadId = validateFileUploadId(value);
+      continue;
+    }
+    if (flags && arg.startsWith("--")) throw new FileUploadRefusal(`Unsupported option ${arg}.`);
+    paths.push(path11.resolve(cwd, arg));
+  }
+  if (!RESOURCE_ATTACHMENT_ROLES.some((value) => value === role))
+    throw new FileUploadRefusal("Unknown file role.");
+  if (scope === "private" && feature && feature !== "none")
+    throw new FileUploadRefusal("Private files cannot be attached to a shared feature.");
+  if (caption && (caption.length > 500 || feature === "none"))
+    throw new FileUploadRefusal(
+      "A caption needs an attachment target and must be 500 characters or fewer."
+    );
+  const fileRole = role;
+  if (paths.length === 0 || uploadId && paths.length !== 1)
+    throw new FileUploadRefusal(
+      "Choose at least one file; --upload-id is only valid with one file."
+    );
+  const binding = await findWorkspaceBinding(cwd);
+  const boundRoot = binding?.workspaceRoot;
+  const relative = boundRoot ? path11.relative(boundRoot, cwd) : "..";
+  const workspaceRoot = boundRoot && relative !== ".." && !relative.startsWith(`..${path11.sep}`) && !path11.isAbsolute(relative) ? boundRoot : cwd;
+  if (paths.length > 20) throw new FileUploadRefusal("Upload at most 20 files at a time.");
+  const files = [];
+  let totalBytes = 0;
+  for (const filePath of paths) {
+    const file2 = await prepareLocalFile({ filePath, workspaceRoot });
+    if (file2.kind === "markdown" && fileRole === "report" && file2.byteSize > 1048576)
+      throw new FileUploadRefusal(
+        "Editable reports are limited to 1 MiB; use --role reference for larger Markdown."
+      );
+    totalBytes += file2.byteSize;
+    if (totalBytes > 100 * 1024 * 1024)
+      throw new FileUploadRefusal("Upload at most 100 MiB at a time.");
+    files.push(file2);
+  }
+  const ctx = await getApi({ cwd });
+  if (!ctx) {
+    process.stderr.write("Not signed in. Run memlin login first.\n");
+    return 1;
+  }
+  const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
+  if (accountBindingHazard(resolved, { allowMismatch: allowAccountMismatch() }) === "block")
+    throw new FileUploadRefusal(
+      "This workspace does not own its git remote. Correct its Memlin project binding before uploading."
+    );
+  const accountId = effectiveAccountId({
+    configAccountId: ctx.config.account_id,
+    resolvedAccountId: resolved.account_id
+  });
+  if (!accountId) throw new FileUploadRefusal("No workspace account resolved. Sign in to Memlin.");
+  let targetProject = project ?? resolved.project_id;
+  if (!host && scope !== "private") {
+    const target = await resolveUploadFeature(ctx.api, {
+      accountId,
+      projectId: targetProject,
+      feature,
+      sessionId: process.env.MEMLIN_SESSION_ID,
+      gitBranch: readFeatureBranch(cwd)
+    });
+    if (target) {
+      if (project && project !== target.project_id)
+        throw new FileUploadRefusal("The feature belongs to a different project.");
+      targetProject = target.project_id;
+      host = { kind: "feature", id: target.id };
+    } else if (feature === "auto") {
+      process.stderr.write(
+        "No active feature binding; saving to the Library without an attachment.\n"
+      );
+    }
+  }
+  if (caption && !host)
+    throw new FileUploadRefusal("A caption needs an available attachment target.");
+  if (host && ["project_work_item", "flow_stage_run"].includes(host.kind) && !targetProject)
+    throw new FileUploadRefusal(
+      "Choose the target project with --project before uploading this attachment."
+    );
+  const results = [];
+  for (const file2 of files) {
+    const saved = await uploadLocalFile({
+      api: {
+        prepareFileUpload: (input) => ctx.api.prepareFileUpload(input, { accountId }),
+        finalizeFileUpload: (id) => ctx.api.finalizeFileUpload(id, { accountId }),
+        attachFile: (id, input) => ctx.api.attachFile(id, input, { accountId })
+      },
+      file: file2,
+      accountId,
+      projectId: targetProject,
+      host,
+      caption,
+      scope,
+      title,
+      role: fileRole,
+      uploadId
+    });
+    results.push(saved);
+    if (!json2)
+      process.stdout.write(`Saved ${title ?? file2.fileName} to Library.
+${saved.embed}
+`);
+  }
+  if (json2)
+    process.stdout.write(JSON.stringify(results.length === 1 ? results[0] : results) + "\n");
+  return 0;
+}
+runCliMain(main, (error40) => {
+  process.stderr.write(
+    `Upload refused: ${error40 instanceof Error ? error40.message : "Unknown error"}
+`
+  );
+  if (error40 instanceof FileUploadFailure)
+    process.stderr.write(`Retry the same file and options with --upload-id ${error40.uploadId}
+`);
+  return error40 instanceof FileUploadRefusal || error40 instanceof Error && error40.name === "ZodError" ? 2 : 1;
 });
 /*! Bundled license information:
 

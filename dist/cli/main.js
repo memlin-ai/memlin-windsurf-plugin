@@ -25,6 +25,7 @@ const RUN = {
   handoffs: () => import("./handoffs.js"),
   role: () => import("./role.js"),
   features: () => import("./features.js"),
+  upload: () => import("./upload.js"),
   link: () => import("./link.js"),
   revert: () => import("./revert.js"),
   pin: () => import("./pin.js"),

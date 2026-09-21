@@ -7579,6 +7579,8 @@ var DOCUMENT_KINDS = [
   // (CORPUS_KINDS), and the default export all use explicit kind allow-lists
   // that exclude 'file'. A file enters the core only via an explicit
   // "Promote to Memory" (which writes a separate kind='memory' doc).
+  // Role-marked living docs have one explicit delivery path: a checked feature
+  // pointer/direct read or opt-in CLI copy, never semantic retrieval.
   "file",
   // A personal-first checklist / list (the people-processed "To-dos" tier). Its
   // body is a GFM task list. Like 'file', it's ISOLATED from the resolver/
@@ -7599,6 +7601,17 @@ var DOCUMENT_KINDS = [
 ];
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];
+var FEATURE_LABELS = {
+  code: { singular: "Feature", plural: "Features" },
+  general: { singular: "Workstream", plural: "Workstreams" },
+  highlight: { singular: "Highlight", plural: "Highlights" }
+};
+function featureLabel(projectKind, nounOverride) {
+  if (nounOverride === "highlight") return FEATURE_LABELS.highlight;
+  if (nounOverride === "feature") return FEATURE_LABELS.code;
+  if (nounOverride === "workstream") return FEATURE_LABELS.general;
+  return projectKind === "general" ? FEATURE_LABELS.general : FEATURE_LABELS.code;
+}
 var MEMORY_TYPES = [
   "correction",
   "preference",
@@ -8189,26 +8202,38 @@ var SONNET_BLENDED_USD_PER_MTOK = SONNET_INPUT_USD_PER_MTOK + OUTPUT_MULTIPLIER 
 var SAVINGS_USD_PER_TOKEN = estCostUsd(1);
 
 // packages/shared/dist/feature-discovery.js
-var FEATURE_DISCOVERY_SYSTEM = [
-  "You are Memlin's feature mapper. You read the inventory of a software project \u2014",
-  "its components (subsystems), recent pull requests, and plans \u2014 and group them",
-  "into a short list of FEATURES: the real units of work a team organizes around",
-  '(e.g. "Authentication & sessions", "Billing & credits", "Capture pipeline").',
-  "",
-  "Rules:",
-  "- Propose between 4 and 15 features. Fewer is better than padding with noise.",
-  "- A feature is a cohesive capability or workstream, NOT a single file, a layer",
-  '  ("frontend"), or a restatement of the whole project.',
-  "- Each feature's members must be drawn ONLY from the provided item ids. Never",
-  "  invent ids. Omit items that do not clearly belong to any feature.",
-  "- Do NOT duplicate or restate the existing features listed; only propose what is",
-  "  genuinely missing.",
-  "- Name features the way the team would say them out loud: short, exact nouns.",
-  "",
-  "Return ONLY a JSON object of the form:",
-  '{ "features": [ { "name": string, "summary": string, "members": string[] } ] }',
-  "where each members entry is an id from the inventory. No prose outside the JSON."
-].join("\n");
+function featureDiscoverySystem({
+  projectKind = "code",
+  noun
+} = {}) {
+  const label2 = featureLabel(projectKind, noun);
+  const inventory = projectKind === "general" ? [
+    "You read a project\u2019s shared thoughts, topics, decisions, goals and plans.",
+    `Group them into ${label2.plural.toUpperCase()}: cohesive areas of work the team organizes around.`,
+    "Examples include customer research, event planning, hiring and quarterly priorities."
+  ] : [
+    "You read the inventory of a software project: components, recent pull requests, decisions, goals and plans.",
+    `Group them into ${label2.plural.toUpperCase()}: cohesive capabilities the team organizes around.`,
+    "Examples include authentication, billing and capture."
+  ];
+  return [
+    `You are Memlin\u2019s ${label2.singular.toLowerCase()} mapper.`,
+    ...inventory,
+    "",
+    "Rules:",
+    `- Propose between 4 and 15 ${label2.plural.toLowerCase()}. Fewer is better than padding with noise.`,
+    "- Each group is a cohesive area of work, not one item or a restatement of the whole project.",
+    "- Members must be drawn ONLY from the provided item ids. Never invent ids.",
+    "- Omit items that do not clearly belong to any group.",
+    "- Do NOT duplicate or restate existing or previously rejected groups; propose only missing work.",
+    "- Use short, exact names the team would use in conversation.",
+    "",
+    "Return ONLY a JSON object of the form:",
+    '{ "features": [ { "name": string, "summary": string, "members": string[] } ] }',
+    "Each members entry is an id from the inventory. No prose outside the JSON."
+  ].join("\n");
+}
+var FEATURE_DISCOVERY_SYSTEM = featureDiscoverySystem();
 
 // packages/shared/dist/light-native.js
 var LIGHT_READER_LIMITS = Object.freeze({
@@ -10931,6 +10956,7 @@ var ExperienceHarnessManifestV2Schema = external_exports.object({
   root_thought_id: external_exports.string().uuid(),
   root_revision_token: external_exports.string().min(1).max(2048),
   context: ContextManifestV1Schema,
+  harness: external_exports.object({ output_mode: external_exports.enum(["inline", "resource"]) }).strict().optional(),
   nodes: external_exports.array(
     external_exports.object({
       id: external_exports.string().uuid(),
@@ -10955,7 +10981,12 @@ var ExperienceHarnessSaveV2Schema = external_exports.object({
   root_revision_token: external_exports.string().min(1).max(2048),
   harness_id: external_exports.string().uuid().nullable().default(null),
   expected_revision: external_exports.number().int().positive().nullable().default(null),
-  definition: ExperienceHarnessManifestV2Schema.pick({ context: true, nodes: true, edges: true })
+  definition: ExperienceHarnessManifestV2Schema.pick({
+    context: true,
+    nodes: true,
+    edges: true,
+    harness: true
+  })
 }).strict().refine(
   (input) => input.harness_id === null === (input.expected_revision === null),
   "Existing harness requires its current revision"
@@ -23494,6 +23525,184 @@ function needsYouDecisionsPhrase(counts) {
 var NEEDS_YOU_HORIZON_DAYS = 14;
 var HORIZON_MS = NEEDS_YOU_HORIZON_DAYS * 24 * 60 * 60 * 1e3;
 var STALLED_GOAL_AGE_MS = 30 * 24 * 60 * 60 * 1e3;
+
+// packages/shared/dist/research-collection.js
+var ResearchCollectionSourceSchema = external_exports.object({
+  url: external_exports.string().url().max(2048).refine((value) => {
+    try {
+      const url2 = new URL(value);
+      return url2.protocol === "https:" && !url2.username && !url2.password && !url2.hash;
+    } catch {
+      return false;
+    }
+  }, "Use a public HTTPS feed URL"),
+  label: external_exports.string().trim().min(1).max(120),
+  category: external_exports.enum(["official", "community"])
+}).strict();
+var ResearchCollectionSchema = external_exports.object({
+  topics: external_exports.array(external_exports.string().trim().min(2).max(100)).min(1).max(10),
+  sources: external_exports.array(ResearchCollectionSourceSchema).min(1).max(4)
+}).strict();
+
+// packages/shared/dist/feature-tracking.js
+var FEATURE_TRACKING_MODES = ["off", "suggest", "assist", "auto"];
+var FEATURE_NOUNS = ["feature", "workstream", "highlight"];
+var FEATURE_CONTEXT_MODES = ["always", "auto", "off"];
+var FeatureTrackingPolicySchema = external_exports.object({
+  mode: external_exports.enum(FEATURE_TRACKING_MODES),
+  source: external_exports.enum(["light", "project", "account"]),
+  noun: external_exports.enum(FEATURE_NOUNS),
+  project_kind: external_exports.enum(["code", "general"]).nullable(),
+  context_mode: external_exports.enum(FEATURE_CONTEXT_MODES)
+});
+
+// packages/shared/dist/feature-system-contracts.js
+var RESOURCE_ATTACHMENT_ROLES = [
+  "report",
+  "screenshot",
+  "log",
+  "output",
+  "reference"
+];
+
+// packages/shared/dist/files.js
+var FileProvenanceSchema = external_exports.object({
+  client: external_exports.enum(["web", "cli", "mcp", "api"]).default("api"),
+  agent_kind: external_exports.string().max(100).optional(),
+  agent_installation_id: external_exports.string().max(200).optional(),
+  session_id: external_exports.string().max(200).optional()
+}).strict();
+var FileUploadPreparedResponseV1Schema = external_exports.object({
+  receipt: ResourceUploadReceiptV2Schema,
+  upload_url: external_exports.string().url().nullable(),
+  upload_headers: external_exports.object({ "content-type": external_exports.string(), "x-upsert": external_exports.literal("false") }).strict()
+}).strict();
+var FileUploadDeduplicatedResponseV1Schema = external_exports.object({
+  version: external_exports.literal(1),
+  state: external_exports.literal("completed"),
+  deduplicated: external_exports.literal(true),
+  resource_id: external_exports.string().uuid(),
+  version_id: external_exports.string().uuid(),
+  sha256: external_exports.string().regex(/^[0-9a-f]{64}$/),
+  document_id: external_exports.string().uuid().optional()
+}).strict();
+var FileUploadPrepareResponseV1Schema = external_exports.union([
+  FileUploadPreparedResponseV1Schema,
+  FileUploadDeduplicatedResponseV1Schema
+]);
+var FileUploadFinalizeResponseV1Schema = external_exports.object({
+  resource_id: external_exports.string().uuid(),
+  version_id: external_exports.string().uuid(),
+  sha256: external_exports.string().regex(/^[0-9a-f]{64}$/),
+  idempotent_replay: external_exports.boolean(),
+  document_id: external_exports.string().uuid().optional()
+}).strict();
+var FileAttachmentHostSchema = external_exports.object({
+  kind: external_exports.enum(["feature", "project_work_item", "flow_stage_run", "thought"]),
+  id: external_exports.string().uuid()
+}).strict();
+var FileAttachmentInputSchema = external_exports.object({
+  host: FileAttachmentHostSchema,
+  pinned_version_id: external_exports.string().uuid().optional(),
+  role: external_exports.enum(RESOURCE_ATTACHMENT_ROLES).default("reference"),
+  caption: external_exports.string().max(500).optional(),
+  provenance: FileProvenanceSchema.default({})
+}).strict();
+var FileAttachmentReceiptSchema = external_exports.object({
+  attachment_id: external_exports.string().uuid(),
+  resource_id: external_exports.string().uuid(),
+  version_id: external_exports.string().uuid()
+}).strict();
+var FileDetachInputSchema = external_exports.object({
+  attachment_id: external_exports.string().uuid(),
+  host: FileAttachmentHostSchema
+}).strict();
+var ResourcePublicLinkWriteSchema = external_exports.discriminatedUnion("action", [
+  external_exports.object({
+    action: external_exports.literal("create"),
+    expires_in_days: external_exports.union([external_exports.literal(1), external_exports.literal(7), external_exports.literal(30)]).default(7),
+    pinned_version_id: external_exports.string().uuid().nullable().optional(),
+    embedded_resource_ids: external_exports.array(external_exports.string().uuid()).max(50).default([]),
+    embedded_resource_versions: external_exports.record(external_exports.string().uuid(), external_exports.string().uuid()).optional()
+  }).strict(),
+  external_exports.object({ action: external_exports.literal("revoke"), id: external_exports.string().uuid() }).strict()
+]);
+var ResourcePublicLinksSchema = external_exports.object({
+  version: external_exports.literal(1),
+  resource_id: external_exports.string().uuid(),
+  token: external_exports.string().nullable(),
+  links: external_exports.array(
+    external_exports.object({
+      id: external_exports.string().uuid(),
+      created_at: external_exports.string(),
+      expires_at: external_exports.string(),
+      revoked_at: external_exports.string().nullable(),
+      pinned_version_id: external_exports.string().uuid().nullable(),
+      embedded_resource_ids: external_exports.array(external_exports.string().uuid()).max(50),
+      embedded_resource_versions: external_exports.record(external_exports.string().uuid(), external_exports.string().uuid())
+    })
+  )
+});
+var ResourcePublicMaterialSchema = external_exports.object({
+  resource: external_exports.object({
+    id: external_exports.string().uuid(),
+    title: external_exports.string(),
+    kind: external_exports.string(),
+    mime_type: external_exports.string(),
+    byte_size: external_exports.number().nonnegative()
+  }),
+  version_id: external_exports.string().uuid(),
+  content: external_exports.string().max(1048576).nullable(),
+  storage_locator: external_exports.object({
+    bucket: external_exports.literal("thought-resource-originals"),
+    path: external_exports.string().min(1).max(1024),
+    original_filename: external_exports.string().nullable()
+  }).nullable(),
+  embedded_resource_ids: external_exports.array(external_exports.string().uuid()).max(50).optional(),
+  expires_at: external_exports.string().optional()
+});
+
+// packages/shared/dist/feature-doc.js
+var FeatureDocNarrativeSchema = external_exports.object({
+  overview: external_exports.string().max(1200),
+  why: external_exports.string().max(1200),
+  how_it_works: external_exports.string().max(1200)
+}).strict();
+
+// packages/shared/dist/file-formats.js
+var KIND_MAX_BYTES = {
+  image: 10 * 1024 * 1024,
+  text: 5 * 1024 * 1024,
+  markdown: 5 * 1024 * 1024,
+  dataset: 5 * 1024 * 1024,
+  pdf: 25 * 1024 * 1024,
+  document: 25 * 1024 * 1024,
+  audio: 25 * 1024 * 1024,
+  video: 25 * 1024 * 1024
+};
+
+// packages/shared/dist/feature-binding.js
+var FeatureCaptureFieldsSchema = external_exports.object({
+  session_id: external_exports.string().trim().min(1).max(256).nullish(),
+  git_branch: external_exports.string().trim().min(1).max(300).nullish(),
+  feature_id: external_exports.string().uuid().nullish()
+});
+
+// packages/shared/dist/feature-work.js
+var Receipt = external_exports.object({
+  scanned: external_exports.number().int().nonnegative().max(200),
+  linked: external_exports.number().int().nonnegative().max(200),
+  suggestions: external_exports.array(
+    external_exports.object({
+      work_item_id: external_exports.string().uuid(),
+      feature_id: external_exports.string().uuid(),
+      method: external_exports.enum(["binding", "handoff", "embedding"]),
+      confidence: external_exports.number().min(0).max(1)
+    })
+  ).max(200),
+  next_cursor: external_exports.string().uuid().nullable(),
+  reason: external_exports.string().optional()
+});
 
 // packages/plugin-core/src/cli/decisions-view.ts
 var NO_OPEN_DECISIONS = "No open decisions \u2014 Memlin has nothing it needs you to decide.\n";

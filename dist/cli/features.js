@@ -1055,8 +1055,8 @@ var require_null = __commonJS({
     function constructYamlNull() {
       return null;
     }
-    function isNull(object2) {
-      return object2 === null;
+    function isNull(object3) {
+      return object3 === null;
     }
     module2.exports = new Type("tag:yaml.org,2002:null", {
       kind: "scalar",
@@ -1095,8 +1095,8 @@ var require_bool = __commonJS({
     function constructYamlBoolean(data) {
       return data === "true" || data === "True" || data === "TRUE";
     }
-    function isBoolean(object2) {
-      return Object.prototype.toString.call(object2) === "[object Boolean]";
+    function isBoolean(object3) {
+      return Object.prototype.toString.call(object3) === "[object Boolean]";
     }
     module2.exports = new Type("tag:yaml.org,2002:bool", {
       kind: "scalar",
@@ -1104,14 +1104,14 @@ var require_bool = __commonJS({
       construct: constructYamlBoolean,
       predicate: isBoolean,
       represent: {
-        lowercase: function(object2) {
-          return object2 ? "true" : "false";
+        lowercase: function(object3) {
+          return object3 ? "true" : "false";
         },
-        uppercase: function(object2) {
-          return object2 ? "TRUE" : "FALSE";
+        uppercase: function(object3) {
+          return object3 ? "TRUE" : "FALSE";
         },
-        camelcase: function(object2) {
-          return object2 ? "True" : "False";
+        camelcase: function(object3) {
+          return object3 ? "True" : "False";
         }
       },
       defaultStyle: "lowercase"
@@ -1218,8 +1218,8 @@ var require_int = __commonJS({
       }
       return sign * parseInt(value, 10);
     }
-    function isInteger(object2) {
-      return Object.prototype.toString.call(object2) === "[object Number]" && (object2 % 1 === 0 && !common2.isNegativeZero(object2));
+    function isInteger(object3) {
+      return Object.prototype.toString.call(object3) === "[object Number]" && (object3 % 1 === 0 && !common2.isNegativeZero(object3));
     }
     module2.exports = new Type("tag:yaml.org,2002:int", {
       kind: "scalar",
@@ -1298,9 +1298,9 @@ var require_float = __commonJS({
       return sign * parseFloat(value, 10);
     }
     var SCIENTIFIC_WITHOUT_DOT = /^[-+]?[0-9]+e/;
-    function representYamlFloat(object2, style) {
+    function representYamlFloat(object3, style) {
       var res;
-      if (isNaN(object2)) {
+      if (isNaN(object3)) {
         switch (style) {
           case "lowercase":
             return ".nan";
@@ -1309,7 +1309,7 @@ var require_float = __commonJS({
           case "camelcase":
             return ".NaN";
         }
-      } else if (Number.POSITIVE_INFINITY === object2) {
+      } else if (Number.POSITIVE_INFINITY === object3) {
         switch (style) {
           case "lowercase":
             return ".inf";
@@ -1318,7 +1318,7 @@ var require_float = __commonJS({
           case "camelcase":
             return ".Inf";
         }
-      } else if (Number.NEGATIVE_INFINITY === object2) {
+      } else if (Number.NEGATIVE_INFINITY === object3) {
         switch (style) {
           case "lowercase":
             return "-.inf";
@@ -1327,14 +1327,14 @@ var require_float = __commonJS({
           case "camelcase":
             return "-.Inf";
         }
-      } else if (common2.isNegativeZero(object2)) {
+      } else if (common2.isNegativeZero(object3)) {
         return "-0.0";
       }
-      res = object2.toString(10);
+      res = object3.toString(10);
       return SCIENTIFIC_WITHOUT_DOT.test(res) ? res.replace("e", ".e") : res;
     }
-    function isFloat(object2) {
-      return Object.prototype.toString.call(object2) === "[object Number]" && (object2 % 1 !== 0 || common2.isNegativeZero(object2));
+    function isFloat(object3) {
+      return Object.prototype.toString.call(object3) === "[object Number]" && (object3 % 1 !== 0 || common2.isNegativeZero(object3));
     }
     module2.exports = new Type("tag:yaml.org,2002:float", {
       kind: "scalar",
@@ -1427,8 +1427,8 @@ var require_timestamp = __commonJS({
       if (delta) date5.setTime(date5.getTime() - delta);
       return date5;
     }
-    function representYamlTimestamp(object2) {
-      return object2.toISOString();
+    function representYamlTimestamp(object3) {
+      return object3.toISOString();
     }
     module2.exports = new Type("tag:yaml.org,2002:timestamp", {
       kind: "scalar",
@@ -1505,8 +1505,8 @@ var require_binary = __commonJS({
       }
       return result;
     }
-    function representYamlBinary(object2) {
-      var result = "", bits = 0, idx, tail, max = object2.length, map2 = BASE64_MAP;
+    function representYamlBinary(object3) {
+      var result = "", bits = 0, idx, tail, max = object3.length, map2 = BASE64_MAP;
       for (idx = 0; idx < max; idx++) {
         if (idx % 3 === 0 && idx) {
           result += map2[bits >> 18 & 63];
@@ -1514,7 +1514,7 @@ var require_binary = __commonJS({
           result += map2[bits >> 6 & 63];
           result += map2[bits & 63];
         }
-        bits = (bits << 8) + object2[idx];
+        bits = (bits << 8) + object3[idx];
       }
       tail = max % 3;
       if (tail === 0) {
@@ -1535,8 +1535,8 @@ var require_binary = __commonJS({
       }
       return result;
     }
-    function isBinary(object2) {
-      return NodeBuffer && NodeBuffer.isBuffer(object2);
+    function isBinary(object3) {
+      return NodeBuffer && NodeBuffer.isBuffer(object3);
     }
     module2.exports = new Type("tag:yaml.org,2002:binary", {
       kind: "scalar",
@@ -1557,9 +1557,9 @@ var require_omap = __commonJS({
     var _toString = Object.prototype.toString;
     function resolveYamlOmap(data) {
       if (data === null) return true;
-      var objectKeys = [], index, length, pair, pairKey, pairHasKey, object2 = data;
-      for (index = 0, length = object2.length; index < length; index += 1) {
-        pair = object2[index];
+      var objectKeys = [], index, length, pair, pairKey, pairHasKey, object3 = data;
+      for (index = 0, length = object3.length; index < length; index += 1) {
+        pair = object3[index];
         pairHasKey = false;
         if (_toString.call(pair) !== "[object Object]") return false;
         for (pairKey in pair) {
@@ -1593,10 +1593,10 @@ var require_pairs = __commonJS({
     var _toString = Object.prototype.toString;
     function resolveYamlPairs(data) {
       if (data === null) return true;
-      var index, length, pair, keys, result, object2 = data;
-      result = new Array(object2.length);
-      for (index = 0, length = object2.length; index < length; index += 1) {
-        pair = object2[index];
+      var index, length, pair, keys, result, object3 = data;
+      result = new Array(object3.length);
+      for (index = 0, length = object3.length; index < length; index += 1) {
+        pair = object3[index];
         if (_toString.call(pair) !== "[object Object]") return false;
         keys = Object.keys(pair);
         if (keys.length !== 1) return false;
@@ -1606,10 +1606,10 @@ var require_pairs = __commonJS({
     }
     function constructYamlPairs(data) {
       if (data === null) return [];
-      var index, length, pair, keys, result, object2 = data;
-      result = new Array(object2.length);
-      for (index = 0, length = object2.length; index < length; index += 1) {
-        pair = object2[index];
+      var index, length, pair, keys, result, object3 = data;
+      result = new Array(object3.length);
+      for (index = 0, length = object3.length; index < length; index += 1) {
+        pair = object3[index];
         keys = Object.keys(pair);
         result[index] = [keys[0], pair[keys[0]]];
       }
@@ -1631,10 +1631,10 @@ var require_set = __commonJS({
     var _hasOwnProperty = Object.prototype.hasOwnProperty;
     function resolveYamlSet(data) {
       if (data === null) return true;
-      var key, object2 = data;
-      for (key in object2) {
-        if (_hasOwnProperty.call(object2, key)) {
-          if (object2[key] !== null) return false;
+      var key, object3 = data;
+      for (key in object3) {
+        if (_hasOwnProperty.call(object3, key)) {
+          if (object3[key] !== null) return false;
         }
       }
       return true;
@@ -1687,8 +1687,8 @@ var require_undefined = __commonJS({
     function representJavascriptUndefined() {
       return "";
     }
-    function isUndefined(object2) {
-      return typeof object2 === "undefined";
+    function isUndefined(object3) {
+      return typeof object3 === "undefined";
     }
     module2.exports = new Type("tag:yaml.org,2002:js/undefined", {
       kind: "scalar",
@@ -1724,15 +1724,15 @@ var require_regexp = __commonJS({
       }
       return new RegExp(regexp, modifiers);
     }
-    function representJavascriptRegExp(object2) {
-      var result = "/" + object2.source + "/";
-      if (object2.global) result += "g";
-      if (object2.multiline) result += "m";
-      if (object2.ignoreCase) result += "i";
+    function representJavascriptRegExp(object3) {
+      var result = "/" + object3.source + "/";
+      if (object3.global) result += "g";
+      if (object3.multiline) result += "m";
+      if (object3.ignoreCase) result += "i";
       return result;
     }
-    function isRegExp(object2) {
-      return Object.prototype.toString.call(object2) === "[object RegExp]";
+    function isRegExp(object3) {
+      return Object.prototype.toString.call(object3) === "[object RegExp]";
     }
     module2.exports = new Type("tag:yaml.org,2002:js/regexp", {
       kind: "scalar",
@@ -1783,11 +1783,11 @@ var require_function = __commonJS({
       }
       return new Function(params, "return " + source.slice(body[0], body[1]));
     }
-    function representJavascriptFunction(object2) {
-      return object2.toString();
+    function representJavascriptFunction(object3) {
+      return object3.toString();
     }
-    function isFunction(object2) {
-      return Object.prototype.toString.call(object2) === "[object Function]";
+    function isFunction(object3) {
+      return Object.prototype.toString.call(object3) === "[object Function]";
     }
     module2.exports = new Type("tag:yaml.org,2002:js/function", {
       kind: "scalar",
@@ -1895,16 +1895,16 @@ var require_loader = __commonJS({
         (c - 65536 & 1023) + 56320
       );
     }
-    function setProperty(object2, key, value) {
+    function setProperty(object3, key, value) {
       if (key === "__proto__") {
-        Object.defineProperty(object2, key, {
+        Object.defineProperty(object3, key, {
           configurable: true,
           enumerable: true,
           writable: true,
           value
         });
       } else {
-        object2[key] = value;
+        object3[key] = value;
       }
     }
     var simpleEscapeCheck = new Array(256);
@@ -3256,10 +3256,10 @@ var require_dumper = __commonJS({
       }
       return result;
     }
-    function writeFlowSequence(state, level, object2) {
+    function writeFlowSequence(state, level, object3) {
       var _result = "", _tag = state.tag, index, length;
-      for (index = 0, length = object2.length; index < length; index += 1) {
-        if (writeNode(state, level, object2[index], false, false)) {
+      for (index = 0, length = object3.length; index < length; index += 1) {
+        if (writeNode(state, level, object3[index], false, false)) {
           if (index !== 0) _result += "," + (!state.condenseFlow ? " " : "");
           _result += state.dump;
         }
@@ -3267,10 +3267,10 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = "[" + _result + "]";
     }
-    function writeBlockSequence(state, level, object2, compact) {
+    function writeBlockSequence(state, level, object3, compact) {
       var _result = "", _tag = state.tag, index, length;
-      for (index = 0, length = object2.length; index < length; index += 1) {
-        if (writeNode(state, level + 1, object2[index], true, true)) {
+      for (index = 0, length = object3.length; index < length; index += 1) {
+        if (writeNode(state, level + 1, object3[index], true, true)) {
           if (!compact || index !== 0) {
             _result += generateNextLine(state, level);
           }
@@ -3285,14 +3285,14 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = _result || "[]";
     }
-    function writeFlowMapping(state, level, object2) {
-      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object2), index, length, objectKey, objectValue, pairBuffer;
+    function writeFlowMapping(state, level, object3) {
+      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object3), index, length, objectKey, objectValue, pairBuffer;
       for (index = 0, length = objectKeyList.length; index < length; index += 1) {
         pairBuffer = "";
         if (index !== 0) pairBuffer += ", ";
         if (state.condenseFlow) pairBuffer += '"';
         objectKey = objectKeyList[index];
-        objectValue = object2[objectKey];
+        objectValue = object3[objectKey];
         if (!writeNode(state, level, objectKey, false, false)) {
           continue;
         }
@@ -3307,8 +3307,8 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = "{" + _result + "}";
     }
-    function writeBlockMapping(state, level, object2, compact) {
-      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object2), index, length, objectKey, objectValue, explicitPair, pairBuffer;
+    function writeBlockMapping(state, level, object3, compact) {
+      var _result = "", _tag = state.tag, objectKeyList = Object.keys(object3), index, length, objectKey, objectValue, explicitPair, pairBuffer;
       if (state.sortKeys === true) {
         objectKeyList.sort();
       } else if (typeof state.sortKeys === "function") {
@@ -3322,7 +3322,7 @@ var require_dumper = __commonJS({
           pairBuffer += generateNextLine(state, level);
         }
         objectKey = objectKeyList[index];
-        objectValue = object2[objectKey];
+        objectValue = object3[objectKey];
         if (!writeNode(state, level + 1, objectKey, true, true, true)) {
           continue;
         }
@@ -3352,19 +3352,19 @@ var require_dumper = __commonJS({
       state.tag = _tag;
       state.dump = _result || "{}";
     }
-    function detectType(state, object2, explicit) {
+    function detectType(state, object3, explicit) {
       var _result, typeList, index, length, type, style;
       typeList = explicit ? state.explicitTypes : state.implicitTypes;
       for (index = 0, length = typeList.length; index < length; index += 1) {
         type = typeList[index];
-        if ((type.instanceOf || type.predicate) && (!type.instanceOf || typeof object2 === "object" && object2 instanceof type.instanceOf) && (!type.predicate || type.predicate(object2))) {
+        if ((type.instanceOf || type.predicate) && (!type.instanceOf || typeof object3 === "object" && object3 instanceof type.instanceOf) && (!type.predicate || type.predicate(object3))) {
           state.tag = explicit ? type.tag : "?";
           if (type.represent) {
             style = state.styleMap[type.tag] || type.defaultStyle;
             if (_toString.call(type.represent) === "[object Function]") {
-              _result = type.represent(object2, style);
+              _result = type.represent(object3, style);
             } else if (_hasOwnProperty.call(type.represent, style)) {
-              _result = type.represent[style](object2, style);
+              _result = type.represent[style](object3, style);
             } else {
               throw new YAMLException("!<" + type.tag + '> tag resolver accepts not "' + style + '" style');
             }
@@ -3375,11 +3375,11 @@ var require_dumper = __commonJS({
       }
       return false;
     }
-    function writeNode(state, level, object2, block, compact, iskey) {
+    function writeNode(state, level, object3, block, compact, iskey) {
       state.tag = null;
-      state.dump = object2;
-      if (!detectType(state, object2, false)) {
-        detectType(state, object2, true);
+      state.dump = object3;
+      if (!detectType(state, object3, false)) {
+        detectType(state, object3, true);
       }
       var type = _toString.call(state.dump);
       if (block) {
@@ -3387,7 +3387,7 @@ var require_dumper = __commonJS({
       }
       var objectOrArray = type === "[object Object]" || type === "[object Array]", duplicateIndex, duplicate;
       if (objectOrArray) {
-        duplicateIndex = state.duplicates.indexOf(object2);
+        duplicateIndex = state.duplicates.indexOf(object3);
         duplicate = duplicateIndex !== -1;
       }
       if (state.tag !== null && state.tag !== "?" || duplicate || state.indent !== 2 && level > 0) {
@@ -3438,32 +3438,32 @@ var require_dumper = __commonJS({
       }
       return true;
     }
-    function getDuplicateReferences(object2, state) {
+    function getDuplicateReferences(object3, state) {
       var objects = [], duplicatesIndexes = [], index, length;
-      inspectNode(object2, objects, duplicatesIndexes);
+      inspectNode(object3, objects, duplicatesIndexes);
       for (index = 0, length = duplicatesIndexes.length; index < length; index += 1) {
         state.duplicates.push(objects[duplicatesIndexes[index]]);
       }
       state.usedDuplicates = new Array(length);
     }
-    function inspectNode(object2, objects, duplicatesIndexes) {
+    function inspectNode(object3, objects, duplicatesIndexes) {
       var objectKeyList, index, length;
-      if (object2 !== null && typeof object2 === "object") {
-        index = objects.indexOf(object2);
+      if (object3 !== null && typeof object3 === "object") {
+        index = objects.indexOf(object3);
         if (index !== -1) {
           if (duplicatesIndexes.indexOf(index) === -1) {
             duplicatesIndexes.push(index);
           }
         } else {
-          objects.push(object2);
-          if (Array.isArray(object2)) {
-            for (index = 0, length = object2.length; index < length; index += 1) {
-              inspectNode(object2[index], objects, duplicatesIndexes);
+          objects.push(object3);
+          if (Array.isArray(object3)) {
+            for (index = 0, length = object3.length; index < length; index += 1) {
+              inspectNode(object3[index], objects, duplicatesIndexes);
             }
           } else {
-            objectKeyList = Object.keys(object2);
+            objectKeyList = Object.keys(object3);
             for (index = 0, length = objectKeyList.length; index < length; index += 1) {
-              inspectNode(object2[objectKeyList[index]], objects, duplicatesIndexes);
+              inspectNode(object3[objectKeyList[index]], objects, duplicatesIndexes);
             }
           }
         }
@@ -3807,7 +3807,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs6 = __require("fs");
+    var fs8 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3891,7 +3891,7 @@ var require_gray_matter = __commonJS({
       return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs6.readFileSync(filepath, "utf8");
+      const str2 = fs8.readFileSync(filepath, "utf8");
       const file2 = matter3(str2, options2);
       file2.path = filepath;
       return file2;
@@ -4263,6 +4263,46 @@ function describeOpaqueBody(status, text) {
   }
   return `HTTP ${status}: ${singleLine(trimmed)}`;
 }
+function backendUnreachableLine(detail) {
+  return `memlin: backend unreachable (${detail}), no memory available`;
+}
+var ROUTING_PATTERN = /account routing (unavailable|lookup failed)/i;
+var CLOUDFLARE_STATUS = /\b(52[0-7])\b/;
+function statusOf(err) {
+  if (err instanceof MemlinApiError) return err.status;
+  const status = err?.status;
+  if (typeof status === "number" && status >= 100 && status <= 599) return status;
+  const message = err instanceof Error ? err.message : String(err);
+  const arrow = message.match(/→ (\d{3}):/);
+  if (arrow) return Number(arrow[1]);
+  return null;
+}
+function summarizeBackendFailure(err) {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const status = statusOf(err);
+  if (ROUTING_PATTERN.test(message)) {
+    const embedded = message.match(CLOUDFLARE_STATUS)?.[1];
+    const code = embedded ?? (status !== null && status >= 500 ? String(status) : null);
+    const detail = code ? `routing ${code}` : "routing unavailable";
+    return { kind: "routing", status: code ? Number(code) : status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (status !== null && status >= 500) {
+    const detail = `HTTP ${status}`;
+    return { kind: "http", status, detail, line: backendUnreachableLine(detail) };
+  }
+  if (/took longer than \d+ seconds/i.test(message)) {
+    return { kind: "network", status: null, detail: "timeout", line: backendUnreachableLine("timeout") };
+  }
+  if (/couldn'?t reach|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|network/i.test(message)) {
+    return {
+      kind: "network",
+      status: null,
+      detail: "network unreachable",
+      line: backendUnreachableLine("network unreachable")
+    };
+  }
+  return null;
+}
 
 // packages/plugin-core/src/auth.ts
 init_auth_refusal();
@@ -4613,10 +4653,10 @@ var util;
       return obj[e];
     });
   };
-  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object2) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object3) => {
     const keys = [];
-    for (const key in object2) {
-      if (Object.prototype.hasOwnProperty.call(object2, key)) {
+    for (const key in object3) {
+      if (Object.prototype.hasOwnProperty.call(object3, key)) {
         keys.push(key);
       }
     }
@@ -4947,8 +4987,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path8, errorMaps, issueData } = params;
-  const fullPath = [...path8, ...issueData.path || []];
+  const { data, path: path14, errorMaps, issueData } = params;
+  const fullPath = [...path14, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5064,11 +5104,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path8, key) {
+  constructor(parent, value, path14, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path8;
+    this._path = path14;
     this._key = key;
   }
   get path() {
@@ -8528,6 +8568,8 @@ var DOCUMENT_KINDS = [
   // (CORPUS_KINDS), and the default export all use explicit kind allow-lists
   // that exclude 'file'. A file enters the core only via an explicit
   // "Promote to Memory" (which writes a separate kind='memory' doc).
+  // Role-marked living docs have one explicit delivery path: a checked feature
+  // pointer/direct read or opt-in CLI copy, never semantic retrieval.
   "file",
   // A personal-first checklist / list (the people-processed "To-dos" tier). Its
   // body is a GFM task list. Like 'file', it's ISOLATED from the resolver/
@@ -8548,6 +8590,31 @@ var DOCUMENT_KINDS = [
 ];
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];
+var FEATURE_STATUSES = ["proposed", "active", "shipped", "archived"];
+var FEATURE_MEMBER_KINDS = [
+  "thought",
+  "file",
+  "todo",
+  "plan",
+  "goal",
+  "memory",
+  "skill",
+  "schema",
+  "decision",
+  "component",
+  "work_item"
+];
+var FEATURE_LABELS = {
+  code: { singular: "Feature", plural: "Features" },
+  general: { singular: "Workstream", plural: "Workstreams" },
+  highlight: { singular: "Highlight", plural: "Highlights" }
+};
+function featureLabel(projectKind, nounOverride) {
+  if (nounOverride === "highlight") return FEATURE_LABELS.highlight;
+  if (nounOverride === "feature") return FEATURE_LABELS.code;
+  if (nounOverride === "workstream") return FEATURE_LABELS.general;
+  return projectKind === "general" ? FEATURE_LABELS.general : FEATURE_LABELS.code;
+}
 var MEMORY_TYPES = [
   "correction",
   "preference",
@@ -9138,26 +9205,38 @@ var SONNET_BLENDED_USD_PER_MTOK = SONNET_INPUT_USD_PER_MTOK + OUTPUT_MULTIPLIER 
 var SAVINGS_USD_PER_TOKEN = estCostUsd(1);
 
 // packages/shared/dist/feature-discovery.js
-var FEATURE_DISCOVERY_SYSTEM = [
-  "You are Memlin's feature mapper. You read the inventory of a software project \u2014",
-  "its components (subsystems), recent pull requests, and plans \u2014 and group them",
-  "into a short list of FEATURES: the real units of work a team organizes around",
-  '(e.g. "Authentication & sessions", "Billing & credits", "Capture pipeline").',
-  "",
-  "Rules:",
-  "- Propose between 4 and 15 features. Fewer is better than padding with noise.",
-  "- A feature is a cohesive capability or workstream, NOT a single file, a layer",
-  '  ("frontend"), or a restatement of the whole project.',
-  "- Each feature's members must be drawn ONLY from the provided item ids. Never",
-  "  invent ids. Omit items that do not clearly belong to any feature.",
-  "- Do NOT duplicate or restate the existing features listed; only propose what is",
-  "  genuinely missing.",
-  "- Name features the way the team would say them out loud: short, exact nouns.",
-  "",
-  "Return ONLY a JSON object of the form:",
-  '{ "features": [ { "name": string, "summary": string, "members": string[] } ] }',
-  "where each members entry is an id from the inventory. No prose outside the JSON."
-].join("\n");
+function featureDiscoverySystem({
+  projectKind = "code",
+  noun
+} = {}) {
+  const label = featureLabel(projectKind, noun);
+  const inventory = projectKind === "general" ? [
+    "You read a project\u2019s shared thoughts, topics, decisions, goals and plans.",
+    `Group them into ${label.plural.toUpperCase()}: cohesive areas of work the team organizes around.`,
+    "Examples include customer research, event planning, hiring and quarterly priorities."
+  ] : [
+    "You read the inventory of a software project: components, recent pull requests, decisions, goals and plans.",
+    `Group them into ${label.plural.toUpperCase()}: cohesive capabilities the team organizes around.`,
+    "Examples include authentication, billing and capture."
+  ];
+  return [
+    `You are Memlin\u2019s ${label.singular.toLowerCase()} mapper.`,
+    ...inventory,
+    "",
+    "Rules:",
+    `- Propose between 4 and 15 ${label.plural.toLowerCase()}. Fewer is better than padding with noise.`,
+    "- Each group is a cohesive area of work, not one item or a restatement of the whole project.",
+    "- Members must be drawn ONLY from the provided item ids. Never invent ids.",
+    "- Omit items that do not clearly belong to any group.",
+    "- Do NOT duplicate or restate existing or previously rejected groups; propose only missing work.",
+    "- Use short, exact names the team would use in conversation.",
+    "",
+    "Return ONLY a JSON object of the form:",
+    '{ "features": [ { "name": string, "summary": string, "members": string[] } ] }',
+    "Each members entry is an id from the inventory. No prose outside the JSON."
+  ].join("\n");
+}
+var FEATURE_DISCOVERY_SYSTEM = featureDiscoverySystem();
 
 // packages/shared/dist/light-native.js
 var LIGHT_READER_LIMITS = Object.freeze({
@@ -9596,19 +9675,19 @@ var ContextManifestV1Schema = external_exports.object({
       location: `linked_contexts.${index}`
     }))
   ];
-  references.forEach(({ ref, path: path8, location }) => {
+  references.forEach(({ ref, path: path14, location }) => {
     const identity = contextReferenceIdentityKey(ref);
     const prior = seen.get(identity);
     if (prior && prior.revision !== ref.revision) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path8,
+        path: path14,
         message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
       });
     } else if (prior && location.startsWith("linked_contexts.")) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path8,
+        path: path14,
         message: `duplicate linked context ${identity}`
       });
     }
@@ -9922,11 +10001,11 @@ var ContextBundleV1Schema = external_exports.object({
         path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
       }))
     ];
-    for (const { ref, path: path8 } of references) {
+    for (const { ref, path: path14 } of references) {
       if (!contextKeys.has(contextReferenceKey(ref))) {
         ctx.addIssue({
           code: external_exports.ZodIssueCode.custom,
-          path: path8,
+          path: path14,
           message: "provider coverage is outside the exact manifest contexts"
         });
       }
@@ -11902,6 +11981,7 @@ var ExperienceHarnessManifestV2Schema = external_exports.object({
   root_thought_id: external_exports.string().uuid(),
   root_revision_token: external_exports.string().min(1).max(2048),
   context: ContextManifestV1Schema,
+  harness: external_exports.object({ output_mode: external_exports.enum(["inline", "resource"]) }).strict().optional(),
   nodes: external_exports.array(
     external_exports.object({
       id: external_exports.string().uuid(),
@@ -11926,7 +12006,12 @@ var ExperienceHarnessSaveV2Schema = external_exports.object({
   root_revision_token: external_exports.string().min(1).max(2048),
   harness_id: external_exports.string().uuid().nullable().default(null),
   expected_revision: external_exports.number().int().positive().nullable().default(null),
-  definition: ExperienceHarnessManifestV2Schema.pick({ context: true, nodes: true, edges: true })
+  definition: ExperienceHarnessManifestV2Schema.pick({
+    context: true,
+    nodes: true,
+    edges: true,
+    harness: true
+  })
 }).strict().refine(
   (input) => input.harness_id === null === (input.expected_revision === null),
   "Existing harness requires its current revision"
@@ -12109,6 +12194,12 @@ var ThoughtHandoffReceiptV2Schema = external_exports.object({
   stale: external_exports.boolean(),
   replayed: external_exports.boolean().optional()
 }).passthrough();
+
+// packages/shared/dist/memory-transitions.js
+function lifecycleStatusOf(metadata) {
+  const s = (metadata ?? {}).status;
+  return typeof s === "string" && s.length > 0 ? s : "active";
+}
 
 // packages/shared/dist/entitlements.js
 var COORDINATION_SELF = [
@@ -12772,19 +12863,19 @@ function floatSafeRemainder2(val, step) {
   const stepInt = Number.parseInt(step.toFixed(decCount).replace(".", ""));
   return valInt % stepInt / 10 ** decCount;
 }
-function defineLazy(object2, key, getter) {
+function defineLazy(object3, key, getter) {
   const set2 = false;
-  Object.defineProperty(object2, key, {
+  Object.defineProperty(object3, key, {
     get() {
       if (!set2) {
         const value = getter();
-        object2[key] = value;
+        object3[key] = value;
         return value;
       }
       throw new Error("cached value already set");
     },
     set(v) {
-      Object.defineProperty(object2, key, {
+      Object.defineProperty(object3, key, {
         value: v
         // configurable: true,
       });
@@ -12800,10 +12891,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path8) {
-  if (!path8)
+function getElementAtPath(obj, path14) {
+  if (!path14)
     return obj;
-  return path8.reduce((acc, key) => acc?.[key], obj);
+  return path14.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -13123,11 +13214,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path8, issues) {
+function prefixIssues(path14, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path8);
+    iss.path.unshift(path14);
     return iss;
   });
 }
@@ -13264,7 +13355,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path8 = []) => {
+  const processError = (error41, path14 = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -13274,7 +13365,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path14, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -13304,9 +13395,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path8) {
+function toDotPath(path14) {
   const segs = [];
-  for (const seg of path8) {
+  for (const seg of path14) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -23964,10 +24055,10 @@ function validateFlowDefinitionSemantics(flow) {
       ],
       ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
     ];
-    targets.forEach(({ target, path: path8 }) => {
+    targets.forEach(({ target, path: path14 }) => {
       if (!isReservedTarget(target) && !stageById.has(target)) {
         issues.push({
-          path: path8,
+          path: path14,
           code: "missing_transition_target",
           message: `transition target ${JSON.stringify(target)} does not exist`
         });
@@ -23997,7 +24088,7 @@ function validateFlowDefinitionSemantics(flow) {
   const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   let hasReachableEnd = false;
-  const visit = (stageId, path8, pathBounds) => {
+  const visit = (stageId, path14, pathBounds) => {
     reachable.add(stageId);
     if (visited.has(stageId)) return;
     visiting.add(stageId);
@@ -24013,7 +24104,7 @@ function validateFlowDefinitionSemantics(flow) {
         ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
         ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
       ];
-      const currentPath = [...path8, stageId];
+      const currentPath = [...path14, stageId];
       for (const edge of edges) {
         const { target } = edge;
         if (target === "$end") {
@@ -24121,18 +24212,18 @@ var FlowPackManifestBaseSchema = external_exports2.object({
   evals: external_exports2.array(ManifestEvalSchema).max(256),
   model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
 }).strict();
-function validateRelativePackPath(path8) {
-  if (path8.startsWith("/") || path8.startsWith("\\")) return "path must be relative";
-  if (/^[A-Za-z]:/.test(path8) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path8)) {
+function validateRelativePackPath(path14) {
+  if (path14.startsWith("/") || path14.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path14) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path14)) {
     return "drive-qualified paths and URI schemes are not allowed";
   }
-  if (/[\u0000-\u001f\u007f]/.test(path8)) return "control characters are not allowed";
-  if (/%(?:2e|2f|5c)/i.test(path8)) return "encoded path traversal is not allowed";
-  if (path8.includes("\\")) return "path must use forward slashes";
-  if (path8.split("/").some((segment) => segment === ".." || segment === ".")) {
+  if (/[\u0000-\u001f\u007f]/.test(path14)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path14)) return "encoded path traversal is not allowed";
+  if (path14.includes("\\")) return "path must use forward slashes";
+  if (path14.split("/").some((segment) => segment === ".." || segment === ".")) {
     return "path traversal and dot segments are not allowed";
   }
-  if (path8.split("/").some((segment) => segment.length === 0)) {
+  if (path14.split("/").some((segment) => segment.length === 0)) {
     return "path cannot contain empty segments";
   }
   return null;
@@ -24179,22 +24270,22 @@ function validateFlowPackManifestSemantics(manifest) {
       issues
     );
     role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
-      const path8 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      const path14 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
       if (comparedRole === role.id) {
         issues.push({
-          path: path8,
+          path: path14,
           code: "self_referential_model_independence",
           message: "a model role cannot require independence from itself"
         });
       } else if (!modelRolesById.has(comparedRole)) {
         issues.push({
-          path: path8,
+          path: path14,
           code: "missing_independence_model_role",
           message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
         });
       } else if (modelRolesById.get(comparedRole)?.independence !== null) {
         issues.push({
-          path: path8,
+          path: path14,
           code: "independence_reference_not_author",
           message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
         });
@@ -24278,6 +24369,336 @@ var NEEDS_YOU_HORIZON_DAYS = 14;
 var HORIZON_MS = NEEDS_YOU_HORIZON_DAYS * 24 * 60 * 60 * 1e3;
 var STALLED_GOAL_AGE_MS = 30 * 24 * 60 * 60 * 1e3;
 
+// packages/shared/dist/research-collection.js
+var ResearchCollectionSourceSchema = external_exports.object({
+  url: external_exports.string().url().max(2048).refine((value) => {
+    try {
+      const url2 = new URL(value);
+      return url2.protocol === "https:" && !url2.username && !url2.password && !url2.hash;
+    } catch {
+      return false;
+    }
+  }, "Use a public HTTPS feed URL"),
+  label: external_exports.string().trim().min(1).max(120),
+  category: external_exports.enum(["official", "community"])
+}).strict();
+var ResearchCollectionSchema = external_exports.object({
+  topics: external_exports.array(external_exports.string().trim().min(2).max(100)).min(1).max(10),
+  sources: external_exports.array(ResearchCollectionSourceSchema).min(1).max(4)
+}).strict();
+
+// packages/shared/dist/feature-tracking.js
+var FEATURE_TRACKING_MODES = ["off", "suggest", "assist", "auto"];
+var FEATURE_NOUNS = ["feature", "workstream", "highlight"];
+var FEATURE_CONTEXT_MODES = ["always", "auto", "off"];
+var FeatureTrackingPolicySchema = external_exports.object({
+  mode: external_exports.enum(FEATURE_TRACKING_MODES),
+  source: external_exports.enum(["light", "project", "account"]),
+  noun: external_exports.enum(FEATURE_NOUNS),
+  project_kind: external_exports.enum(["code", "general"]).nullable(),
+  context_mode: external_exports.enum(FEATURE_CONTEXT_MODES)
+});
+
+// packages/shared/dist/feature-system-contracts.js
+var RESOURCE_ATTACHMENT_ROLES = [
+  "report",
+  "screenshot",
+  "log",
+  "output",
+  "reference"
+];
+var FEATURE_DOC_ROLE = "feature_doc";
+var featureDocImportKey = (featureId) => `feature:${featureId}`;
+
+// packages/shared/dist/files.js
+var FileProvenanceSchema = external_exports.object({
+  client: external_exports.enum(["web", "cli", "mcp", "api"]).default("api"),
+  agent_kind: external_exports.string().max(100).optional(),
+  agent_installation_id: external_exports.string().max(200).optional(),
+  session_id: external_exports.string().max(200).optional()
+}).strict();
+var FileUploadPreparedResponseV1Schema = external_exports.object({
+  receipt: ResourceUploadReceiptV2Schema,
+  upload_url: external_exports.string().url().nullable(),
+  upload_headers: external_exports.object({ "content-type": external_exports.string(), "x-upsert": external_exports.literal("false") }).strict()
+}).strict();
+var FileUploadDeduplicatedResponseV1Schema = external_exports.object({
+  version: external_exports.literal(1),
+  state: external_exports.literal("completed"),
+  deduplicated: external_exports.literal(true),
+  resource_id: external_exports.string().uuid(),
+  version_id: external_exports.string().uuid(),
+  sha256: external_exports.string().regex(/^[0-9a-f]{64}$/),
+  document_id: external_exports.string().uuid().optional()
+}).strict();
+var FileUploadPrepareResponseV1Schema = external_exports.union([
+  FileUploadPreparedResponseV1Schema,
+  FileUploadDeduplicatedResponseV1Schema
+]);
+var FileUploadFinalizeResponseV1Schema = external_exports.object({
+  resource_id: external_exports.string().uuid(),
+  version_id: external_exports.string().uuid(),
+  sha256: external_exports.string().regex(/^[0-9a-f]{64}$/),
+  idempotent_replay: external_exports.boolean(),
+  document_id: external_exports.string().uuid().optional()
+}).strict();
+var FileAttachmentHostSchema = external_exports.object({
+  kind: external_exports.enum(["feature", "project_work_item", "flow_stage_run", "thought"]),
+  id: external_exports.string().uuid()
+}).strict();
+var FileAttachmentInputSchema = external_exports.object({
+  host: FileAttachmentHostSchema,
+  pinned_version_id: external_exports.string().uuid().optional(),
+  role: external_exports.enum(RESOURCE_ATTACHMENT_ROLES).default("reference"),
+  caption: external_exports.string().max(500).optional(),
+  provenance: FileProvenanceSchema.default({})
+}).strict();
+var FileAttachmentReceiptSchema = external_exports.object({
+  attachment_id: external_exports.string().uuid(),
+  resource_id: external_exports.string().uuid(),
+  version_id: external_exports.string().uuid()
+}).strict();
+var FileDetachInputSchema = external_exports.object({
+  attachment_id: external_exports.string().uuid(),
+  host: FileAttachmentHostSchema
+}).strict();
+function parseResourceReference(uri) {
+  const match = /^memlin-resource:([0-9a-f-]+)(?:\?v=([0-9a-f-]+))?$/i.exec(uri ?? "");
+  if (!match || !external_exports.string().uuid().safeParse(match[1]).success || match[2] && !external_exports.string().uuid().safeParse(match[2]).success)
+    return null;
+  return {
+    resourceId: match[1].toLowerCase(),
+    ...match[2] ? { versionId: match[2].toLowerCase() } : {}
+  };
+}
+var ResourcePublicLinkWriteSchema = external_exports.discriminatedUnion("action", [
+  external_exports.object({
+    action: external_exports.literal("create"),
+    expires_in_days: external_exports.union([external_exports.literal(1), external_exports.literal(7), external_exports.literal(30)]).default(7),
+    pinned_version_id: external_exports.string().uuid().nullable().optional(),
+    embedded_resource_ids: external_exports.array(external_exports.string().uuid()).max(50).default([]),
+    embedded_resource_versions: external_exports.record(external_exports.string().uuid(), external_exports.string().uuid()).optional()
+  }).strict(),
+  external_exports.object({ action: external_exports.literal("revoke"), id: external_exports.string().uuid() }).strict()
+]);
+var ResourcePublicLinksSchema = external_exports.object({
+  version: external_exports.literal(1),
+  resource_id: external_exports.string().uuid(),
+  token: external_exports.string().nullable(),
+  links: external_exports.array(
+    external_exports.object({
+      id: external_exports.string().uuid(),
+      created_at: external_exports.string(),
+      expires_at: external_exports.string(),
+      revoked_at: external_exports.string().nullable(),
+      pinned_version_id: external_exports.string().uuid().nullable(),
+      embedded_resource_ids: external_exports.array(external_exports.string().uuid()).max(50),
+      embedded_resource_versions: external_exports.record(external_exports.string().uuid(), external_exports.string().uuid())
+    })
+  )
+});
+var ResourcePublicMaterialSchema = external_exports.object({
+  resource: external_exports.object({
+    id: external_exports.string().uuid(),
+    title: external_exports.string(),
+    kind: external_exports.string(),
+    mime_type: external_exports.string(),
+    byte_size: external_exports.number().nonnegative()
+  }),
+  version_id: external_exports.string().uuid(),
+  content: external_exports.string().max(1048576).nullable(),
+  storage_locator: external_exports.object({
+    bucket: external_exports.literal("thought-resource-originals"),
+    path: external_exports.string().min(1).max(1024),
+    original_filename: external_exports.string().nullable()
+  }).nullable(),
+  embedded_resource_ids: external_exports.array(external_exports.string().uuid()).max(50).optional(),
+  expires_at: external_exports.string().optional()
+});
+
+// packages/shared/dist/feature-doc.js
+var FeatureDocNarrativeSchema = external_exports.object({
+  overview: external_exports.string().max(1200),
+  why: external_exports.string().max(1200),
+  how_it_works: external_exports.string().max(1200)
+}).strict();
+
+// packages/shared/dist/file-formats.js
+var KIND_MAX_BYTES = {
+  image: 10 * 1024 * 1024,
+  text: 5 * 1024 * 1024,
+  markdown: 5 * 1024 * 1024,
+  dataset: 5 * 1024 * 1024,
+  pdf: 25 * 1024 * 1024,
+  document: 25 * 1024 * 1024,
+  audio: 25 * 1024 * 1024,
+  video: 25 * 1024 * 1024
+};
+var FILE_FORMATS = [
+  {
+    kind: "document",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    extension: "docx",
+    acceptedMimeTypes: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    acceptedExtensions: ["docx"]
+  },
+  {
+    kind: "document",
+    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    extension: "pptx",
+    acceptedMimeTypes: [
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    ],
+    acceptedExtensions: ["pptx"]
+  },
+  {
+    kind: "pdf",
+    mimeType: "application/pdf",
+    extension: "pdf",
+    acceptedMimeTypes: ["application/pdf"],
+    acceptedExtensions: ["pdf"]
+  },
+  {
+    kind: "image",
+    mimeType: "image/png",
+    extension: "png",
+    acceptedMimeTypes: ["image/png"],
+    acceptedExtensions: ["png"]
+  },
+  {
+    kind: "image",
+    mimeType: "image/jpeg",
+    extension: "jpg",
+    acceptedMimeTypes: ["image/jpeg", "image/jpg"],
+    acceptedExtensions: ["jpg", "jpeg"]
+  },
+  {
+    kind: "image",
+    mimeType: "image/webp",
+    extension: "webp",
+    acceptedMimeTypes: ["image/webp"],
+    acceptedExtensions: ["webp"]
+  },
+  {
+    kind: "image",
+    mimeType: "image/gif",
+    extension: "gif",
+    acceptedMimeTypes: ["image/gif"],
+    acceptedExtensions: ["gif"]
+  },
+  {
+    kind: "audio",
+    mimeType: "audio/mpeg",
+    extension: "mp3",
+    acceptedMimeTypes: ["audio/mpeg", "audio/mp3"],
+    acceptedExtensions: ["mp3"]
+  },
+  {
+    kind: "audio",
+    mimeType: "audio/wav",
+    extension: "wav",
+    acceptedMimeTypes: ["audio/wav", "audio/x-wav", "audio/wave"],
+    acceptedExtensions: ["wav"]
+  },
+  {
+    kind: "audio",
+    mimeType: "audio/ogg",
+    extension: "ogg",
+    acceptedMimeTypes: ["audio/ogg"],
+    acceptedExtensions: ["ogg", "oga"]
+  },
+  {
+    kind: "audio",
+    mimeType: "audio/mp4",
+    extension: "m4a",
+    acceptedMimeTypes: ["audio/mp4", "audio/x-m4a"],
+    acceptedExtensions: ["m4a"]
+  },
+  {
+    kind: "audio",
+    mimeType: "audio/webm",
+    extension: "weba",
+    acceptedMimeTypes: ["audio/webm"],
+    acceptedExtensions: ["weba"]
+  },
+  {
+    kind: "video",
+    mimeType: "video/mp4",
+    extension: "mp4",
+    acceptedMimeTypes: ["video/mp4"],
+    acceptedExtensions: ["mp4", "m4v"]
+  },
+  {
+    kind: "video",
+    mimeType: "video/webm",
+    extension: "webm",
+    acceptedMimeTypes: ["video/webm"],
+    acceptedExtensions: ["webm"]
+  },
+  {
+    kind: "video",
+    mimeType: "video/quicktime",
+    extension: "mov",
+    acceptedMimeTypes: ["video/quicktime"],
+    acceptedExtensions: ["mov"]
+  },
+  {
+    kind: "text",
+    mimeType: "text/plain",
+    extension: "txt",
+    acceptedMimeTypes: ["text/plain"],
+    acceptedExtensions: ["txt"]
+  },
+  {
+    kind: "text",
+    mimeType: "text/plain",
+    extension: "log",
+    acceptedMimeTypes: ["text/plain"],
+    acceptedExtensions: ["log"]
+  },
+  {
+    kind: "markdown",
+    mimeType: "text/markdown",
+    extension: "md",
+    acceptedMimeTypes: ["text/markdown"],
+    acceptedExtensions: ["md"]
+  },
+  {
+    kind: "dataset",
+    mimeType: "application/json",
+    extension: "json",
+    acceptedMimeTypes: ["application/json"],
+    acceptedExtensions: ["json"]
+  }
+];
+
+// packages/shared/dist/feature-binding.js
+var FeatureCaptureFieldsSchema = external_exports.object({
+  session_id: external_exports.string().trim().min(1).max(256).nullish(),
+  git_branch: external_exports.string().trim().min(1).max(300).nullish(),
+  feature_id: external_exports.string().uuid().nullish()
+});
+function featureBranch(branch) {
+  const value = branch?.trim().replace(/^(refs\/heads\/|refs\/remotes\/[^/]+\/|origin\/)/i, "");
+  return value && !["main", "master", "develop", "trunk", "head"].includes(value.toLowerCase()) ? value : null;
+}
+
+// packages/shared/dist/feature-work.js
+var Receipt = external_exports.object({
+  scanned: external_exports.number().int().nonnegative().max(200),
+  linked: external_exports.number().int().nonnegative().max(200),
+  suggestions: external_exports.array(
+    external_exports.object({
+      work_item_id: external_exports.string().uuid(),
+      feature_id: external_exports.string().uuid(),
+      method: external_exports.enum(["binding", "handoff", "embedding"]),
+      confidence: external_exports.number().min(0).max(1)
+    })
+  ).max(200),
+  next_cursor: external_exports.string().uuid().nullable(),
+  reason: external_exports.string().optional()
+});
+
 // packages/plugin-core/src/memlin-api-client.ts
 init_auth_refusal();
 import { readFileSync } from "node:fs";
@@ -24313,6 +24734,42 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
+var PROVIDER_HOSTS = [
+  "github.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "dev.azure.com",
+  "ssh.dev.azure.com",
+  "codeberg.org",
+  "sr.ht",
+  "git.sr.ht"
+];
+function normalizeGitRemote(raw) {
+  if (!raw) return null;
+  let s = raw.trim();
+  if (!s) return null;
+  if (!s.includes("://")) {
+    s = s.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
+  }
+  s = s.replace(/^(?:ssh|git|https?):\/\//, "");
+  s = s.replace(/^[^/@]+@/, "");
+  s = s.replace(/\.git$/, "");
+  s = s.replace(/\/$/, "");
+  const slash = s.indexOf("/");
+  if (slash > 0) {
+    const host = s.slice(0, slash).toLowerCase();
+    const rest = s.slice(slash);
+    s = host + rest;
+    for (const provider of PROVIDER_HOSTS) {
+      if (host === provider) break;
+      if (host.startsWith(provider + "-")) {
+        s = provider + rest;
+        break;
+      }
+    }
+  }
+  return s || null;
+}
 async function closeHttpSockets() {
   try {
     const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
@@ -24407,7 +24864,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.46";
+  cachedAgentVersion = "0.1.47";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -24988,8 +25445,8 @@ var MemlinApiClient = class {
     return this.request("POST", "/workspace-contract/sync", input);
   }
   /** GET /documents/{id} — fetch one doc with body + metadata. */
-  async getDocument(documentId) {
-    return this.request("GET", `/documents/${encodeURIComponent(documentId)}`);
+  async getDocument(documentId, opts = {}) {
+    return this.request("GET", `/documents/${encodeURIComponent(documentId)}`, void 0, opts);
   }
   /** POST /documents/{id}/contract-verification — H12. Record a contract
    *  check. Used by `memlin diff --record`. */
@@ -25048,10 +25505,11 @@ var MemlinApiClient = class {
     return this.request("POST", `/insights/${encodeURIComponent(insightId)}/resolve`, { action });
   }
   /** POST /inbox/{id} — accept or reject a proposal, optionally with the reviewer's reason. */
-  async resolveProposal(proposalId, action, note) {
+  async resolveProposal(proposalId, action, note, feature) {
     return this.request("POST", `/inbox/${encodeURIComponent(proposalId)}`, {
       action,
-      ...note?.trim() ? { note: note.trim() } : {}
+      ...note?.trim() ? { note: note.trim() } : {},
+      ...feature !== void 0 ? { feature } : {}
     });
   }
   async listHandoffs(opts = {}, callOpts = {}) {
@@ -25082,17 +25540,115 @@ var MemlinApiClient = class {
   async createHandoff(input) {
     return this.request("POST", "/handoffs", input);
   }
+  /** Save agent files through the same Library upload contract used by the web app. */
+  /** Exact-version Library metadata; storage locators remain private. */
+  async getFile(resourceId, opts = {}) {
+    const query = opts.versionId ? `?version_id=${encodeURIComponent(opts.versionId)}` : "";
+    return this.request("GET", `/files/${encodeURIComponent(resourceId)}${query}`, void 0, opts);
+  }
+  /** Current permission check for one immutable original; signed URLs are transient. */
+  async getFileContent(resourceId, opts) {
+    return this.request(
+      "GET",
+      `/files/${encodeURIComponent(resourceId)}/content?version_id=${encodeURIComponent(opts.versionId)}`,
+      void 0,
+      opts
+    );
+  }
+  async prepareFileUpload(input, opts = {}) {
+    return FileUploadPrepareResponseV1Schema.parse(
+      await this.request("POST", "/files/uploads", input, { ...opts, requestTimeoutMs: 6e4 })
+    );
+  }
+  async finalizeFileUpload(uploadId, opts = {}) {
+    return FileUploadFinalizeResponseV1Schema.parse(
+      await this.request(
+        "POST",
+        `/files/uploads/${encodeURIComponent(uploadId)}/finalize`,
+        {},
+        { ...opts, requestTimeoutMs: 6e4 }
+      )
+    );
+  }
+  async attachFile(resourceId, input, opts = {}) {
+    return FileAttachmentReceiptSchema.parse(
+      await this.request(
+        "POST",
+        `/files/${encodeURIComponent(resourceId)}/attachments`,
+        FileAttachmentInputSchema.parse(input),
+        opts
+      )
+    );
+  }
+  async detachFile(resourceId, input, opts = {}) {
+    const result = await this.request(
+      "DELETE",
+      `/files/${encodeURIComponent(resourceId)}/attachments`,
+      FileDetachInputSchema.parse(input),
+      opts
+    );
+    if (typeof result.detached !== "boolean") throw new Error("Invalid file detach response");
+    return result;
+  }
   async listFeatures(opts = {}) {
     const qs = new URLSearchParams();
     if (opts.project_id) qs.set("project_id", opts.project_id);
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/features${suffix}`);
+    if (opts.status) qs.set("status", opts.status);
+    if (opts.q) qs.set("q", opts.q);
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    if (opts.include) qs.set("include", opts.include);
+    if (opts.cursor) qs.set("cursor", opts.cursor);
+    return this.request("GET", `/features${qs.size ? `?${qs}` : ""}`, void 0, {
+      accountId: opts.accountId
+    });
   }
-  async createFeature(input) {
-    return this.request("POST", "/features", input);
+  async createFeature(input, opts = {}) {
+    return this.request("POST", "/features", input, opts);
   }
-  async addFeatureMember(featureId, source) {
-    return this.request("POST", `/features/${featureId}/members`, { source });
+  async addFeatureMember(featureId, source, opts = {}) {
+    return this.request(
+      "POST",
+      `/features/${encodeURIComponent(featureId)}/members`,
+      { source },
+      opts
+    );
+  }
+  async setFeatureBinding(input, opts = {}) {
+    return this.request(
+      input.feature_id === null ? "DELETE" : "PUT",
+      "/features/binding",
+      input,
+      opts
+    );
+  }
+  async getFeatureBinding(input, opts = {}) {
+    const query = new URLSearchParams(input);
+    const result = await this.request("GET", `/features/binding?${query}`, void 0, opts);
+    const value = result;
+    if (!value || typeof value !== "object" || !("binding" in value) || value.auto_link !== void 0 && typeof value.auto_link !== "boolean")
+      throw Error("Feature binding response is invalid.");
+    if (value.binding === null) return { binding: null, auto_link: value.auto_link === true };
+    const binding = FeatureCaptureFieldsSchema.pick({ feature_id: true }).parse(value.binding);
+    if (!binding.feature_id || typeof value.binding?.via !== "string")
+      throw Error("Feature binding response is invalid.");
+    return {
+      binding: { feature_id: binding.feature_id, via: value.binding.via },
+      auto_link: value.auto_link === true
+    };
+  }
+  async getFeature(featureId, opts = {}) {
+    return this.request("GET", `/features/${encodeURIComponent(featureId)}`, void 0, opts);
+  }
+  async updateFeature(featureId, input, opts = {}) {
+    return this.request("PATCH", `/features/${encodeURIComponent(featureId)}`, input, opts);
+  }
+  async removeFeatureMember(featureId, linkId, opts = {}) {
+    return this.request(
+      "DELETE",
+      `/features/${encodeURIComponent(featureId)}/members?link_id=${encodeURIComponent(linkId)}`,
+      void 0,
+      opts
+    );
   }
   /** POST /documents/search — semantic + text. */
   async search(query, opts = {}) {
@@ -25736,9 +26292,6 @@ var CliExit = class extends Error {
   }
   code;
 };
-function exitCli(code) {
-  throw new CliExit(code);
-}
 function scheduleProcessExit(code) {
   process.exitCode = code;
   void closeHttpSockets();
@@ -25844,129 +26397,883 @@ function argvAsSlashArgs() {
   return parseSlashArgs(raw);
 }
 
-// packages/plugin-core/src/cli/features.ts
-function matchFeature(features, needle) {
-  const exact = features.find((f) => f.id === needle);
-  if (exact) return exact;
-  const matches = features.filter((f) => f.id.startsWith(needle));
-  if (matches.length === 1) return matches[0];
-  if (matches.length === 0) return { error: `no feature matches "${needle}"` };
-  return { error: `"${needle}" is ambiguous \u2014 matches ${matches.length} features` };
+// packages/plugin-core/src/project-resolver.ts
+import { existsSync, readdirSync, readFileSync as readFileSync2, lstatSync } from "node:fs";
+import path8 from "node:path";
+init_workspace_binding();
+var ALLOW_ACCOUNT_MISMATCH_ENV = "MEMLIN_ALLOW_ACCOUNT_MISMATCH";
+function allowAccountMismatch(env = process.env) {
+  const v = env[ALLOW_ACCOUNT_MISMATCH_ENV];
+  return v === "1" || v === "true" || v === "yes";
 }
-async function main() {
-  const ctx = await getApi();
-  if (!ctx) {
-    process.stderr.write("not signed in \u2014 run memlin login first\n");
-    exitCli(1);
+function accountBindingHazard(r, opts = {}) {
+  if (!r.hasGitRemote || !r.project_id) return "none";
+  if (r.reason === "local-path") return opts.allowMismatch ? "warn" : "block";
+  if (r.reason === "config") return "warn";
+  return "none";
+}
+var WORKSPACE_ENV_VARS = [
+  // Claude Code exposes the original project dir to hooks/plugin commands.
+  "CLAUDE_PROJECT_DIR",
+  // Cursor/plugin shims and local tests can set this explicitly.
+  "CURSOR_WORKSPACE_ROOT",
+  "CURSOR_PROJECT_ROOT",
+  "MEMLIN_WORKSPACE_ROOT",
+  // npm/pnpm set INIT_CWD to the directory where the user invoked a script.
+  "INIT_CWD"
+];
+function runtimeCwd(fallback = process.cwd()) {
+  for (const name of WORKSPACE_ENV_VARS) {
+    const raw = process.env[name]?.trim();
+    if (raw && path8.isAbsolute(raw)) return path8.resolve(raw);
   }
-  const args = argvAsSlashArgs();
-  const action = args[0];
-  const pinnedProject = ctx.config.project_id ?? null;
-  if (!action || action === "list") {
-    const { features } = await ctx.api.listFeatures({ project_id: pinnedProject });
-    if (features.length === 0) {
-      process.stdout.write('No features yet. Create one: memlin features create "<title>"\n');
-      return;
+  return path8.resolve(fallback);
+}
+async function resolveProject(api, cwd, configProjectId) {
+  const absCwd = path8.resolve(cwd);
+  const remotes = detectGitRemotes(cwd);
+  const hasGitRemote = remotes.length > 0;
+  let serverFailure;
+  try {
+    const result = await api.resolveProject({
+      // Primary remote (back-compat with the single-remote server path).
+      git_remote: remotes[0] ?? null,
+      // All detected remotes — for the workspace-root-of-repos case, this is
+      // every sibling repo so the server resolves to the owning project.
+      git_remotes: remotes,
+      cwd: absCwd
+    });
+    if (result.project_id) {
+      return {
+        project_id: result.project_id,
+        project_name: result.name,
+        account_id: result.account_id,
+        reason: result.reason === "none" ? "config" : result.reason,
+        hasGitRemote,
+        enforce_done_deployed: result.enforce_done_deployed
+      };
     }
-    process.stdout.write(`${features.length} feature${features.length === 1 ? "" : "s"}:
+  } catch (e) {
+    serverFailure = summarizeBackendFailure(e) ?? void 0;
+  }
+  if (configProjectId) {
+    const localBinding = await findWorkspaceBinding(absCwd).catch(() => null);
+    if (localBinding?.binding.project_id === configProjectId) {
+      return {
+        project_id: configProjectId,
+        project_name: null,
+        account_id: null,
+        reason: "config",
+        hasGitRemote,
+        server_failure: serverFailure
+      };
+    }
+  }
+  return {
+    project_id: null,
+    project_name: null,
+    account_id: null,
+    reason: "none",
+    hasGitRemote,
+    server_failure: serverFailure
+  };
+}
+function readGitRemote(cwd) {
+  const read = (file2) => {
+    const stat = lstatSync(file2);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024)
+      throw new Error("Unsupported Git metadata");
+    return readFileSync2(file2, "utf8");
+  };
+  try {
+    let root = path8.resolve(cwd);
+    for (; ; ) {
+      const marker = path8.join(root, ".git");
+      if (existsSync(marker)) {
+        const info = lstatSync(marker);
+        if (info.isSymbolicLink()) return null;
+        let directory = marker;
+        if (info.isFile()) {
+          const match = /^gitdir:\s*(.+)$/m.exec(read(marker));
+          if (!match) return null;
+          directory = path8.resolve(root, match[1].trim());
+        }
+        const common2 = path8.join(directory, "commondir");
+        if (existsSync(common2)) directory = path8.resolve(directory, read(common2).trim());
+        let origin = false;
+        for (const line of read(path8.join(directory, "config")).split(/\r?\n/)) {
+          if (/^\s*\[/.test(line)) origin = /^\s*\[remote\s+"origin"\]\s*(?:[#;].*)?$/.test(line);
+          else if (origin) {
+            const match = /^\s*url\s*=\s*(.*?)\s*$/.exec(line);
+            if (match) return normalizeGitRemote(match[1].replace(/^"(.*)"$/, "$1"));
+          }
+        }
+        return null;
+      }
+      const parent = path8.dirname(root);
+      if (parent === root) return null;
+      root = parent;
+    }
+  } catch {
+    return null;
+  }
+}
+var MAX_WORKSPACE_SCAN = 64;
+function detectGitRemotes(cwd) {
+  const enclosing = readGitRemote(cwd);
+  if (enclosing) return [enclosing];
+  const out = [];
+  try {
+    let scanned = 0;
+    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
+      if (scanned >= MAX_WORKSPACE_SCAN) break;
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
+        continue;
+      }
+      scanned++;
+      const child = path8.join(cwd, entry.name);
+      if (!existsSync(path8.join(child, ".git"))) continue;
+      const remote = readGitRemote(child);
+      if (remote && !out.includes(remote)) out.push(remote);
+    }
+  } catch {
+  }
+  return out;
+}
+function effectiveAccountId(input) {
+  return input.resolvedAccountId ?? input.configAccountId;
+}
 
-`);
-    for (const f of features) {
-      process.stdout.write(`  ${f.id.slice(0, 8)}  ${f.title}  [${f.status}]
-`);
+// packages/plugin-core/src/cli/features-command.ts
+import path13 from "node:path";
+
+// packages/plugin-core/src/feature-doc-export.ts
+import { createHash as createHash2 } from "node:crypto";
+
+// packages/plugin-core/src/review-copy.ts
+import { randomUUID as randomUUID4 } from "node:crypto";
+import { constants as constants2, promises as fs6 } from "node:fs";
+import path9 from "node:path";
+async function ensureDirectory(directory) {
+  const absolute = path9.resolve(directory), root = path9.parse(absolute).root;
+  let current = root;
+  for (const component of absolute.slice(root.length).split(path9.sep).filter(Boolean)) {
+    current = path9.join(current, component);
+    try {
+      await fs6.mkdir(current, { mode: 448 });
+    } catch (error40) {
+      if (error40.code !== "EEXIST") throw error40;
     }
-    process.stdout.write('\nUse: memlin features create "<title>" | add <feature-id> <kind> <id>\n');
+    const info = await fs6.lstat(current);
+    if (info.isSymbolicLink() || !info.isDirectory())
+      throw Error("Export directories must be ordinary directories, not symlinks.");
+  }
+}
+async function saveReviewBytes(copy, destination, edited = () => true) {
+  if (!/^[0-9a-f]{64}$/.test(copy.sha) || !/^[a-z0-9-]+$/i.test(String(copy.version)))
+    throw Error("Invalid review-copy identity.");
+  const base = path9.resolve(destination), bytes = copy.bytes;
+  const parsed = path9.parse(base);
+  await ensureDirectory(parsed.dir);
+  const directory = await fs6.lstat(parsed.dir);
+  const realDirectory = await fs6.realpath(parsed.dir);
+  const validateDirectory = async () => {
+    await ensureDirectory(parsed.dir);
+    const current = await fs6.lstat(parsed.dir);
+    if (current.dev !== directory.dev || current.ino !== directory.ino || await fs6.realpath(parsed.dir) !== realDirectory)
+      throw Error("Export directory changed during publication.");
+  };
+  const temporary = path9.join(parsed.dir, `.memlin-feature-doc-${randomUUID4()}.tmp`);
+  const handle = await fs6.open(
+    temporary,
+    constants2.O_CREAT | constants2.O_EXCL | constants2.O_WRONLY | (constants2.O_NOFOLLOW ?? 0),
+    384
+  );
+  const temporaryInfo = await handle.stat();
+  let preservedLocalEdits = false;
+  try {
+    try {
+      await handle.writeFile(bytes);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    for (let attempt = 0; attempt < 1e3; attempt++) {
+      const candidate = attempt === 0 ? base : path9.join(
+        parsed.dir,
+        `${parsed.name}.v${copy.version}-${copy.sha.slice(0, 12)}${attempt === 1 ? "" : `.${attempt - 1}`}${parsed.ext || ".md"}`
+      );
+      await validateDirectory();
+      try {
+        await fs6.link(temporary, candidate);
+      } catch (error40) {
+        if (error40.code !== "EEXIST") throw error40;
+        const info = await fs6.lstat(candidate);
+        if (info.isSymbolicLink() || !info.isFile())
+          throw Error("Export destination is not an ordinary file.");
+        const reader = await fs6.open(candidate, constants2.O_RDONLY | (constants2.O_NOFOLLOW ?? 0));
+        let existing = null;
+        try {
+          const opened = await reader.stat();
+          if (!opened.isFile()) throw Error("Export destination is not an ordinary file.");
+          if (opened.size <= Math.max(5001024, bytes.length)) {
+            const bytes2 = Buffer.alloc(opened.size + 1);
+            const read = await reader.read(bytes2, 0, bytes2.length, 0);
+            existing = bytes2.subarray(0, read.bytesRead);
+          }
+        } finally {
+          await reader.close();
+        }
+        if (existing?.equals(bytes))
+          return { path: candidate, status: "unchanged", preservedLocalEdits };
+        preservedLocalEdits ||= existing === null || edited(existing);
+        continue;
+      }
+      return {
+        path: candidate,
+        status: attempt ? "saved_beside_existing" : "saved",
+        preservedLocalEdits
+      };
+    }
+    throw Error("Too many existing export copies; choose another output location.");
+  } finally {
+    const current = await fs6.lstat(temporary).catch(() => null);
+    if (current?.dev === temporaryInfo.dev && current.ino === temporaryInfo.ino)
+      await fs6.unlink(temporary);
+  }
+}
+
+// packages/plugin-core/src/feature-doc-assets.ts
+import { createHash } from "node:crypto";
+import path10 from "node:path";
+var hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+var uuid3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function mapFeatureDocResourceLinks(body, map2) {
+  let fence = null;
+  return body.split(/(?<=\n)/).map((line) => {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*?)(?:\r?\n)?$/.exec(line);
+    if (marker) {
+      if (!fence) fence = { marker: marker[1][0], width: marker[1].length };
+      else if (marker[1][0] === fence.marker && marker[1].length >= fence.width && !marker[2].trim())
+        fence = null;
+      return line;
+    }
+    if (fence) return line;
+    const rewrite = (text) => text.replace(
+      /(!?\[(?:\\.|[^\\\]\r\n])*\]\()(memlin-resource:[^)\s]+)(\))/g,
+      (whole, prefix, uri, suffix) => {
+        const reference = parseResourceReference(uri);
+        const replacement = reference ? map2(reference) : null;
+        return replacement ? `${prefix}${replacement}${suffix}` : whole;
+      }
+    );
+    let out = "", start = 0, at = 0;
+    while (at < line.length) {
+      let escapes = 0;
+      for (let before = at - 1; before >= 0 && line[before] === "\\"; before--) escapes++;
+      if (line[at] !== "`" || escapes % 2 === 1) {
+        at++;
+        continue;
+      }
+      out += rewrite(line.slice(start, at));
+      let width = 1;
+      while (line[at + width] === "`") width++;
+      let end = at + width;
+      while (end < line.length) {
+        if (line[end] !== "`") {
+          end++;
+          continue;
+        }
+        let closing = 1;
+        while (line[end + closing] === "`") closing++;
+        if (closing === width) {
+          end += closing;
+          break;
+        }
+        end += closing;
+      }
+      out += line.slice(at, end);
+      at = end;
+      start = end;
+    }
+    return out + rewrite(line.slice(start));
+  }).join("");
+}
+function featureDocResourceWebLink(reference, apiUrl, accountId) {
+  const base = new URL(apiUrl);
+  if (!uuid3.test(accountId) || base.username || base.password || base.protocol !== "https:" && !(base.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(base.hostname)))
+    throw Error("A valid workspace URL is required to export file references.");
+  const query = new URLSearchParams({ variant: "original" });
+  if (reference.versionId) query.set("version_id", reference.versionId);
+  query.set("disposition", "attachment");
+  return `${base.origin}/app/${accountId}/files/${reference.resourceId}/raw?${query}`;
+}
+async function readBounded(response, limit) {
+  if (!response.ok || !response.body) throw Error("Attachment download failed.");
+  const length = response.headers.get("content-length");
+  if (length && (!/^\d+$/.test(length) || Number(length) > limit)) {
+    await response.body.cancel();
+    throw Error("Attachment exceeds the export byte limit.");
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      bytes += next.value.byteLength;
+      if (bytes > limit) {
+        await reader.cancel();
+        throw Error("Attachment exceeds the export byte limit.");
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks);
+}
+async function exportFeatureDocAssets(api, body, context, fetchBytes = fetch) {
+  const references = /* @__PURE__ */ new Map();
+  mapFeatureDocResourceLinks(body, (reference) => {
+    references.set(`${reference.resourceId}/${reference.versionId ?? ""}`, reference);
+    return null;
+  });
+  if (references.size + context.budget.files > 50)
+    throw Error("Attachment export is limited to 50 files per run.");
+  const links = /* @__PURE__ */ new Map();
+  const assets = [];
+  for (const [key, reference] of references) {
+    if (!reference.versionId) throw Error("Attachment export requires exact saved versions.");
+    context.budget.files++;
+    const request = { accountId: context.accountId, versionId: reference.versionId };
+    const metadata = await api.getFile(reference.resourceId, request);
+    const v = metadata.version;
+    if (metadata.metadata?.sensitive_hold === true || !["active", "background"].includes(lifecycleStatusOf(metadata.metadata ?? {})) || metadata.id !== reference.resourceId || metadata.account_id !== context.accountId || v.id !== reference.versionId || !(metadata.scope === "project" && metadata.project_id === context.projectId || metadata.scope === "team" && metadata.project_id === null) || !v.original_sha256 || !/^[0-9a-f]{64}$/.test(v.original_sha256))
+      throw Error("Attachment version, account, project or original hash is unavailable.");
+    const format = FILE_FORMATS.find((format2) => format2.acceptedMimeTypes.includes(v.mime_type));
+    if (!format) throw Error("Attachment format is not supported for export.");
+    const remaining = 100 * 1024 * 1024 - context.budget.bytes;
+    const limit = Math.min(KIND_MAX_BYTES[format.kind], remaining);
+    if (limit <= 0 || v.original_byte_size !== null && (!Number.isSafeInteger(v.original_byte_size) || v.original_byte_size < 0 || v.original_byte_size > limit))
+      throw Error("Attachment exceeds the export byte limit.");
+    const reserved = v.original_byte_size ?? limit;
+    context.budget.bytes += reserved;
+    const source = await api.getFileContent(reference.resourceId, request);
+    if (source.version_id !== reference.versionId || source.mime_type !== v.mime_type)
+      throw Error("Attachment response changed version or format.");
+    let bytes;
+    if (typeof source.content === "string") {
+      bytes = Buffer.from(source.content, "utf8");
+      if (bytes.length > Math.min(limit, reserved))
+        throw Error("Attachment exceeds the export byte limit.");
+    } else if (typeof source.url === "string") {
+      const url2 = new URL(source.url);
+      if (url2.username || url2.password || url2.protocol !== "https:" && !(url2.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url2.hostname)))
+        throw Error("Attachment download URL is invalid.");
+      const response = await fetchBytes(url2, {
+        redirect: "error",
+        signal: AbortSignal.timeout(3e4),
+        referrerPolicy: "no-referrer"
+      });
+      bytes = await readBounded(response, Math.min(limit, reserved));
+    } else throw Error("Attachment content is unavailable.");
+    if (hash(bytes) !== v.original_sha256 || v.original_byte_size !== null && bytes.length !== v.original_byte_size)
+      throw Error("Attachment bytes do not match the saved original.");
+    const name = path10.parse(metadata.title.replace(/[/\\]/g, "-")).name.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 70) || "attachment";
+    const destination = path10.join(
+      context.directory,
+      "assets",
+      `${v.original_sha256.slice(0, 16)}-${reference.resourceId.slice(0, 8)}-${name}.${format.extension}`
+    );
+    const saved = await saveReviewBytes(
+      { bytes, sha: v.original_sha256, version: reference.versionId },
+      destination
+    );
+    context.budget.bytes -= reserved - bytes.length;
+    const relative = path10.relative(context.directory, saved.path).split(path10.sep).map(encodeURIComponent).join("/");
+    links.set(key, `./${relative}`);
+    assets.push({
+      resourceId: reference.resourceId,
+      versionId: reference.versionId,
+      path: saved.path,
+      sha256: v.original_sha256,
+      bytes: bytes.length
+    });
+  }
+  return {
+    body: mapFeatureDocResourceLinks(
+      body,
+      (reference) => links.get(`${reference.resourceId}/${reference.versionId ?? ""}`) ?? null
+    ),
+    assets
+  };
+}
+
+// packages/plugin-core/src/feature-doc-export.ts
+import path11 from "node:path";
+var UUID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var sha2 = (text) => createHash2("sha256").update(text, "utf8").digest("hex");
+var object2 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+async function listExportFeatures(api, projectId, accountId) {
+  if (!UUID2.test(projectId) || !UUID2.test(accountId))
+    throw Error("A valid project and account are required.");
+  const rows = /* @__PURE__ */ new Map();
+  const cursors = /* @__PURE__ */ new Set();
+  let cursor;
+  for (let page = 0; page < 100; page++) {
+    const result = await api.listFeatures({ project_id: projectId, accountId, limit: 100, cursor });
+    for (const feature of result.features) {
+      if (!UUID2.test(feature.id) || feature.project_id !== projectId)
+        throw Error("Feature list escaped the requested project.");
+      rows.set(feature.id, feature);
+    }
+    if (!result.next_cursor) {
+      if (result.next_cursor === void 0 && result.features.length >= 100)
+        throw Error(
+          "This server cannot confirm a complete export. Update the server to enable paged feature exports."
+        );
+      return [...rows.values()];
+    }
+    if (cursors.has(result.next_cursor))
+      throw Error("Feature pagination did not advance; no files were exported.");
+    cursors.add(result.next_cursor);
+    cursor = result.next_cursor;
+  }
+  throw Error("The project exceeds the bounded export limit; no files were exported.");
+}
+async function resolveExportFeature(api, needle, projectId, accountId) {
+  if (UUID2.test(needle)) {
+    const result = await api.getFeature(needle, { accountId });
+    const feature = object2(result.feature);
+    if (typeof feature.id !== "string" || feature.id.toLowerCase() !== needle.toLowerCase() || feature.project_id !== projectId)
+      throw Error("Feature not found in the requested project.");
+    return feature;
+  }
+  if (!/^[0-9a-f-]{4,35}$/i.test(needle))
+    throw Error("Use a feature UUID or an unambiguous prefix of at least four characters.");
+  const matches = (await listExportFeatures(api, projectId, accountId)).filter(
+    (feature) => feature.id.toLowerCase().startsWith(needle.toLowerCase())
+  );
+  if (matches.length !== 1)
+    throw Error(
+      matches.length ? "Feature prefix is ambiguous; use the complete ID." : "No feature matches that prefix."
+    );
+  return matches[0];
+}
+async function fetchFeatureDocCopy(api, feature, projectId, accountId) {
+  if (!UUID2.test(accountId) || !UUID2.test(projectId) || !UUID2.test(feature.id) || feature.project_id !== projectId)
+    throw Error("Feature is outside the requested context.");
+  if (!feature.doc_document_id) return null;
+  if (!UUID2.test(feature.doc_document_id)) throw Error("Invalid document pointer.");
+  const doc = await api.getDocument(feature.doc_document_id, { accountId });
+  const metadata = object2(doc.metadata);
+  if (doc.id !== feature.doc_document_id || doc.kind !== "file" || doc.account_id !== accountId || doc.locked_to_owners !== false || doc.scope !== "project" || doc.project_id !== projectId || doc.status === "archived" || metadata.doc_role !== FEATURE_DOC_ROLE || metadata.feature_id !== feature.id || metadata.imported_from !== featureDocImportKey(feature.id) || metadata.sensitive_hold === true || ["proposed", "rejected", "archived", "expired", "superseded"].includes(
+    lifecycleStatusOf(metadata)
+  ))
+    throw Error("Living document is inactive, moved, or no longer bound to this feature.");
+  if (!Number.isInteger(doc.version_number) || doc.version_number < 1 || typeof doc.content !== "string" || Buffer.byteLength(doc.content, "utf8") > 5e6)
+    throw Error("Living document version is unavailable or too large to export.");
+  return {
+    featureId: feature.id,
+    documentId: doc.id,
+    version: doc.version_number,
+    sha: sha2(doc.content),
+    content: doc.content
+  };
+}
+function featureDocExportText(copy) {
+  return `<!-- memlin:feature-doc feature=${copy.featureId} doc=${copy.documentId} v=${copy.version} sha=${copy.sha}${copy.sourceSha ? ` source_sha=${copy.sourceSha}` : ""} generated \u2014 edit in Memlin -->
+${copy.content}`;
+}
+function isEdited(text) {
+  const header = /^<!-- memlin:feature-doc feature=([0-9a-f-]+) doc=([0-9a-f-]+) v=(\d+) sha=([0-9a-f]{64})(?: source_sha=[0-9a-f]{64})? generated — edit in Memlin -->\n/.exec(
+    text
+  );
+  return !header || sha2(text.slice(header[0].length)) !== header[4];
+}
+async function saveFeatureDocCopy(copy, destination) {
+  return saveReviewBytes(
+    { ...copy, bytes: Buffer.from(featureDocExportText(copy), "utf8") },
+    destination,
+    (bytes) => isEdited(bytes.toString("utf8"))
+  );
+}
+function projectFeatureDocCopy(copy, accountId, apiUrl, body) {
+  const content = body ?? (apiUrl ? mapFeatureDocResourceLinks(
+    copy.content,
+    (reference) => featureDocResourceWebLink(reference, apiUrl, accountId)
+  ) : copy.content);
+  return content === copy.content ? copy : { ...copy, content, sourceSha: copy.sourceSha ?? copy.sha, sha: sha2(content) };
+}
+async function exportFeatureDocs(api, projectId, accountId, directory, options2 = {}) {
+  const features = await listExportFeatures(api, projectId, accountId);
+  const assetBudget = { bytes: 0, files: 0 };
+  const assets = [];
+  const files = [];
+  const skipped = [];
+  const errors = [];
+  for (const feature of features) {
+    try {
+      const copy = await fetchFeatureDocCopy(api, feature, projectId, accountId);
+      if (!copy) {
+        skipped.push({
+          featureId: feature.id,
+          reason: "No readable living document is available."
+        });
+        continue;
+      }
+      let projected;
+      if (options2.withAttachments) {
+        const assetApi = api;
+        if (!assetApi.getFile || !assetApi.getFileContent)
+          throw Error("This client cannot download Library attachments.");
+        const downloaded = await exportFeatureDocAssets(
+          {
+            getFile: assetApi.getFile.bind(api),
+            getFileContent: assetApi.getFileContent.bind(api)
+          },
+          copy.content,
+          { accountId, projectId, directory, budget: assetBudget }
+        );
+        assets.push(...downloaded.assets);
+        projected = projectFeatureDocCopy(copy, accountId, options2.apiUrl, downloaded.body);
+      } else projected = projectFeatureDocCopy(copy, accountId, options2.apiUrl);
+      files.push({
+        featureId: feature.id,
+        ...await saveFeatureDocCopy(projected, path11.join(directory, `${feature.id}.md`))
+      });
+    } catch (error40) {
+      errors.push({
+        featureId: feature.id,
+        reason: error40 instanceof Error ? error40.message : "Export failed."
+      });
+    }
+  }
+  return {
+    kind: "feature_doc_export",
+    files,
+    ...options2.withAttachments ? { assets } : {},
+    skipped,
+    errors,
+    complete: errors.length === 0
+  };
+}
+
+// packages/plugin-core/src/session-feature.ts
+import { execFileSync } from "node:child_process";
+
+// packages/plugin-core/src/state.ts
+init_atomic_rename();
+import { promises as fs7 } from "node:fs";
+import path12 from "node:path";
+import os7 from "node:os";
+import crypto4 from "node:crypto";
+var STATE_FILE = path12.join(os7.homedir(), ".config", "memlin", "state.json");
+var MAX_LAST_RESOLVE_SESSIONS = 32;
+var EMPTY = { documents: {} };
+async function readState() {
+  try {
+    const raw = await fs7.readFile(STATE_FILE, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return { ...EMPTY };
+  }
+}
+async function writeState(state) {
+  await fs7.mkdir(path12.dirname(STATE_FILE), { recursive: true });
+  const tmp = `${STATE_FILE}.${process.pid}.tmp`;
+  await fs7.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
+  await atomicRename(tmp, STATE_FILE);
+}
+var LOCK_DIR = `${STATE_FILE}.lock`;
+var LOCK_STALE_MS = 2e3;
+var LOCK_WAIT_MS = 2e3;
+var LOCK_RETRY_MS = 50;
+async function acquireStateLock() {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  await fs7.mkdir(path12.dirname(LOCK_DIR), { recursive: true }).catch(() => {
+  });
+  for (; ; ) {
+    try {
+      await fs7.mkdir(LOCK_DIR);
+      return true;
+    } catch {
+      try {
+        const stat = await fs7.stat(LOCK_DIR);
+        if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+          await fs7.rmdir(LOCK_DIR).catch(() => {
+          });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() >= deadline) return false;
+      await new Promise((r) => setTimeout(r, LOCK_RETRY_MS));
+    }
+  }
+}
+async function releaseStateLock() {
+  await fs7.rmdir(LOCK_DIR).catch(() => {
+  });
+}
+async function updateState(mutate) {
+  const locked = await acquireStateLock();
+  try {
+    const state = await readState();
+    await mutate(state);
+    await writeState(state);
+    return state;
+  } finally {
+    if (locked) await releaseStateLock();
+  }
+}
+
+// packages/plugin-core/src/session-feature.ts
+var TTL = 14 * 864e5;
+var UUID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function validSession(value) {
+  return !!value && value.length <= 256;
+}
+function readFeatureBranch(cwd) {
+  try {
+    const raw = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2e3
+    }).trim();
+    return raw.length <= 300 ? featureBranch(raw) : null;
+  } catch {
+    return null;
+  }
+}
+function cacheSessionFeature(state, identity, active, now = Date.now()) {
+  if (!validSession(identity.sessionId)) return;
+  if (!identity.accountId || !identity.projectId || !active || !UUID3.test(active.id) || !["pin", "handoff", "branch"].includes(active.via)) {
+    delete state.session_features?.[identity.sessionId];
     return;
   }
+  const branch = featureBranch(identity.gitBranch);
+  if (active.via === "branch" && !branch) {
+    delete state.session_features?.[identity.sessionId];
+    return;
+  }
+  const entries = state.session_features ??= /* @__PURE__ */ Object.create(null);
+  entries[identity.sessionId] = {
+    feature_id: active.id,
+    title: active.title.slice(0, 100),
+    via: active.via,
+    account_id: identity.accountId,
+    project_id: identity.projectId,
+    git_branch: branch,
+    at: now
+  };
+  Object.entries(entries).sort(([, a], [, b]) => b.at - a.at).slice(MAX_LAST_RESOLVE_SESSIONS).forEach(([id]) => {
+    delete entries[id];
+  });
+}
+async function recordSessionFeature(identity, active) {
+  if (!validSession(identity.sessionId)) return;
+  await updateState((state) => cacheSessionFeature(state, identity, active)).catch(() => void 0);
+}
+
+// packages/plugin-core/src/cli/features-command.ts
+function parseFeatureArgs(args) {
+  const options2 = {};
+  const positional = [];
+  for (let i = 0; i < args.length; i++) {
+    const value = args[i];
+    if (!value.startsWith("--")) {
+      positional.push(value);
+      continue;
+    }
+    if (value === "--with-attachments") {
+      options2.withAttachments = "true";
+      continue;
+    }
+    if (value === "--stdout" || value === "--clear") {
+      options2[value.slice(2)] = "true";
+      continue;
+    }
+    if (!["--project", "--status", "--summary", "--out", "--dir"].includes(value))
+      throw Error(`Unknown flag: ${value}`);
+    if (args[i + 1] === void 0 || args[i + 1].startsWith("--"))
+      throw Error(`Missing value for ${value}`);
+    options2[value.slice(2)] = args[++i];
+  }
+  if (options2.status && options2.status.split(",").some((status) => !FEATURE_STATUSES.includes(status)))
+    throw Error("Invalid feature status");
+  const action = positional[0] ?? "list";
+  if (options2.clear !== void 0 && action !== "pin")
+    throw Error("--clear is supported by features pin.");
+  if (options2.status !== void 0 && !["list", "search"].includes(action))
+    throw Error(
+      "--status is supported by list and search; use the status command to change a feature."
+    );
+  if (options2.summary !== void 0 && !["create", "rename"].includes(action))
+    throw Error("--summary is supported by create and rename.");
+  if ((options2.out !== void 0 || options2.stdout !== void 0) && action !== "doc")
+    throw Error("--out and --stdout are supported by features doc.");
+  if (options2.out !== void 0 && options2.stdout !== void 0)
+    throw Error("Choose --out or --stdout, not both.");
+  if (options2.withAttachments && !(action === "docs" && positional[1] === "pull"))
+    throw Error("--with-attachments is supported by features docs pull.");
+  if (options2.dir !== void 0 && !(action === "docs" && positional[1] === "pull"))
+    throw Error("--dir is supported by features docs pull.");
+  return { action, positional: positional.slice(1), options: options2 };
+}
+async function runFeatureCommand(api, parsed, projectId, accountId, cwd = process.cwd(), apiUrl) {
+  const { action, positional, options: options2 } = parsed;
+  const request = { accountId };
+  if (action === "pin") {
+    const clear = options2.clear === "true";
+    if (clear ? positional.length !== 0 : positional.length !== 1)
+      throw Error("Usage: memlin features pin <feature-id> | pin --clear");
+    const featureId2 = clear ? null : positional[0];
+    if (featureId2 && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(featureId2))
+      throw Error("Use the complete feature ID from memlin features list.");
+    const gitBranch = readFeatureBranch(cwd);
+    if (!gitBranch)
+      throw Error("Pin a feature from a feature branch; default branches are not supported.");
+    const sessionId = process.env.MEMLIN_SESSION_ID ?? null;
+    const result = await api.setFeatureBinding(
+      {
+        project_id: projectId,
+        feature_id: featureId2,
+        git_branch: gitBranch,
+        ...sessionId ? { session_id: sessionId } : {}
+      },
+      request
+    );
+    await recordSessionFeature(
+      { accountId, projectId, sessionId, gitBranch },
+      result.binding.feature_id && result.binding.via === "pin" ? { id: result.binding.feature_id, title: result.binding.feature_id, via: "pin" } : null
+    );
+    return result;
+  }
+  if (action === "doc") {
+    if (positional.length !== 1)
+      throw Error("Usage: memlin features doc <id|prefix> [--out path|--stdout]");
+    const feature = await resolveExportFeature(api, positional[0], projectId, accountId);
+    const copy = await fetchFeatureDocCopy(api, feature, projectId, accountId);
+    if (!copy) throw Error("No readable living document is available for this feature.");
+    const projected = projectFeatureDocCopy(copy, accountId, apiUrl);
+    return options2.out ? {
+      kind: "feature_doc_saved",
+      ...await saveFeatureDocCopy(projected, path13.resolve(cwd, options2.out))
+    } : { kind: "feature_doc_stdout", content: featureDocExportText(projected) };
+  }
+  if (action === "docs") {
+    if (positional.length !== 1 || positional[0] !== "pull")
+      throw Error("Usage: memlin features docs pull [--dir path] [--project UUID]");
+    return exportFeatureDocs(
+      api,
+      projectId,
+      accountId,
+      path13.resolve(cwd, options2.dir ?? ".memlin/docs/features"),
+      { withAttachments: options2.withAttachments === "true", apiUrl }
+    );
+  }
+  if (action === "list" || action === "search") {
+    const query = positional.join(" ").trim();
+    if (action === "search" && !query) throw Error('Usage: memlin features search "query"');
+    return api.listFeatures({
+      project_id: projectId,
+      status: options2.status,
+      q: action === "search" ? query : void 0,
+      ...request
+    });
+  }
   if (action === "create") {
-    let projectId = pinnedProject ?? process.env.MEMLIN_PROJECT_ID ?? null;
-    let summary = null;
-    const titleParts = [];
-    for (let i = 1; i < args.length; i++) {
-      const a = args[i];
-      if (a === "--summary" && i + 1 < args.length) {
-        summary = args[++i] ?? null;
-        continue;
-      }
-      if (a === "--project" && i + 1 < args.length) {
-        projectId = args[++i] ?? null;
-        continue;
-      }
-      if (a?.startsWith("--")) {
-        process.stderr.write(`unknown flag: ${a}
-`);
-        exitCli(1);
-      }
-      titleParts.push(a ?? "");
-    }
-    if (!projectId) {
-      process.stderr.write(
-        "memlin features create: no project pinned \u2014 run `memlin add-project` first, pass --project <uuid>, or set MEMLIN_PROJECT_ID.\n"
-      );
-      exitCli(2);
-    }
-    const title = titleParts.join(" ").trim();
-    if (!title) {
-      process.stderr.write('usage: memlin features create "<title>" [--summary S] [--project P]\n');
-      exitCli(1);
-    }
-    try {
-      const result = await ctx.api.createFeature({
+    const title = positional.join(" ").trim();
+    if (!title) throw Error('Usage: memlin features create "title" [--summary "summary"]');
+    return api.createFeature(
+      {
         project_id: projectId,
         title,
-        summary
-      });
-      process.stdout.write(`\u2713 created feature ${result.id.slice(0, 8)} \u2014 ${title}
-`);
-      process.stdout.write(`  add work to it: memlin features add ${result.id.slice(0, 8)} <kind> <id>
-`);
-      return;
-    } catch (err) {
-      process.stderr.write(
-        `memlin features create failed: ${err instanceof Error ? err.message : String(err)}
-`
-      );
-      exitCli(1);
-    }
+        ...options2.summary !== void 0 ? { summary: options2.summary } : {}
+      },
+      request
+    );
+  }
+  const featureId = positional[0];
+  if (!featureId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(featureId))
+    throw Error("Use the complete feature ID from memlin features list.");
+  if (action === "show") return api.getFeature(featureId, request);
+  if (action === "status") {
+    const status = positional[1];
+    if (!FEATURE_STATUSES.includes(status ?? ""))
+      throw Error("Choose proposed, active, shipped, or archived.");
+    return api.updateFeature(featureId, { status }, request);
+  }
+  if (action === "rename") {
+    const title = positional.slice(1).join(" ").trim();
+    if (!title)
+      throw Error('Usage: memlin features rename <feature-id> "title" [--summary "summary"]');
+    return api.updateFeature(
+      featureId,
+      { title, ...options2.summary !== void 0 ? { summary: options2.summary } : {} },
+      request
+    );
+  }
+  if (action === "remove") {
+    if (!positional[1]) throw Error("Usage: memlin features remove <feature-id> <link-id>");
+    return api.removeFeatureMember(featureId, positional[1], request);
   }
   if (action === "add") {
-    const needle = args[1];
-    const kind = args[2];
-    const itemId = args[3];
-    if (!needle || !kind || !itemId) {
-      process.stderr.write("usage: memlin features add <feature-id> <kind> <entity-id>\n");
-      exitCli(1);
-    }
-    const { features } = await ctx.api.listFeatures({ project_id: pinnedProject });
-    const match = matchFeature(features, needle);
-    if ("error" in match) {
-      process.stderr.write(`${match.error}
-`);
-      exitCli(2);
-    }
-    try {
-      await ctx.api.addFeatureMember(match.id, { kind, id: itemId });
-      process.stdout.write(
-        `\u2713 added ${kind} ${itemId.slice(0, 8)} to feature ${match.id.slice(0, 8)} (${match.title})
-`
-      );
-      return;
-    } catch (err) {
-      process.stderr.write(
-        `memlin features add failed: ${err instanceof Error ? err.message : String(err)}
-`
-      );
-      exitCli(1);
-    }
+    if (!FEATURE_MEMBER_KINDS.includes(positional[1] ?? "") || !positional[2])
+      throw Error("Usage: memlin features add <feature-id> <member-kind> <member-id>");
+    return api.addFeatureMember(featureId, { kind: positional[1], id: positional[2] }, request);
   }
-  process.stderr.write(
-    'usage: memlin features [list] | create "<title>" [--summary S] [--project P] | add <feature-id> <kind> <id>\n'
+  throw Error(
+    "Usage: memlin features list | search | show | create | status | rename | add | remove | pin | doc | docs pull"
   );
-  return 1;
 }
-runCliMain(main, (err) => {
+
+// packages/plugin-core/src/cli/features.ts
+async function main() {
+  const cwd = runtimeCwd();
+  const ctx = await getApi({ cwd });
+  if (!ctx) throw Error("Not signed in \u2014 run memlin login first.");
+  const parsed = parseFeatureArgs(argvAsSlashArgs());
+  const resolved = await resolveProject(ctx.api, cwd, ctx.config.project_id);
+  if (accountBindingHazard(resolved, { allowMismatch: allowAccountMismatch() }) === "block")
+    throw Error(
+      "This workspace resolves to a project that does not own its git remote. Run memlin add-project to correct the binding."
+    );
+  const projectId = parsed.options.project ?? resolved.project_id;
+  if (!projectId)
+    throw Error(
+      "No project resolved for this workspace. Pass --project <uuid> or run memlin add-project."
+    );
+  const accountId = effectiveAccountId({
+    configAccountId: ctx.config.account_id,
+    resolvedAccountId: resolved.account_id
+  });
+  if (!accountId) throw Error("No account resolved. Run memlin login.");
+  const result = await runFeatureCommand(
+    ctx.api,
+    parsed,
+    projectId,
+    accountId,
+    cwd,
+    process.env.MEMLIN_API_URL?.trim() || ctx.config.api_url
+  );
+  if ("kind" in result && result.kind === "feature_doc_stdout" && "content" in result && typeof result.content === "string") {
+    process.stdout.write(result.content);
+    return;
+  }
+  process.stdout.write(`${JSON.stringify(result, null, 2)}
+`);
+  if ("kind" in result && result.kind === "feature_doc_export" && result.complete === false)
+    return 1;
+}
+runCliMain(main, (error40) => {
   process.stderr.write(
-    `memlin features failed: ${err instanceof Error ? err.message : String(err)}
+    `memlin features: ${error40 instanceof Error ? error40.message : String(error40)}
 `
   );
   return 1;

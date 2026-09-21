@@ -3824,7 +3824,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs8 = __require("fs");
+    var fs9 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3908,7 +3908,7 @@ var require_gray_matter = __commonJS({
       return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs8.readFileSync(filepath, "utf8");
+      const str2 = fs9.readFileSync(filepath, "utf8");
       const file2 = matter3(str2, options2);
       file2.path = filepath;
       return file2;
@@ -4241,9 +4241,9 @@ var init_workspace_binding = __esm({
 
 // apps/windsurf-plugin/src/hooks/session-start.ts
 import { spawn } from "node:child_process";
-import { promises as fs7 } from "node:fs";
-import os8 from "node:os";
-import path10 from "node:path";
+import { promises as fs8 } from "node:fs";
+import os9 from "node:os";
+import path11 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // packages/plugin-core/dist/client.js
@@ -5011,8 +5011,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path11, errorMaps, issueData } = params;
-  const fullPath = [...path11, ...issueData.path || []];
+  const { data, path: path12, errorMaps, issueData } = params;
+  const fullPath = [...path12, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5128,11 +5128,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path11, key) {
+  constructor(parent, value, path12, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path11;
+    this._path = path12;
     this._key = key;
   }
   get path() {
@@ -8592,6 +8592,8 @@ var DOCUMENT_KINDS = [
   // (CORPUS_KINDS), and the default export all use explicit kind allow-lists
   // that exclude 'file'. A file enters the core only via an explicit
   // "Promote to Memory" (which writes a separate kind='memory' doc).
+  // Role-marked living docs have one explicit delivery path: a checked feature
+  // pointer/direct read or opt-in CLI copy, never semantic retrieval.
   "file",
   // A personal-first checklist / list (the people-processed "To-dos" tier). Its
   // body is a GFM task list. Like 'file', it's ISOLATED from the resolver/
@@ -8612,6 +8614,17 @@ var DOCUMENT_KINDS = [
 ];
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];
+var FEATURE_LABELS = {
+  code: { singular: "Feature", plural: "Features" },
+  general: { singular: "Workstream", plural: "Workstreams" },
+  highlight: { singular: "Highlight", plural: "Highlights" }
+};
+function featureLabel(projectKind, nounOverride) {
+  if (nounOverride === "highlight") return FEATURE_LABELS.highlight;
+  if (nounOverride === "feature") return FEATURE_LABELS.code;
+  if (nounOverride === "workstream") return FEATURE_LABELS.general;
+  return projectKind === "general" ? FEATURE_LABELS.general : FEATURE_LABELS.code;
+}
 var MEMORY_TYPES = [
   "correction",
   "preference",
@@ -9202,26 +9215,38 @@ var SONNET_BLENDED_USD_PER_MTOK = SONNET_INPUT_USD_PER_MTOK + OUTPUT_MULTIPLIER 
 var SAVINGS_USD_PER_TOKEN = estCostUsd(1);
 
 // packages/shared/dist/feature-discovery.js
-var FEATURE_DISCOVERY_SYSTEM = [
-  "You are Memlin's feature mapper. You read the inventory of a software project \u2014",
-  "its components (subsystems), recent pull requests, and plans \u2014 and group them",
-  "into a short list of FEATURES: the real units of work a team organizes around",
-  '(e.g. "Authentication & sessions", "Billing & credits", "Capture pipeline").',
-  "",
-  "Rules:",
-  "- Propose between 4 and 15 features. Fewer is better than padding with noise.",
-  "- A feature is a cohesive capability or workstream, NOT a single file, a layer",
-  '  ("frontend"), or a restatement of the whole project.',
-  "- Each feature's members must be drawn ONLY from the provided item ids. Never",
-  "  invent ids. Omit items that do not clearly belong to any feature.",
-  "- Do NOT duplicate or restate the existing features listed; only propose what is",
-  "  genuinely missing.",
-  "- Name features the way the team would say them out loud: short, exact nouns.",
-  "",
-  "Return ONLY a JSON object of the form:",
-  '{ "features": [ { "name": string, "summary": string, "members": string[] } ] }',
-  "where each members entry is an id from the inventory. No prose outside the JSON."
-].join("\n");
+function featureDiscoverySystem({
+  projectKind = "code",
+  noun
+} = {}) {
+  const label = featureLabel(projectKind, noun);
+  const inventory = projectKind === "general" ? [
+    "You read a project\u2019s shared thoughts, topics, decisions, goals and plans.",
+    `Group them into ${label.plural.toUpperCase()}: cohesive areas of work the team organizes around.`,
+    "Examples include customer research, event planning, hiring and quarterly priorities."
+  ] : [
+    "You read the inventory of a software project: components, recent pull requests, decisions, goals and plans.",
+    `Group them into ${label.plural.toUpperCase()}: cohesive capabilities the team organizes around.`,
+    "Examples include authentication, billing and capture."
+  ];
+  return [
+    `You are Memlin\u2019s ${label.singular.toLowerCase()} mapper.`,
+    ...inventory,
+    "",
+    "Rules:",
+    `- Propose between 4 and 15 ${label.plural.toLowerCase()}. Fewer is better than padding with noise.`,
+    "- Each group is a cohesive area of work, not one item or a restatement of the whole project.",
+    "- Members must be drawn ONLY from the provided item ids. Never invent ids.",
+    "- Omit items that do not clearly belong to any group.",
+    "- Do NOT duplicate or restate existing or previously rejected groups; propose only missing work.",
+    "- Use short, exact names the team would use in conversation.",
+    "",
+    "Return ONLY a JSON object of the form:",
+    '{ "features": [ { "name": string, "summary": string, "members": string[] } ] }',
+    "Each members entry is an id from the inventory. No prose outside the JSON."
+  ].join("\n");
+}
+var FEATURE_DISCOVERY_SYSTEM = featureDiscoverySystem();
 
 // packages/shared/dist/light-native.js
 var LIGHT_READER_LIMITS = Object.freeze({
@@ -9660,19 +9685,19 @@ var ContextManifestV1Schema = external_exports.object({
       location: `linked_contexts.${index}`
     }))
   ];
-  references.forEach(({ ref, path: path11, location }) => {
+  references.forEach(({ ref, path: path12, location }) => {
     const identity = contextReferenceIdentityKey(ref);
     const prior = seen.get(identity);
     if (prior && prior.revision !== ref.revision) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path11,
+        path: path12,
         message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
       });
     } else if (prior && location.startsWith("linked_contexts.")) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path11,
+        path: path12,
         message: `duplicate linked context ${identity}`
       });
     }
@@ -9986,11 +10011,11 @@ var ContextBundleV1Schema = external_exports.object({
         path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
       }))
     ];
-    for (const { ref, path: path11 } of references) {
+    for (const { ref, path: path12 } of references) {
       if (!contextKeys.has(contextReferenceKey(ref))) {
         ctx.addIssue({
           code: external_exports.ZodIssueCode.custom,
-          path: path11,
+          path: path12,
           message: "provider coverage is outside the exact manifest contexts"
         });
       }
@@ -11966,6 +11991,7 @@ var ExperienceHarnessManifestV2Schema = external_exports.object({
   root_thought_id: external_exports.string().uuid(),
   root_revision_token: external_exports.string().min(1).max(2048),
   context: ContextManifestV1Schema,
+  harness: external_exports.object({ output_mode: external_exports.enum(["inline", "resource"]) }).strict().optional(),
   nodes: external_exports.array(
     external_exports.object({
       id: external_exports.string().uuid(),
@@ -11990,7 +12016,12 @@ var ExperienceHarnessSaveV2Schema = external_exports.object({
   root_revision_token: external_exports.string().min(1).max(2048),
   harness_id: external_exports.string().uuid().nullable().default(null),
   expected_revision: external_exports.number().int().positive().nullable().default(null),
-  definition: ExperienceHarnessManifestV2Schema.pick({ context: true, nodes: true, edges: true })
+  definition: ExperienceHarnessManifestV2Schema.pick({
+    context: true,
+    nodes: true,
+    edges: true,
+    harness: true
+  })
 }).strict().refine(
   (input) => input.harness_id === null === (input.expected_revision === null),
   "Existing harness requires its current revision"
@@ -12864,10 +12895,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path11) {
-  if (!path11)
+function getElementAtPath(obj, path12) {
+  if (!path12)
     return obj;
-  return path11.reduce((acc, key) => acc?.[key], obj);
+  return path12.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -13187,11 +13218,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path11, issues) {
+function prefixIssues(path12, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path11);
+    iss.path.unshift(path12);
     return iss;
   });
 }
@@ -13328,7 +13359,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path11 = []) => {
+  const processError = (error41, path12 = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -13338,7 +13369,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path11, ...issue2.path];
+        const fullpath = [...path12, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -13368,9 +13399,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path11) {
+function toDotPath(path12) {
   const segs = [];
-  for (const seg of path11) {
+  for (const seg of path12) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -24028,10 +24059,10 @@ function validateFlowDefinitionSemantics(flow) {
       ],
       ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
     ];
-    targets.forEach(({ target, path: path11 }) => {
+    targets.forEach(({ target, path: path12 }) => {
       if (!isReservedTarget(target) && !stageById.has(target)) {
         issues.push({
-          path: path11,
+          path: path12,
           code: "missing_transition_target",
           message: `transition target ${JSON.stringify(target)} does not exist`
         });
@@ -24061,7 +24092,7 @@ function validateFlowDefinitionSemantics(flow) {
   const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   let hasReachableEnd = false;
-  const visit = (stageId, path11, pathBounds) => {
+  const visit = (stageId, path12, pathBounds) => {
     reachable.add(stageId);
     if (visited.has(stageId)) return;
     visiting.add(stageId);
@@ -24077,7 +24108,7 @@ function validateFlowDefinitionSemantics(flow) {
         ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
         ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
       ];
-      const currentPath = [...path11, stageId];
+      const currentPath = [...path12, stageId];
       for (const edge of edges) {
         const { target } = edge;
         if (target === "$end") {
@@ -24185,18 +24216,18 @@ var FlowPackManifestBaseSchema = external_exports2.object({
   evals: external_exports2.array(ManifestEvalSchema).max(256),
   model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
 }).strict();
-function validateRelativePackPath(path11) {
-  if (path11.startsWith("/") || path11.startsWith("\\")) return "path must be relative";
-  if (/^[A-Za-z]:/.test(path11) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path11)) {
+function validateRelativePackPath(path12) {
+  if (path12.startsWith("/") || path12.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path12) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path12)) {
     return "drive-qualified paths and URI schemes are not allowed";
   }
-  if (/[\u0000-\u001f\u007f]/.test(path11)) return "control characters are not allowed";
-  if (/%(?:2e|2f|5c)/i.test(path11)) return "encoded path traversal is not allowed";
-  if (path11.includes("\\")) return "path must use forward slashes";
-  if (path11.split("/").some((segment) => segment === ".." || segment === ".")) {
+  if (/[\u0000-\u001f\u007f]/.test(path12)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path12)) return "encoded path traversal is not allowed";
+  if (path12.includes("\\")) return "path must use forward slashes";
+  if (path12.split("/").some((segment) => segment === ".." || segment === ".")) {
     return "path traversal and dot segments are not allowed";
   }
-  if (path11.split("/").some((segment) => segment.length === 0)) {
+  if (path12.split("/").some((segment) => segment.length === 0)) {
     return "path cannot contain empty segments";
   }
   return null;
@@ -24243,22 +24274,22 @@ function validateFlowPackManifestSemantics(manifest) {
       issues
     );
     role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
-      const path11 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      const path12 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
       if (comparedRole === role.id) {
         issues.push({
-          path: path11,
+          path: path12,
           code: "self_referential_model_independence",
           message: "a model role cannot require independence from itself"
         });
       } else if (!modelRolesById.has(comparedRole)) {
         issues.push({
-          path: path11,
+          path: path12,
           code: "missing_independence_model_role",
           message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
         });
       } else if (modelRolesById.get(comparedRole)?.independence !== null) {
         issues.push({
-          path: path11,
+          path: path12,
           code: "independence_reference_not_author",
           message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
         });
@@ -24341,6 +24372,188 @@ var FlowPackManifestSchema = FlowPackManifestBaseSchema.superRefine((value, ctx)
 var NEEDS_YOU_HORIZON_DAYS = 14;
 var HORIZON_MS = NEEDS_YOU_HORIZON_DAYS * 24 * 60 * 60 * 1e3;
 var STALLED_GOAL_AGE_MS = 30 * 24 * 60 * 60 * 1e3;
+
+// packages/shared/dist/research-collection.js
+var ResearchCollectionSourceSchema = external_exports.object({
+  url: external_exports.string().url().max(2048).refine((value) => {
+    try {
+      const url2 = new URL(value);
+      return url2.protocol === "https:" && !url2.username && !url2.password && !url2.hash;
+    } catch {
+      return false;
+    }
+  }, "Use a public HTTPS feed URL"),
+  label: external_exports.string().trim().min(1).max(120),
+  category: external_exports.enum(["official", "community"])
+}).strict();
+var ResearchCollectionSchema = external_exports.object({
+  topics: external_exports.array(external_exports.string().trim().min(2).max(100)).min(1).max(10),
+  sources: external_exports.array(ResearchCollectionSourceSchema).min(1).max(4)
+}).strict();
+
+// packages/shared/dist/feature-tracking.js
+var FEATURE_TRACKING_MODES = ["off", "suggest", "assist", "auto"];
+var FEATURE_NOUNS = ["feature", "workstream", "highlight"];
+var FEATURE_CONTEXT_MODES = ["always", "auto", "off"];
+var FeatureTrackingPolicySchema = external_exports.object({
+  mode: external_exports.enum(FEATURE_TRACKING_MODES),
+  source: external_exports.enum(["light", "project", "account"]),
+  noun: external_exports.enum(FEATURE_NOUNS),
+  project_kind: external_exports.enum(["code", "general"]).nullable(),
+  context_mode: external_exports.enum(FEATURE_CONTEXT_MODES)
+});
+
+// packages/shared/dist/feature-system-contracts.js
+var RESOURCE_ATTACHMENT_ROLES = [
+  "report",
+  "screenshot",
+  "log",
+  "output",
+  "reference"
+];
+
+// packages/shared/dist/files.js
+var FileProvenanceSchema = external_exports.object({
+  client: external_exports.enum(["web", "cli", "mcp", "api"]).default("api"),
+  agent_kind: external_exports.string().max(100).optional(),
+  agent_installation_id: external_exports.string().max(200).optional(),
+  session_id: external_exports.string().max(200).optional()
+}).strict();
+var FileUploadPreparedResponseV1Schema = external_exports.object({
+  receipt: ResourceUploadReceiptV2Schema,
+  upload_url: external_exports.string().url().nullable(),
+  upload_headers: external_exports.object({ "content-type": external_exports.string(), "x-upsert": external_exports.literal("false") }).strict()
+}).strict();
+var FileUploadDeduplicatedResponseV1Schema = external_exports.object({
+  version: external_exports.literal(1),
+  state: external_exports.literal("completed"),
+  deduplicated: external_exports.literal(true),
+  resource_id: external_exports.string().uuid(),
+  version_id: external_exports.string().uuid(),
+  sha256: external_exports.string().regex(/^[0-9a-f]{64}$/),
+  document_id: external_exports.string().uuid().optional()
+}).strict();
+var FileUploadPrepareResponseV1Schema = external_exports.union([
+  FileUploadPreparedResponseV1Schema,
+  FileUploadDeduplicatedResponseV1Schema
+]);
+var FileUploadFinalizeResponseV1Schema = external_exports.object({
+  resource_id: external_exports.string().uuid(),
+  version_id: external_exports.string().uuid(),
+  sha256: external_exports.string().regex(/^[0-9a-f]{64}$/),
+  idempotent_replay: external_exports.boolean(),
+  document_id: external_exports.string().uuid().optional()
+}).strict();
+var FileAttachmentHostSchema = external_exports.object({
+  kind: external_exports.enum(["feature", "project_work_item", "flow_stage_run", "thought"]),
+  id: external_exports.string().uuid()
+}).strict();
+var FileAttachmentInputSchema = external_exports.object({
+  host: FileAttachmentHostSchema,
+  pinned_version_id: external_exports.string().uuid().optional(),
+  role: external_exports.enum(RESOURCE_ATTACHMENT_ROLES).default("reference"),
+  caption: external_exports.string().max(500).optional(),
+  provenance: FileProvenanceSchema.default({})
+}).strict();
+var FileAttachmentReceiptSchema = external_exports.object({
+  attachment_id: external_exports.string().uuid(),
+  resource_id: external_exports.string().uuid(),
+  version_id: external_exports.string().uuid()
+}).strict();
+var FileDetachInputSchema = external_exports.object({
+  attachment_id: external_exports.string().uuid(),
+  host: FileAttachmentHostSchema
+}).strict();
+var ResourcePublicLinkWriteSchema = external_exports.discriminatedUnion("action", [
+  external_exports.object({
+    action: external_exports.literal("create"),
+    expires_in_days: external_exports.union([external_exports.literal(1), external_exports.literal(7), external_exports.literal(30)]).default(7),
+    pinned_version_id: external_exports.string().uuid().nullable().optional(),
+    embedded_resource_ids: external_exports.array(external_exports.string().uuid()).max(50).default([]),
+    embedded_resource_versions: external_exports.record(external_exports.string().uuid(), external_exports.string().uuid()).optional()
+  }).strict(),
+  external_exports.object({ action: external_exports.literal("revoke"), id: external_exports.string().uuid() }).strict()
+]);
+var ResourcePublicLinksSchema = external_exports.object({
+  version: external_exports.literal(1),
+  resource_id: external_exports.string().uuid(),
+  token: external_exports.string().nullable(),
+  links: external_exports.array(
+    external_exports.object({
+      id: external_exports.string().uuid(),
+      created_at: external_exports.string(),
+      expires_at: external_exports.string(),
+      revoked_at: external_exports.string().nullable(),
+      pinned_version_id: external_exports.string().uuid().nullable(),
+      embedded_resource_ids: external_exports.array(external_exports.string().uuid()).max(50),
+      embedded_resource_versions: external_exports.record(external_exports.string().uuid(), external_exports.string().uuid())
+    })
+  )
+});
+var ResourcePublicMaterialSchema = external_exports.object({
+  resource: external_exports.object({
+    id: external_exports.string().uuid(),
+    title: external_exports.string(),
+    kind: external_exports.string(),
+    mime_type: external_exports.string(),
+    byte_size: external_exports.number().nonnegative()
+  }),
+  version_id: external_exports.string().uuid(),
+  content: external_exports.string().max(1048576).nullable(),
+  storage_locator: external_exports.object({
+    bucket: external_exports.literal("thought-resource-originals"),
+    path: external_exports.string().min(1).max(1024),
+    original_filename: external_exports.string().nullable()
+  }).nullable(),
+  embedded_resource_ids: external_exports.array(external_exports.string().uuid()).max(50).optional(),
+  expires_at: external_exports.string().optional()
+});
+
+// packages/shared/dist/feature-doc.js
+var FeatureDocNarrativeSchema = external_exports.object({
+  overview: external_exports.string().max(1200),
+  why: external_exports.string().max(1200),
+  how_it_works: external_exports.string().max(1200)
+}).strict();
+
+// packages/shared/dist/file-formats.js
+var KIND_MAX_BYTES = {
+  image: 10 * 1024 * 1024,
+  text: 5 * 1024 * 1024,
+  markdown: 5 * 1024 * 1024,
+  dataset: 5 * 1024 * 1024,
+  pdf: 25 * 1024 * 1024,
+  document: 25 * 1024 * 1024,
+  audio: 25 * 1024 * 1024,
+  video: 25 * 1024 * 1024
+};
+
+// packages/shared/dist/feature-binding.js
+var FeatureCaptureFieldsSchema = external_exports.object({
+  session_id: external_exports.string().trim().min(1).max(256).nullish(),
+  git_branch: external_exports.string().trim().min(1).max(300).nullish(),
+  feature_id: external_exports.string().uuid().nullish()
+});
+function featureBranch(branch) {
+  const value = branch?.trim().replace(/^(refs\/heads\/|refs\/remotes\/[^/]+\/|origin\/)/i, "");
+  return value && !["main", "master", "develop", "trunk", "head"].includes(value.toLowerCase()) ? value : null;
+}
+
+// packages/shared/dist/feature-work.js
+var Receipt = external_exports.object({
+  scanned: external_exports.number().int().nonnegative().max(200),
+  linked: external_exports.number().int().nonnegative().max(200),
+  suggestions: external_exports.array(
+    external_exports.object({
+      work_item_id: external_exports.string().uuid(),
+      feature_id: external_exports.string().uuid(),
+      method: external_exports.enum(["binding", "handoff", "embedding"]),
+      confidence: external_exports.number().min(0).max(1)
+    })
+  ).max(200),
+  next_cursor: external_exports.string().uuid().nullable(),
+  reason: external_exports.string().optional()
+});
 
 // packages/plugin-core/dist/memlin-api-client.js
 init_auth_refusal();
@@ -24507,7 +24720,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.46";
+  cachedAgentVersion = "0.1.47";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -25088,8 +25301,8 @@ var MemlinApiClient = class {
     return this.request("POST", "/workspace-contract/sync", input);
   }
   /** GET /documents/{id} — fetch one doc with body + metadata. */
-  async getDocument(documentId) {
-    return this.request("GET", `/documents/${encodeURIComponent(documentId)}`);
+  async getDocument(documentId, opts = {}) {
+    return this.request("GET", `/documents/${encodeURIComponent(documentId)}`, void 0, opts);
   }
   /** POST /documents/{id}/contract-verification — H12. Record a contract
    *  check. Used by `memlin diff --record`. */
@@ -25148,10 +25361,11 @@ var MemlinApiClient = class {
     return this.request("POST", `/insights/${encodeURIComponent(insightId)}/resolve`, { action });
   }
   /** POST /inbox/{id} — accept or reject a proposal, optionally with the reviewer's reason. */
-  async resolveProposal(proposalId, action, note) {
+  async resolveProposal(proposalId, action, note, feature) {
     return this.request("POST", `/inbox/${encodeURIComponent(proposalId)}`, {
       action,
-      ...note?.trim() ? { note: note.trim() } : {}
+      ...note?.trim() ? { note: note.trim() } : {},
+      ...feature !== void 0 ? { feature } : {}
     });
   }
   async listHandoffs(opts = {}, callOpts = {}) {
@@ -25182,17 +25396,115 @@ var MemlinApiClient = class {
   async createHandoff(input) {
     return this.request("POST", "/handoffs", input);
   }
+  /** Save agent files through the same Library upload contract used by the web app. */
+  /** Exact-version Library metadata; storage locators remain private. */
+  async getFile(resourceId, opts = {}) {
+    const query = opts.versionId ? `?version_id=${encodeURIComponent(opts.versionId)}` : "";
+    return this.request("GET", `/files/${encodeURIComponent(resourceId)}${query}`, void 0, opts);
+  }
+  /** Current permission check for one immutable original; signed URLs are transient. */
+  async getFileContent(resourceId, opts) {
+    return this.request(
+      "GET",
+      `/files/${encodeURIComponent(resourceId)}/content?version_id=${encodeURIComponent(opts.versionId)}`,
+      void 0,
+      opts
+    );
+  }
+  async prepareFileUpload(input, opts = {}) {
+    return FileUploadPrepareResponseV1Schema.parse(
+      await this.request("POST", "/files/uploads", input, { ...opts, requestTimeoutMs: 6e4 })
+    );
+  }
+  async finalizeFileUpload(uploadId, opts = {}) {
+    return FileUploadFinalizeResponseV1Schema.parse(
+      await this.request(
+        "POST",
+        `/files/uploads/${encodeURIComponent(uploadId)}/finalize`,
+        {},
+        { ...opts, requestTimeoutMs: 6e4 }
+      )
+    );
+  }
+  async attachFile(resourceId, input, opts = {}) {
+    return FileAttachmentReceiptSchema.parse(
+      await this.request(
+        "POST",
+        `/files/${encodeURIComponent(resourceId)}/attachments`,
+        FileAttachmentInputSchema.parse(input),
+        opts
+      )
+    );
+  }
+  async detachFile(resourceId, input, opts = {}) {
+    const result = await this.request(
+      "DELETE",
+      `/files/${encodeURIComponent(resourceId)}/attachments`,
+      FileDetachInputSchema.parse(input),
+      opts
+    );
+    if (typeof result.detached !== "boolean") throw new Error("Invalid file detach response");
+    return result;
+  }
   async listFeatures(opts = {}) {
     const qs = new URLSearchParams();
     if (opts.project_id) qs.set("project_id", opts.project_id);
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.request("GET", `/features${suffix}`);
+    if (opts.status) qs.set("status", opts.status);
+    if (opts.q) qs.set("q", opts.q);
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    if (opts.include) qs.set("include", opts.include);
+    if (opts.cursor) qs.set("cursor", opts.cursor);
+    return this.request("GET", `/features${qs.size ? `?${qs}` : ""}`, void 0, {
+      accountId: opts.accountId
+    });
   }
-  async createFeature(input) {
-    return this.request("POST", "/features", input);
+  async createFeature(input, opts = {}) {
+    return this.request("POST", "/features", input, opts);
   }
-  async addFeatureMember(featureId, source) {
-    return this.request("POST", `/features/${featureId}/members`, { source });
+  async addFeatureMember(featureId, source, opts = {}) {
+    return this.request(
+      "POST",
+      `/features/${encodeURIComponent(featureId)}/members`,
+      { source },
+      opts
+    );
+  }
+  async setFeatureBinding(input, opts = {}) {
+    return this.request(
+      input.feature_id === null ? "DELETE" : "PUT",
+      "/features/binding",
+      input,
+      opts
+    );
+  }
+  async getFeatureBinding(input, opts = {}) {
+    const query = new URLSearchParams(input);
+    const result = await this.request("GET", `/features/binding?${query}`, void 0, opts);
+    const value = result;
+    if (!value || typeof value !== "object" || !("binding" in value) || value.auto_link !== void 0 && typeof value.auto_link !== "boolean")
+      throw Error("Feature binding response is invalid.");
+    if (value.binding === null) return { binding: null, auto_link: value.auto_link === true };
+    const binding = FeatureCaptureFieldsSchema.pick({ feature_id: true }).parse(value.binding);
+    if (!binding.feature_id || typeof value.binding?.via !== "string")
+      throw Error("Feature binding response is invalid.");
+    return {
+      binding: { feature_id: binding.feature_id, via: value.binding.via },
+      auto_link: value.auto_link === true
+    };
+  }
+  async getFeature(featureId, opts = {}) {
+    return this.request("GET", `/features/${encodeURIComponent(featureId)}`, void 0, opts);
+  }
+  async updateFeature(featureId, input, opts = {}) {
+    return this.request("PATCH", `/features/${encodeURIComponent(featureId)}`, input, opts);
+  }
+  async removeFeatureMember(featureId, linkId, opts = {}) {
+    return this.request(
+      "DELETE",
+      `/features/${encodeURIComponent(featureId)}/members?link_id=${encodeURIComponent(linkId)}`,
+      void 0,
+      opts
+    );
   }
   /** POST /documents/search — semantic + text. */
   async search(query, opts = {}) {
@@ -26045,6 +26357,114 @@ function effectiveAccountId(input) {
 
 // packages/plugin-core/dist/handoffs.js
 import { createHash } from "node:crypto";
+
+// packages/plugin-core/dist/session-feature.js
+import { execFileSync } from "node:child_process";
+
+// packages/plugin-core/dist/state.js
+init_atomic_rename();
+import { promises as fs6 } from "node:fs";
+import path9 from "node:path";
+import os7 from "node:os";
+import crypto4 from "node:crypto";
+var STATE_FILE = path9.join(os7.homedir(), ".config", "memlin", "state.json");
+var MAX_LAST_RESOLVE_SESSIONS = 32;
+var EMPTY = { documents: {} };
+async function readState() {
+  try {
+    const raw = await fs6.readFile(STATE_FILE, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return { ...EMPTY };
+  }
+}
+async function writeState(state) {
+  await fs6.mkdir(path9.dirname(STATE_FILE), { recursive: true });
+  const tmp = `${STATE_FILE}.${process.pid}.tmp`;
+  await fs6.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
+  await atomicRename(tmp, STATE_FILE);
+}
+var LOCK_DIR = `${STATE_FILE}.lock`;
+var LOCK_STALE_MS = 2e3;
+var LOCK_WAIT_MS = 2e3;
+var LOCK_RETRY_MS = 50;
+async function acquireStateLock() {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  await fs6.mkdir(path9.dirname(LOCK_DIR), { recursive: true }).catch(() => {
+  });
+  for (; ; ) {
+    try {
+      await fs6.mkdir(LOCK_DIR);
+      return true;
+    } catch {
+      try {
+        const stat = await fs6.stat(LOCK_DIR);
+        if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+          await fs6.rmdir(LOCK_DIR).catch(() => {
+          });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() >= deadline) return false;
+      await new Promise((r) => setTimeout(r, LOCK_RETRY_MS));
+    }
+  }
+}
+async function releaseStateLock() {
+  await fs6.rmdir(LOCK_DIR).catch(() => {
+  });
+}
+async function updateState(mutate) {
+  const locked = await acquireStateLock();
+  try {
+    const state = await readState();
+    await mutate(state);
+    await writeState(state);
+    return state;
+  } finally {
+    if (locked) await releaseStateLock();
+  }
+}
+
+// packages/plugin-core/dist/session-feature.js
+var TTL = 14 * 864e5;
+var UUID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function validSession(value) {
+  return !!value && value.length <= 256;
+}
+function cacheSessionFeature(state, identity, active, now = Date.now()) {
+  if (!validSession(identity.sessionId)) return;
+  if (!identity.accountId || !identity.projectId || !active || !UUID2.test(active.id) || !["pin", "handoff", "branch"].includes(active.via)) {
+    delete state.session_features?.[identity.sessionId];
+    return;
+  }
+  const branch = featureBranch(identity.gitBranch);
+  if (active.via === "branch" && !branch) {
+    delete state.session_features?.[identity.sessionId];
+    return;
+  }
+  const entries = state.session_features ??= /* @__PURE__ */ Object.create(null);
+  entries[identity.sessionId] = {
+    feature_id: active.id,
+    title: active.title.slice(0, 100),
+    via: active.via,
+    account_id: identity.accountId,
+    project_id: identity.projectId,
+    git_branch: branch,
+    at: now
+  };
+  Object.entries(entries).sort(([, a], [, b]) => b.at - a.at).slice(MAX_LAST_RESOLVE_SESSIONS).forEach(([id]) => {
+    delete entries[id];
+  });
+}
+async function recordSessionFeature(identity, active) {
+  if (!validSession(identity.sessionId)) return;
+  await updateState((state) => cacheSessionFeature(state, identity, active)).catch(() => void 0);
+}
+
+// packages/plugin-core/dist/handoffs.js
 async function acceptPendingHandoffContext(api, projectId, opts = {}) {
   const targetAgentKind = resolveHost().kind;
   const { handoffs } = await api.listHandoffs(
@@ -26076,9 +26496,20 @@ async function acceptPendingHandoffContext(api, projectId, opts = {}) {
     ...opts.sessionId ? { sessionId: opts.sessionId } : {}
   }).catch(() => null);
   if (!accepted || accepted.id !== handoff.id || accepted.status !== "accepted") return null;
-  return renderHandoffContext(handoff);
+  const binding = accepted.feature_binding;
+  const active = binding?.bound && binding.feature_id && (binding.via === "pin" || binding.via === "handoff" || binding.via === "branch") ? { id: binding.feature_id, title: binding.feature_id, via: binding.via } : null;
+  if (active)
+    await recordSessionFeature(
+      {
+        accountId: opts.accountId,
+        projectId: handoff.project_id,
+        sessionId: opts.sessionId
+      },
+      active
+    );
+  return renderHandoffContext(handoff, active?.id);
 }
-function renderHandoffContext(handoff) {
+function renderHandoffContext(handoff, activeFeatureId) {
   return [
     "<memlin-handoff>",
     "# Assigned handoff accepted by Memlin session start.",
@@ -26087,24 +26518,25 @@ function renderHandoffContext(handoff) {
     handoff.packet_markdown,
     "",
     `handoff_id: ${handoff.id}`,
+    ...activeFeatureId ? [`active_feature_id: ${activeFeatureId}`] : [],
     "</memlin-handoff>"
   ].join("\n");
 }
 
 // packages/plugin-core/dist/heartbeat.js
-import crypto4 from "node:crypto";
-import { promises as fs6 } from "node:fs";
-import os7 from "node:os";
-import path9 from "node:path";
+import crypto5 from "node:crypto";
+import { promises as fs7 } from "node:fs";
+import os8 from "node:os";
+import path10 from "node:path";
 var DEFAULT_THROTTLE_MS = 6e4;
 var HEARTBEAT_REQUEST_TIMEOUT_MS = 750;
 function statePath(cwd, host) {
-  const key = crypto4.createHash("sha256").update(cwd).digest("hex").slice(0, 16);
-  return path9.join(os7.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
+  const key = crypto5.createHash("sha256").update(cwd).digest("hex").slice(0, 16);
+  return path10.join(os8.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
 }
 async function recentlySent(file2, throttleMs) {
   try {
-    const raw = await fs6.readFile(file2, "utf8");
+    const raw = await fs7.readFile(file2, "utf8");
     const parsed = JSON.parse(raw);
     return typeof parsed.sent_at === "number" && Date.now() - parsed.sent_at < throttleMs;
   } catch {
@@ -26134,7 +26566,7 @@ async function recordInstallHeartbeat(cwd, reason, opts = {}) {
       requestTimeoutMs: HEARTBEAT_REQUEST_TIMEOUT_MS,
       maxRetries: 0
     });
-    await fs6.writeFile(file2, JSON.stringify({ sent_at: Date.now(), reason, host }), "utf8");
+    await fs7.writeFile(file2, JSON.stringify({ sent_at: Date.now(), reason, host }), "utf8");
     log(`${host} activity recorded: ${reason}`);
   } catch (err) {
     log(`${host} activity failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -26172,11 +26604,11 @@ function readHookInput() {
 var PULL_PLANS_BIN = fileURLToPath2(import.meta.resolve("@memlin/plugin-core/cli/pull-plans"));
 function gatePath(trajectoryId) {
   const key = trajectoryId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64) || "unknown";
-  return path10.join(os8.tmpdir(), `memlin-windsurf-session-start-${key}`);
+  return path11.join(os9.tmpdir(), `memlin-windsurf-session-start-${key}`);
 }
 async function alreadyRan(trajectoryId) {
   try {
-    await fs7.access(gatePath(trajectoryId));
+    await fs8.access(gatePath(trajectoryId));
     return true;
   } catch {
     return false;
@@ -26184,7 +26616,7 @@ async function alreadyRan(trajectoryId) {
 }
 async function markRan(trajectoryId) {
   try {
-    await fs7.writeFile(gatePath(trajectoryId), JSON.stringify({ at: Date.now() }), "utf8");
+    await fs8.writeFile(gatePath(trajectoryId), JSON.stringify({ at: Date.now() }), "utf8");
   } catch {
   }
 }
