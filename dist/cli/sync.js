@@ -3412,7 +3412,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs12 = __require("fs");
+    var fs13 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3496,7 +3496,7 @@ var require_gray_matter = __commonJS({
       return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs12.readFileSync(filepath, "utf8");
+      const str2 = fs13.readFileSync(filepath, "utf8");
       const file2 = matter3(str2, options2);
       file2.path = filepath;
       return file2;
@@ -4223,7 +4223,7 @@ var init_companion_client = __esm({
 });
 
 // packages/plugin-core/src/cli/sync.ts
-import path17 from "node:path";
+import path18 from "node:path";
 
 // packages/plugin-core/src/light-sync.ts
 import { promises as fs4, constants as constants2 } from "node:fs";
@@ -4708,8 +4708,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path18, errorMaps, issueData } = params;
-  const fullPath = [...path18, ...issueData.path || []];
+  const { data, path: path19, errorMaps, issueData } = params;
+  const fullPath = [...path19, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -4825,11 +4825,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path18, key) {
+  constructor(parent, value, path19, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path18;
+    this._path = path19;
     this._key = key;
   }
   get path() {
@@ -9101,6 +9101,21 @@ var MODEL_PRICES = {
   // $3/$15 on the strength of the old launch announcement — that over-bills
   // every Sonnet 5 turn by 50%.
   "claude-sonnet-5": { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
+  // Opus 5.5 shipped after the 5 pair and is the current default Anthropic
+  // recommends "for most workloads" — which makes it a current Claude Code
+  // default too, and therefore a model that arrives in ingested telemetry
+  // whether or not this app ever requests it. Absent until 2026-09-22, it was
+  // the THIRD time an Opus tier priced as $0: Opus at all (fixed 2026-07-23),
+  // Opus 5 (2026-09-02), and this. The pattern is not "we forgot" — it is that
+  // a new tier is invisible here until someone checks the sheet against the
+  // pricing page, so re-verify on every model launch.
+  //
+  // It is also CHEAPER than the tier it replaces ($4/$20 against Opus 5's
+  // $5/$25) and reads cache at 0.05x rather than the standard 0.1x — the
+  // second entry in this sheet to need the override, and the reason the
+  // override is a field rather than a special case for the 5.1 pair.
+  // Verified 2026-09-22 against https://platform.claude.com/docs/en/about-claude/pricing.
+  "claude-opus-5-5": { inputUsdPerMTok: 4, outputUsdPerMTok: 20, cacheReadMultiplier: 0.05 },
   // Opus 5 was absent until 2026-09-02. The app never requests it, but
   // aggregateTurnTiming prices provider-reported models from ingested Claude
   // Code telemetry, where it is a current default — so every Opus 5 turn was
@@ -9621,19 +9636,19 @@ var ContextManifestV1Schema = external_exports.object({
       location: `linked_contexts.${index}`
     }))
   ];
-  references.forEach(({ ref, path: path18, location }) => {
+  references.forEach(({ ref, path: path19, location }) => {
     const identity = contextReferenceIdentityKey(ref);
     const prior = seen.get(identity);
     if (prior && prior.revision !== ref.revision) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path18,
+        path: path19,
         message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
       });
     } else if (prior && location.startsWith("linked_contexts.")) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path18,
+        path: path19,
         message: `duplicate linked context ${identity}`
       });
     }
@@ -9947,11 +9962,11 @@ var ContextBundleV1Schema = external_exports.object({
         path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
       }))
     ];
-    for (const { ref, path: path18 } of references) {
+    for (const { ref, path: path19 } of references) {
       if (!contextKeys.has(contextReferenceKey(ref))) {
         ctx.addIssue({
           code: external_exports.ZodIssueCode.custom,
-          path: path18,
+          path: path19,
           message: "provider coverage is outside the exact manifest contexts"
         });
       }
@@ -12141,6 +12156,9 @@ var ThoughtHandoffReceiptV2Schema = external_exports.object({
   replayed: external_exports.boolean().optional()
 }).passthrough();
 
+// packages/shared/dist/ops-watch.js
+var OPS_DIAGNOSE_SEV2_AFTER_MS = 15 * 6e4;
+
 // packages/shared/dist/entitlements.js
 var COORDINATION_SELF = [
   "coordination.work_ledger",
@@ -12831,10 +12849,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path18) {
-  if (!path18)
+function getElementAtPath(obj, path19) {
+  if (!path19)
     return obj;
-  return path18.reduce((acc, key) => acc?.[key], obj);
+  return path19.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -13154,11 +13172,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path18, issues) {
+function prefixIssues(path19, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path18);
+    iss.path.unshift(path19);
     return iss;
   });
 }
@@ -13295,7 +13313,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path18 = []) => {
+  const processError = (error41, path19 = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -13305,7 +13323,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path18, ...issue2.path];
+        const fullpath = [...path19, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -13335,9 +13353,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path18) {
+function toDotPath(path19) {
   const segs = [];
-  for (const seg of path18) {
+  for (const seg of path19) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -23995,10 +24013,10 @@ function validateFlowDefinitionSemantics(flow) {
       ],
       ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
     ];
-    targets.forEach(({ target, path: path18 }) => {
+    targets.forEach(({ target, path: path19 }) => {
       if (!isReservedTarget(target) && !stageById.has(target)) {
         issues.push({
-          path: path18,
+          path: path19,
           code: "missing_transition_target",
           message: `transition target ${JSON.stringify(target)} does not exist`
         });
@@ -24028,7 +24046,7 @@ function validateFlowDefinitionSemantics(flow) {
   const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   let hasReachableEnd = false;
-  const visit = (stageId, path18, pathBounds) => {
+  const visit = (stageId, path19, pathBounds) => {
     reachable.add(stageId);
     if (visited.has(stageId)) return;
     visiting.add(stageId);
@@ -24044,7 +24062,7 @@ function validateFlowDefinitionSemantics(flow) {
         ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
         ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
       ];
-      const currentPath = [...path18, stageId];
+      const currentPath = [...path19, stageId];
       for (const edge of edges) {
         const { target } = edge;
         if (target === "$end") {
@@ -24152,18 +24170,18 @@ var FlowPackManifestBaseSchema = external_exports2.object({
   evals: external_exports2.array(ManifestEvalSchema).max(256),
   model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
 }).strict();
-function validateRelativePackPath(path18) {
-  if (path18.startsWith("/") || path18.startsWith("\\")) return "path must be relative";
-  if (/^[A-Za-z]:/.test(path18) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path18)) {
+function validateRelativePackPath(path19) {
+  if (path19.startsWith("/") || path19.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path19) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path19)) {
     return "drive-qualified paths and URI schemes are not allowed";
   }
-  if (/[\u0000-\u001f\u007f]/.test(path18)) return "control characters are not allowed";
-  if (/%(?:2e|2f|5c)/i.test(path18)) return "encoded path traversal is not allowed";
-  if (path18.includes("\\")) return "path must use forward slashes";
-  if (path18.split("/").some((segment) => segment === ".." || segment === ".")) {
+  if (/[\u0000-\u001f\u007f]/.test(path19)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path19)) return "encoded path traversal is not allowed";
+  if (path19.includes("\\")) return "path must use forward slashes";
+  if (path19.split("/").some((segment) => segment === ".." || segment === ".")) {
     return "path traversal and dot segments are not allowed";
   }
-  if (path18.split("/").some((segment) => segment.length === 0)) {
+  if (path19.split("/").some((segment) => segment.length === 0)) {
     return "path cannot contain empty segments";
   }
   return null;
@@ -24210,22 +24228,22 @@ function validateFlowPackManifestSemantics(manifest) {
       issues
     );
     role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
-      const path18 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      const path19 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
       if (comparedRole === role.id) {
         issues.push({
-          path: path18,
+          path: path19,
           code: "self_referential_model_independence",
           message: "a model role cannot require independence from itself"
         });
       } else if (!modelRolesById.has(comparedRole)) {
         issues.push({
-          path: path18,
+          path: path19,
           code: "missing_independence_model_role",
           message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
         });
       } else if (modelRolesById.get(comparedRole)?.independence !== null) {
         issues.push({
-          path: path18,
+          path: path19,
           code: "independence_reference_not_author",
           message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
         });
@@ -25283,14 +25301,17 @@ async function archiveDestination(trackedRelPath) {
   }
   return `${stem}.${Date.now()}${ext}`;
 }
-async function applyPullToLocal(docs, state, now, rootOverride) {
+async function applyPullToLocal(docs, state, now, rootOverride, opts = {}) {
+  const reconcileMissing = opts.reconcileMissing ?? true;
   const out = {
     written: [],
     unchanged: [],
     removed: [],
     archived: [],
     keptEdited: [],
-    citations: {}
+    citations: {},
+    reconciliationSkipped: !reconcileMissing,
+    collisions: {}
   };
   const currentPaths = /* @__PURE__ */ new Set();
   const root = rootOverride ?? resolveHost().homeDir();
@@ -25298,6 +25319,9 @@ async function applyPullToLocal(docs, state, now, rootOverride) {
     if (d.kind === "brand_guidelines") continue;
     if (d.kind === "feedback") continue;
     const localPath = inferLocalPath(d.kind, d.title, d.path);
+    if (currentPaths.has(localPath)) {
+      out.collisions[localPath] = (out.collisions[localPath] ?? 1) + 1;
+    }
     currentPaths.add(localPath);
     const full = path9.join(root, localPath);
     const contentHash = hash2(d.content);
@@ -25323,6 +25347,7 @@ async function applyPullToLocal(docs, state, now, rootOverride) {
     };
   }
   for (const tracked of Object.keys(state.documents)) {
+    if (!reconcileMissing) break;
     if (currentPaths.has(tracked)) continue;
     const full = path9.join(root, tracked);
     if (existsSync3(full)) {
@@ -25367,9 +25392,9 @@ function stateRow(d, h, at) {
 }
 
 // packages/plugin-core/src/client.ts
-import { promises as fs9 } from "node:fs";
-import path12 from "node:path";
-import os8 from "node:os";
+import { promises as fs10 } from "node:fs";
+import path13 from "node:path";
+import os9 from "node:os";
 import { randomUUID as randomUUID4 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
@@ -25586,17 +25611,122 @@ init_atomic_rename();
 init_auth_refusal();
 import { readFileSync as readFileSync2 } from "node:fs";
 import crypto4 from "node:crypto";
-import os7 from "node:os";
+import os8 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// packages/plugin-core/src/private-mode.ts
+init_atomic_rename();
+import { promises as fs9 } from "node:fs";
+import path12 from "node:path";
+import os7 from "node:os";
+var PRIVATE_HEADER = "Memlin-Private";
+var PRIVATE_UNTIL_HEADER = "Memlin-Private-Until";
+var PRIVATE_TTL_MS = 24 * 60 * 60 * 1e3;
+var PRIVATE_ALLOWED_WRITES = [
+  "POST /resolve",
+  "POST /projects/resolve",
+  "POST /deploy-guard"
+];
+var DENIED_TTL_MS = 10 * 60 * 1e3;
+var FLOOR_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+function stateFile() {
+  return path12.join(os7.homedir(), ".config", "memlin", "private-sessions.json");
+}
+async function readPrivateState() {
+  try {
+    const parsed = JSON.parse(await fs9.readFile(stateFile(), "utf8"));
+    return { ...parsed, sessions: parsed.sessions ?? {} };
+  } catch {
+    return { sessions: {} };
+  }
+}
+async function writePrivateState(state, now) {
+  for (const [id, entry] of Object.entries(state.sessions)) {
+    if (entry.expires_at <= now) delete state.sessions[id];
+  }
+  for (const [id, entry] of Object.entries(state.denied ?? {})) {
+    if (now - entry.at > DENIED_TTL_MS) delete state.denied?.[id];
+  }
+  for (const [id, entry] of Object.entries(state.accounts ?? {})) {
+    if (entry.until !== null && entry.until <= now) delete state.accounts?.[id];
+  }
+  for (const [id, floor] of Object.entries(state.floors ?? {})) {
+    if (now - floor.at > FLOOR_TTL_MS) delete state.floors?.[id];
+  }
+  const file2 = stateFile();
+  await fs9.mkdir(path12.dirname(file2), { recursive: true });
+  const tmp = `${file2}.${process.pid}.${Date.now()}.tmp`;
+  await fs9.writeFile(tmp, JSON.stringify(state, null, 2), { mode: 384 });
+  await atomicRename(tmp, file2);
+}
+function envPrivate() {
+  const v = process.env.MEMLIN_PRIVATE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
+}
+function currentSessionId() {
+  return process.env.MEMLIN_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || null;
+}
+async function isPrivateSession(sessionId = currentSessionId(), now = Date.now(), accountId = null) {
+  const state = await readPrivateState();
+  if (accountId && accountDenied(state, accountId, now)) return false;
+  if (envPrivate()) return true;
+  if (accountId && accountPrivateActive(state, accountId, now)) return true;
+  if (!sessionId) return false;
+  const entry = state.sessions[sessionId];
+  return Boolean(entry && entry.expires_at > now);
+}
+function accountDenied(state, accountId, now) {
+  const entry = state.denied?.[accountId];
+  return Boolean(entry && now - entry.at <= DENIED_TTL_MS);
+}
+function accountPrivateActive(state, accountId, now) {
+  const entry = state.accounts?.[accountId];
+  return Boolean(entry && (entry.until === null || entry.until > now));
+}
+async function notePrivateUntil(accountId, header, now = Date.now()) {
+  const state = await readPrivateState();
+  if (header === "denied") {
+    const prev2 = state.denied?.[accountId];
+    if (prev2 && now - prev2.at < 6e4 && !state.accounts?.[accountId]) return;
+    state.denied = { ...state.denied, [accountId]: { at: now } };
+    delete state.accounts?.[accountId];
+    await writePrivateState(state, now);
+    return;
+  }
+  let until;
+  if (!header || header === "off") until = void 0;
+  else if (header === "infinity") until = null;
+  else {
+    const at = Date.parse(header);
+    until = Number.isFinite(at) && at > now ? at : void 0;
+  }
+  if (until !== void 0 && state.denied?.[accountId]) delete state.denied[accountId];
+  const prev = state.accounts?.[accountId];
+  if (until === void 0) {
+    if (!prev) return;
+    delete state.accounts[accountId];
+  } else {
+    if (prev && prev.until === until) return;
+    state.accounts = { ...state.accounts, [accountId]: { until, seen_at: now } };
+  }
+  await writePrivateState(state, now);
+}
+function isPrivateAllowedWrite(method, pathAndQuery) {
+  if (method === "GET") return true;
+  const pathOnly = pathAndQuery.split("?")[0];
+  return PRIVATE_ALLOWED_WRITES.includes(`${method} ${pathOnly}`);
+}
+
+// packages/plugin-core/src/memlin-api-client.ts
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os7.hostname() || "unknown";
+  return process.env.MEMLIN_AGENT_DEVICE || os8.hostname() || "unknown";
 }
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.47";
+  cachedAgentVersion = "0.1.48";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -25738,6 +25868,7 @@ async function* parseNdjsonEvents(body) {
     reader.releaseLock();
   }
 }
+var LIST_MAX_ROWS = 1e3;
 var MemlinApiClient = class {
   constructor(cfg) {
     this.cfg = cfg;
@@ -25746,6 +25877,9 @@ var MemlinApiClient = class {
   /** The configured account (the light-gate cache key when a call names none). */
   get defaultAccountId() {
     return this.cfg.accountId;
+  }
+  nativeSessionHook(input, opts) {
+    return this.request("POST", "/agent-control/hook", input, { ...opts, agentVersion: agentVersion() });
   }
   // ---------- low-level ----------
   async authHeaders(includeAccount = true, override = {}) {
@@ -25758,16 +25892,18 @@ var MemlinApiClient = class {
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: version2,
       [AGENT_CAPABILITIES_HEADER]: (override.agentKind ? AGENT_EXPECTED_CAPABILITIES[kind] : agentCapabilities()).join(","),
-      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os7.platform(),
-      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os7.arch()
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os8.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os8.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h["Memlin-Account-Id"] = this.cfg.accountId;
     }
+    if (this.cfg.privateSession) h[PRIVATE_HEADER] = "1";
     return h;
   }
   async request(method, pathAndQuery, body, opts = {}) {
     const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
+    this.throwIfPrivateWrite(method, pathAndQuery);
     const refusalAccountId = this.refusalAccountId(opts.includeAccount ?? true, opts.accountId);
     await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
     const baseHeaders = await this.authHeaders(opts.includeAccount ?? true, opts);
@@ -25817,13 +25953,21 @@ var MemlinApiClient = class {
         }
       }
       const refusalCode = await this.noteAuthOutcome(res.status, parsed, refusalAccountId);
+      const privateRefusal = parsed?.code === "private_mode";
+      if (refusalAccountId && (res.ok || privateRefusal)) {
+        await notePrivateUntil(
+          refusalAccountId,
+          res.headers.get(PRIVATE_UNTIL_HEADER) ?? (parsed?.private_until ?? null)
+        ).catch(() => {
+        });
+      }
       if (!res.ok) {
         const serverError = parsed?.error;
         const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
         throw new MemlinApiError(
           `${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`,
           res.status,
-          refusalCode
+          refusalCode ?? (privateRefusal ? "private_mode" : void 0)
         );
       }
       return parsed;
@@ -25841,6 +25985,17 @@ var MemlinApiClient = class {
     return includeAccount && this.cfg.accountId ? this.cfg.accountId : null;
   }
   /** Zero-network short circuit while a membership refusal is fresh. */
+  throwIfPrivateWrite(method, pathAndQuery) {
+    if (!this.cfg.privateSession || isPrivateAllowedWrite(method, pathAndQuery)) return;
+    if (method === "POST" && pathAndQuery.split("?")[0] === "/resolve/v2") {
+      throw new MemlinApiError("POST /resolve/v2 \u2192 404: progressive resolve unavailable", 404);
+    }
+    throw new MemlinApiError(
+      `${method} ${pathAndQuery}: skipped \u2014 Memlin private mode is on for this session (turn it off with /memlin-private off)`,
+      423,
+      "private_mode"
+    );
+  }
   async throwIfAuthRefused(method, pathAndQuery, accountId) {
     if (!this.cfg.authRefusal || !accountId) return;
     const entry = await readAuthRefusal(accountId, this.cfg.authRefusal.binding);
@@ -25881,6 +26036,7 @@ var MemlinApiClient = class {
   }
   async openResolveV2Stream(method, pathAndQuery, body, opts = {}) {
     const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
+    this.throwIfPrivateWrite(method, pathAndQuery);
     const refusalAccountId = this.refusalAccountId(true, opts.accountId);
     await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
     const headers = await this.authHeaders(true, opts);
@@ -26569,6 +26725,14 @@ var MemlinApiClient = class {
   async setEnforceDoneDeployed(enabled, opts = {}) {
     return this.request("PUT", "/account/enforce-done-deployed", { enabled }, opts);
   }
+  /** GET /account/private-mode — the caller's own private mode in this account. */
+  async getPrivateMode(opts = {}) {
+    return this.request("GET", "/account/private-mode", void 0, opts);
+  }
+  /** PUT /account/private-mode — until: ISO timestamp, 'infinity', or null (off). */
+  async setPrivateMode(until, opts = {}) {
+    return this.request("PUT", "/account/private-mode", { until }, opts);
+  }
   /**
    * POST /deploy-guard — acquire, release, status, or queue the per-project
    * deploy lease / waiter line.
@@ -26937,13 +27101,13 @@ function resolveApiUrl() {
 init_workspace_binding();
 init_auth_refusal();
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path12.join(os8.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path13.join(os9.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path12.join(os8.homedir(), ".config", "memlin");
-var TOKEN_FILE = path12.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path13.join(os9.homedir(), ".config", "memlin");
+var TOKEN_FILE = path13.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
-    const raw = await fs9.readFile(globalConfigFilePath(), "utf8");
+    const raw = await fs10.readFile(globalConfigFilePath(), "utf8");
     const parsed = JSON.parse(raw);
     if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
       return null;
@@ -26993,13 +27157,15 @@ async function getApi(opts = {}) {
     overlay
   );
   const apiUrl = process.env.MEMLIN_API_URL?.trim() || config2.api_url || resolveApiUrl();
+  const privateSession = await isPrivateSession(void 0, void 0, config2.account_id);
   const api = new MemlinApiClient({
     baseUrl: apiUrl,
     getAccessToken: () => getIdentityBoundAccessToken(config2),
     accountId: config2.account_id,
-    authRefusal: { binding: workspaceRoot, accountName: workspaceAccountName }
+    authRefusal: { binding: workspaceRoot, accountName: workspaceAccountName },
+    privateSession
   });
-  return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName };
+  return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName, privateSession };
 }
 function applyWorkspaceOverlay(config2, overlay) {
   if (!overlay) return { workspaceBound: false, workspaceRoot: null, workspaceAccountName: null };
@@ -27015,16 +27181,16 @@ function applyWorkspaceOverlay(config2, overlay) {
 }
 
 // packages/plugin-core/src/trigger-memories.ts
-import { promises as fs10 } from "node:fs";
-import os11 from "node:os";
-import path15 from "node:path";
+import { promises as fs11 } from "node:fs";
+import os12 from "node:os";
+import path16 from "node:path";
 init_atomic_rename();
 
 // packages/plugin-core/src/edit-activity.ts
 import { execSync } from "node:child_process";
 import { realpathSync as realpathSync2 } from "node:fs";
-import path14 from "node:path";
-import os10 from "node:os";
+import path15 from "node:path";
+import os11 from "node:os";
 
 // packages/plugin-core/src/edit-broker-local.ts
 import crypto5 from "node:crypto";
@@ -27039,14 +27205,14 @@ import {
   rmSync,
   writeFileSync
 } from "node:fs";
-import os9 from "node:os";
-import path13 from "node:path";
+import os10 from "node:os";
+import path14 from "node:path";
 import { execFileSync } from "node:child_process";
 
 // packages/plugin-core/src/trigger-memories.ts
 init_workspace_binding();
 function compiledTriggersPath() {
-  return path15.join(os11.homedir(), ".config", "memlin", "triggers.json");
+  return path16.join(os12.homedir(), ".config", "memlin", "triggers.json");
 }
 function decodeStoredEntry(raw, fallbackId) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -27074,7 +27240,7 @@ async function readCompiledTriggers(file2 = compiledTriggersPath()) {
   const empty = { version: 1, workspaces: {} };
   let raw;
   try {
-    raw = await fs10.readFile(file2, "utf8");
+    raw = await fs11.readFile(file2, "utf8");
   } catch {
     return empty;
   }
@@ -27102,6 +27268,13 @@ async function readCompiledTriggers(file2 = compiledTriggersPath()) {
   }
 }
 var COMPILED_MESSAGE_MAX = 700;
+async function refreshWorkspaceTriggers(args) {
+  const docs = await args.api.listDocuments(
+    { kinds: ["memory"], has_trigger: true, project_id: args.projectId },
+    args.callOpts ?? {}
+  );
+  return compileWorkspaceTriggers({ ...args, docs });
+}
 async function compileWorkspaceTriggers(args) {
   const file2 = args.file ?? compiledTriggersPath();
   const root = await canonicalRoot(args.workspaceRoot);
@@ -27135,9 +27308,9 @@ async function compileWorkspaceTriggers(args) {
       triggers
     };
   }
-  await fs10.mkdir(path15.dirname(file2), { recursive: true });
+  await fs11.mkdir(path16.dirname(file2), { recursive: true });
   const tmp = `${file2}.${process.pid}.tmp`;
-  await fs10.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
+  await fs11.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
   await atomicRename(tmp, file2);
   return { compiled: triggers.length, skipped };
 }
@@ -27161,9 +27334,9 @@ async function workspaceRootFor(cwd) {
   }
 }
 async function canonicalRoot(dir) {
-  const resolved = path15.resolve(dir);
+  const resolved = path16.resolve(dir);
   try {
-    return await fs10.realpath(resolved);
+    return await fs11.realpath(resolved);
   } catch {
     return resolved;
   }
@@ -27171,11 +27344,11 @@ async function canonicalRoot(dir) {
 
 // packages/plugin-core/src/resolver-skill.ts
 import { createHash as createHash2 } from "node:crypto";
-import { promises as fs11 } from "node:fs";
-import os12 from "node:os";
-import path16 from "node:path";
-var RESOLVER_SKILL_DIR = path16.join(os12.homedir(), ".claude", "skills", "memlin");
-var RESOLVER_SKILL_FILE = path16.join(RESOLVER_SKILL_DIR, "SKILL.md");
+import { promises as fs12 } from "node:fs";
+import os13 from "node:os";
+import path17 from "node:path";
+var RESOLVER_SKILL_DIR = path17.join(os13.homedir(), ".claude", "skills", "memlin");
+var RESOLVER_SKILL_FILE = path17.join(RESOLVER_SKILL_DIR, "SKILL.md");
 var LEGACY_RESOLVER_SKILL_HASHES = [
   // v1: 2026-06-09 → 2026-06-17. Before the "Writing your own memories"
   // section was added.
@@ -27185,7 +27358,7 @@ async function ensureResolverSkill() {
   try {
     let existing = null;
     try {
-      existing = await fs11.readFile(RESOLVER_SKILL_FILE, "utf8");
+      existing = await fs12.readFile(RESOLVER_SKILL_FILE, "utf8");
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
@@ -27197,11 +27370,11 @@ async function ensureResolverSkill() {
       if (!LEGACY_RESOLVER_SKILL_HASHES.includes(hash3)) {
         return { status: "kept", path: RESOLVER_SKILL_FILE };
       }
-      await fs11.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+      await fs12.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
       return { status: "upgraded", path: RESOLVER_SKILL_FILE };
     }
-    await fs11.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
-    await fs11.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
+    await fs12.mkdir(RESOLVER_SKILL_DIR, { recursive: true });
+    await fs12.writeFile(RESOLVER_SKILL_FILE, RESOLVER_SKILL_MD, "utf8");
     return { status: "installed", path: RESOLVER_SKILL_FILE };
   } catch (e) {
     return {
@@ -27372,7 +27545,15 @@ async function main() {
     project_id: resolved.project_id
   });
   const remote = [...m1, ...m2];
-  const result = await applyPullToLocal(remote, state, now);
+  const listTruncated = m1.length >= LIST_MAX_ROWS || m2.length >= LIST_MAX_ROWS;
+  const result = await applyPullToLocal(remote, state, now, void 0, {
+    reconcileMissing: !listTruncated
+  });
+  if (result.reconciliationSkipped) {
+    console.log(
+      `  \u26A0 server returned its maximum of ${LIST_MAX_ROWS} documents \u2014 the list is truncated, so nothing was archived this run.`
+    );
+  }
   for (const p of result.written) {
     console.log(`  \u2193 ${p}`);
     const cite = result.citations[p];
@@ -27386,11 +27567,11 @@ async function main() {
   for (const p of result.keptEdited) console.log(`  \u2022 ${p} (kept \u2014 locally edited)`);
   await writeState(state);
   try {
-    const compiled = await compileWorkspaceTriggers({
+    const compiled = await refreshWorkspaceTriggers({
+      api,
       workspaceRoot: await workspaceRootFor(runtimeCwd()),
       accountId: resolved.account_id ?? config2.account_id,
-      projectId: resolved.project_id,
-      docs: m1
+      projectId: resolved.project_id
     });
     if (compiled.compiled > 0 || compiled.skipped > 0) {
       console.log(
@@ -27424,7 +27605,7 @@ function inferTitle(relPath, content) {
     const name = m[1].split("\n").find((l) => l.startsWith("name:"));
     if (name) return name.replace(/^name:\s*/, "").trim();
   }
-  return path17.basename(relPath, path17.extname(relPath));
+  return path18.basename(relPath, path18.extname(relPath));
 }
 main().catch((err) => {
   console.error("memlin sync failed:", err instanceof Error ? err.message : err);

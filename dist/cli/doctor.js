@@ -4110,7 +4110,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs8 = __require("fs");
+    var fs9 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -4194,7 +4194,7 @@ var require_gray_matter = __commonJS({
       return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs8.readFileSync(filepath, "utf8");
+      const str2 = fs9.readFileSync(filepath, "utf8");
       const file2 = matter3(str2, options2);
       file2.path = filepath;
       return file2;
@@ -4223,9 +4223,9 @@ var require_gray_matter = __commonJS({
 });
 
 // packages/plugin-core/src/cli/doctor.ts
-import { promises as fs7 } from "node:fs";
-import path10 from "node:path";
-import os8 from "node:os";
+import { promises as fs8 } from "node:fs";
+import path11 from "node:path";
+import os9 from "node:os";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // packages/plugin-core/src/project-resolver.ts
@@ -4623,9 +4623,9 @@ function runCliMain(main2, onError) {
 }
 
 // packages/plugin-core/src/client.ts
-import { promises as fs5 } from "node:fs";
-import path8 from "node:path";
-import os6 from "node:os";
+import { promises as fs6 } from "node:fs";
+import path9 from "node:path";
+import os7 from "node:os";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
@@ -5316,8 +5316,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path11, errorMaps, issueData } = params;
-  const fullPath = [...path11, ...issueData.path || []];
+  const { data, path: path12, errorMaps, issueData } = params;
+  const fullPath = [...path12, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5433,11 +5433,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path11, key) {
+  constructor(parent, value, path12, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path11;
+    this._path = path12;
     this._key = key;
   }
   get path() {
@@ -9473,6 +9473,21 @@ var MODEL_PRICES = {
   // $3/$15 on the strength of the old launch announcement — that over-bills
   // every Sonnet 5 turn by 50%.
   "claude-sonnet-5": { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
+  // Opus 5.5 shipped after the 5 pair and is the current default Anthropic
+  // recommends "for most workloads" — which makes it a current Claude Code
+  // default too, and therefore a model that arrives in ingested telemetry
+  // whether or not this app ever requests it. Absent until 2026-09-22, it was
+  // the THIRD time an Opus tier priced as $0: Opus at all (fixed 2026-07-23),
+  // Opus 5 (2026-09-02), and this. The pattern is not "we forgot" — it is that
+  // a new tier is invisible here until someone checks the sheet against the
+  // pricing page, so re-verify on every model launch.
+  //
+  // It is also CHEAPER than the tier it replaces ($4/$20 against Opus 5's
+  // $5/$25) and reads cache at 0.05x rather than the standard 0.1x — the
+  // second entry in this sheet to need the override, and the reason the
+  // override is a field rather than a special case for the 5.1 pair.
+  // Verified 2026-09-22 against https://platform.claude.com/docs/en/about-claude/pricing.
+  "claude-opus-5-5": { inputUsdPerMTok: 4, outputUsdPerMTok: 20, cacheReadMultiplier: 0.05 },
   // Opus 5 was absent until 2026-09-02. The app never requests it, but
   // aggregateTurnTiming prices provider-reported models from ingested Claude
   // Code telemetry, where it is a current default — so every Opus 5 turn was
@@ -9990,19 +10005,19 @@ var ContextManifestV1Schema = external_exports.object({
       location: `linked_contexts.${index}`
     }))
   ];
-  references.forEach(({ ref, path: path11, location }) => {
+  references.forEach(({ ref, path: path12, location }) => {
     const identity = contextReferenceIdentityKey(ref);
     const prior = seen.get(identity);
     if (prior && prior.revision !== ref.revision) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path11,
+        path: path12,
         message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
       });
     } else if (prior && location.startsWith("linked_contexts.")) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path11,
+        path: path12,
         message: `duplicate linked context ${identity}`
       });
     }
@@ -10316,11 +10331,11 @@ var ContextBundleV1Schema = external_exports.object({
         path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
       }))
     ];
-    for (const { ref, path: path11 } of references) {
+    for (const { ref, path: path12 } of references) {
       if (!contextKeys.has(contextReferenceKey(ref))) {
         ctx.addIssue({
           code: external_exports.ZodIssueCode.custom,
-          path: path11,
+          path: path12,
           message: "provider coverage is outside the exact manifest contexts"
         });
       }
@@ -12510,6 +12525,9 @@ var ThoughtHandoffReceiptV2Schema = external_exports.object({
   replayed: external_exports.boolean().optional()
 }).passthrough();
 
+// packages/shared/dist/ops-watch.js
+var OPS_DIAGNOSE_SEV2_AFTER_MS = 15 * 6e4;
+
 // packages/shared/dist/entitlements.js
 var COORDINATION_SELF = [
   "coordination.work_ledger",
@@ -13200,10 +13218,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path11) {
-  if (!path11)
+function getElementAtPath(obj, path12) {
+  if (!path12)
     return obj;
-  return path11.reduce((acc, key) => acc?.[key], obj);
+  return path12.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -13523,11 +13541,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path11, issues) {
+function prefixIssues(path12, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path11);
+    iss.path.unshift(path12);
     return iss;
   });
 }
@@ -13664,7 +13682,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path11 = []) => {
+  const processError = (error41, path12 = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -13674,7 +13692,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path11, ...issue2.path];
+        const fullpath = [...path12, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -13704,9 +13722,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path11) {
+function toDotPath(path12) {
   const segs = [];
-  for (const seg of path11) {
+  for (const seg of path12) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -24364,10 +24382,10 @@ function validateFlowDefinitionSemantics(flow) {
       ],
       ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
     ];
-    targets.forEach(({ target, path: path11 }) => {
+    targets.forEach(({ target, path: path12 }) => {
       if (!isReservedTarget(target) && !stageById.has(target)) {
         issues.push({
-          path: path11,
+          path: path12,
           code: "missing_transition_target",
           message: `transition target ${JSON.stringify(target)} does not exist`
         });
@@ -24397,7 +24415,7 @@ function validateFlowDefinitionSemantics(flow) {
   const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   let hasReachableEnd = false;
-  const visit = (stageId, path11, pathBounds) => {
+  const visit = (stageId, path12, pathBounds) => {
     reachable.add(stageId);
     if (visited.has(stageId)) return;
     visiting.add(stageId);
@@ -24413,7 +24431,7 @@ function validateFlowDefinitionSemantics(flow) {
         ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
         ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
       ];
-      const currentPath = [...path11, stageId];
+      const currentPath = [...path12, stageId];
       for (const edge of edges) {
         const { target } = edge;
         if (target === "$end") {
@@ -24521,18 +24539,18 @@ var FlowPackManifestBaseSchema = external_exports2.object({
   evals: external_exports2.array(ManifestEvalSchema).max(256),
   model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
 }).strict();
-function validateRelativePackPath(path11) {
-  if (path11.startsWith("/") || path11.startsWith("\\")) return "path must be relative";
-  if (/^[A-Za-z]:/.test(path11) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path11)) {
+function validateRelativePackPath(path12) {
+  if (path12.startsWith("/") || path12.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path12) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path12)) {
     return "drive-qualified paths and URI schemes are not allowed";
   }
-  if (/[\u0000-\u001f\u007f]/.test(path11)) return "control characters are not allowed";
-  if (/%(?:2e|2f|5c)/i.test(path11)) return "encoded path traversal is not allowed";
-  if (path11.includes("\\")) return "path must use forward slashes";
-  if (path11.split("/").some((segment) => segment === ".." || segment === ".")) {
+  if (/[\u0000-\u001f\u007f]/.test(path12)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path12)) return "encoded path traversal is not allowed";
+  if (path12.includes("\\")) return "path must use forward slashes";
+  if (path12.split("/").some((segment) => segment === ".." || segment === ".")) {
     return "path traversal and dot segments are not allowed";
   }
-  if (path11.split("/").some((segment) => segment.length === 0)) {
+  if (path12.split("/").some((segment) => segment.length === 0)) {
     return "path cannot contain empty segments";
   }
   return null;
@@ -24579,22 +24597,22 @@ function validateFlowPackManifestSemantics(manifest) {
       issues
     );
     role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
-      const path11 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      const path12 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
       if (comparedRole === role.id) {
         issues.push({
-          path: path11,
+          path: path12,
           code: "self_referential_model_independence",
           message: "a model role cannot require independence from itself"
         });
       } else if (!modelRolesById.has(comparedRole)) {
         issues.push({
-          path: path11,
+          path: path12,
           code: "missing_independence_model_role",
           message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
         });
       } else if (modelRolesById.get(comparedRole)?.independence !== null) {
         issues.push({
-          path: path11,
+          path: path12,
           code: "independence_reference_not_author",
           message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
         });
@@ -24860,17 +24878,122 @@ var Receipt = external_exports.object({
 init_auth_refusal();
 import { readFileSync as readFileSync2 } from "node:fs";
 import crypto3 from "node:crypto";
-import os5 from "node:os";
+import os6 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// packages/plugin-core/src/private-mode.ts
+init_atomic_rename();
+import { promises as fs5 } from "node:fs";
+import path8 from "node:path";
+import os5 from "node:os";
+var PRIVATE_HEADER = "Memlin-Private";
+var PRIVATE_UNTIL_HEADER = "Memlin-Private-Until";
+var PRIVATE_TTL_MS = 24 * 60 * 60 * 1e3;
+var PRIVATE_ALLOWED_WRITES = [
+  "POST /resolve",
+  "POST /projects/resolve",
+  "POST /deploy-guard"
+];
+var DENIED_TTL_MS = 10 * 60 * 1e3;
+var FLOOR_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+function stateFile() {
+  return path8.join(os5.homedir(), ".config", "memlin", "private-sessions.json");
+}
+async function readPrivateState() {
+  try {
+    const parsed = JSON.parse(await fs5.readFile(stateFile(), "utf8"));
+    return { ...parsed, sessions: parsed.sessions ?? {} };
+  } catch {
+    return { sessions: {} };
+  }
+}
+async function writePrivateState(state, now) {
+  for (const [id, entry] of Object.entries(state.sessions)) {
+    if (entry.expires_at <= now) delete state.sessions[id];
+  }
+  for (const [id, entry] of Object.entries(state.denied ?? {})) {
+    if (now - entry.at > DENIED_TTL_MS) delete state.denied?.[id];
+  }
+  for (const [id, entry] of Object.entries(state.accounts ?? {})) {
+    if (entry.until !== null && entry.until <= now) delete state.accounts?.[id];
+  }
+  for (const [id, floor] of Object.entries(state.floors ?? {})) {
+    if (now - floor.at > FLOOR_TTL_MS) delete state.floors?.[id];
+  }
+  const file2 = stateFile();
+  await fs5.mkdir(path8.dirname(file2), { recursive: true });
+  const tmp = `${file2}.${process.pid}.${Date.now()}.tmp`;
+  await fs5.writeFile(tmp, JSON.stringify(state, null, 2), { mode: 384 });
+  await atomicRename(tmp, file2);
+}
+function envPrivate() {
+  const v = process.env.MEMLIN_PRIVATE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
+}
+function currentSessionId() {
+  return process.env.MEMLIN_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || null;
+}
+async function isPrivateSession(sessionId = currentSessionId(), now = Date.now(), accountId = null) {
+  const state = await readPrivateState();
+  if (accountId && accountDenied(state, accountId, now)) return false;
+  if (envPrivate()) return true;
+  if (accountId && accountPrivateActive(state, accountId, now)) return true;
+  if (!sessionId) return false;
+  const entry = state.sessions[sessionId];
+  return Boolean(entry && entry.expires_at > now);
+}
+function accountDenied(state, accountId, now) {
+  const entry = state.denied?.[accountId];
+  return Boolean(entry && now - entry.at <= DENIED_TTL_MS);
+}
+function accountPrivateActive(state, accountId, now) {
+  const entry = state.accounts?.[accountId];
+  return Boolean(entry && (entry.until === null || entry.until > now));
+}
+async function notePrivateUntil(accountId, header, now = Date.now()) {
+  const state = await readPrivateState();
+  if (header === "denied") {
+    const prev2 = state.denied?.[accountId];
+    if (prev2 && now - prev2.at < 6e4 && !state.accounts?.[accountId]) return;
+    state.denied = { ...state.denied, [accountId]: { at: now } };
+    delete state.accounts?.[accountId];
+    await writePrivateState(state, now);
+    return;
+  }
+  let until;
+  if (!header || header === "off") until = void 0;
+  else if (header === "infinity") until = null;
+  else {
+    const at = Date.parse(header);
+    until = Number.isFinite(at) && at > now ? at : void 0;
+  }
+  if (until !== void 0 && state.denied?.[accountId]) delete state.denied[accountId];
+  const prev = state.accounts?.[accountId];
+  if (until === void 0) {
+    if (!prev) return;
+    delete state.accounts[accountId];
+  } else {
+    if (prev && prev.until === until) return;
+    state.accounts = { ...state.accounts, [accountId]: { until, seen_at: now } };
+  }
+  await writePrivateState(state, now);
+}
+function isPrivateAllowedWrite(method, pathAndQuery) {
+  if (method === "GET") return true;
+  const pathOnly = pathAndQuery.split("?")[0];
+  return PRIVATE_ALLOWED_WRITES.includes(`${method} ${pathOnly}`);
+}
+
+// packages/plugin-core/src/memlin-api-client.ts
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os5.hostname() || "unknown";
+  return process.env.MEMLIN_AGENT_DEVICE || os6.hostname() || "unknown";
 }
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.47";
+  cachedAgentVersion = "0.1.48";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -25021,6 +25144,9 @@ var MemlinApiClient = class {
   get defaultAccountId() {
     return this.cfg.accountId;
   }
+  nativeSessionHook(input, opts) {
+    return this.request("POST", "/agent-control/hook", input, { ...opts, agentVersion: agentVersion() });
+  }
   // ---------- low-level ----------
   async authHeaders(includeAccount = true, override = {}) {
     const token = await this.cfg.getAccessToken();
@@ -25032,16 +25158,18 @@ var MemlinApiClient = class {
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: version2,
       [AGENT_CAPABILITIES_HEADER]: (override.agentKind ? AGENT_EXPECTED_CAPABILITIES[kind] : agentCapabilities()).join(","),
-      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os5.platform(),
-      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os5.arch()
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os6.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os6.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h["Memlin-Account-Id"] = this.cfg.accountId;
     }
+    if (this.cfg.privateSession) h[PRIVATE_HEADER] = "1";
     return h;
   }
   async request(method, pathAndQuery, body, opts = {}) {
     const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
+    this.throwIfPrivateWrite(method, pathAndQuery);
     const refusalAccountId = this.refusalAccountId(opts.includeAccount ?? true, opts.accountId);
     await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
     const baseHeaders = await this.authHeaders(opts.includeAccount ?? true, opts);
@@ -25091,13 +25219,21 @@ var MemlinApiClient = class {
         }
       }
       const refusalCode = await this.noteAuthOutcome(res.status, parsed, refusalAccountId);
+      const privateRefusal = parsed?.code === "private_mode";
+      if (refusalAccountId && (res.ok || privateRefusal)) {
+        await notePrivateUntil(
+          refusalAccountId,
+          res.headers.get(PRIVATE_UNTIL_HEADER) ?? (parsed?.private_until ?? null)
+        ).catch(() => {
+        });
+      }
       if (!res.ok) {
         const serverError = parsed?.error;
         const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
         throw new MemlinApiError(
           `${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`,
           res.status,
-          refusalCode
+          refusalCode ?? (privateRefusal ? "private_mode" : void 0)
         );
       }
       return parsed;
@@ -25115,6 +25251,17 @@ var MemlinApiClient = class {
     return includeAccount && this.cfg.accountId ? this.cfg.accountId : null;
   }
   /** Zero-network short circuit while a membership refusal is fresh. */
+  throwIfPrivateWrite(method, pathAndQuery) {
+    if (!this.cfg.privateSession || isPrivateAllowedWrite(method, pathAndQuery)) return;
+    if (method === "POST" && pathAndQuery.split("?")[0] === "/resolve/v2") {
+      throw new MemlinApiError("POST /resolve/v2 \u2192 404: progressive resolve unavailable", 404);
+    }
+    throw new MemlinApiError(
+      `${method} ${pathAndQuery}: skipped \u2014 Memlin private mode is on for this session (turn it off with /memlin-private off)`,
+      423,
+      "private_mode"
+    );
+  }
   async throwIfAuthRefused(method, pathAndQuery, accountId) {
     if (!this.cfg.authRefusal || !accountId) return;
     const entry = await readAuthRefusal(accountId, this.cfg.authRefusal.binding);
@@ -25155,6 +25302,7 @@ var MemlinApiClient = class {
   }
   async openResolveV2Stream(method, pathAndQuery, body, opts = {}) {
     const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
+    this.throwIfPrivateWrite(method, pathAndQuery);
     const refusalAccountId = this.refusalAccountId(true, opts.accountId);
     await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
     const headers = await this.authHeaders(true, opts);
@@ -25843,6 +25991,14 @@ var MemlinApiClient = class {
   async setEnforceDoneDeployed(enabled, opts = {}) {
     return this.request("PUT", "/account/enforce-done-deployed", { enabled }, opts);
   }
+  /** GET /account/private-mode — the caller's own private mode in this account. */
+  async getPrivateMode(opts = {}) {
+    return this.request("GET", "/account/private-mode", void 0, opts);
+  }
+  /** PUT /account/private-mode — until: ISO timestamp, 'infinity', or null (off). */
+  async setPrivateMode(until, opts = {}) {
+    return this.request("PUT", "/account/private-mode", { until }, opts);
+  }
   /**
    * POST /deploy-guard — acquire, release, status, or queue the per-project
    * deploy lease / waiter line.
@@ -26211,13 +26367,13 @@ function resolveApiUrl() {
 init_workspace_binding();
 init_auth_refusal();
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path8.join(os6.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path9.join(os7.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path8.join(os6.homedir(), ".config", "memlin");
-var TOKEN_FILE = path8.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path9.join(os7.homedir(), ".config", "memlin");
+var TOKEN_FILE = path9.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
-    const raw = await fs5.readFile(globalConfigFilePath(), "utf8");
+    const raw = await fs6.readFile(globalConfigFilePath(), "utf8");
     const parsed = JSON.parse(raw);
     if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
       return null;
@@ -26267,13 +26423,15 @@ async function getApi(opts = {}) {
     overlay
   );
   const apiUrl = process.env.MEMLIN_API_URL?.trim() || config2.api_url || resolveApiUrl();
+  const privateSession = await isPrivateSession(void 0, void 0, config2.account_id);
   const api = new MemlinApiClient({
     baseUrl: apiUrl,
     getAccessToken: () => getIdentityBoundAccessToken(config2),
     accountId: config2.account_id,
-    authRefusal: { binding: workspaceRoot, accountName: workspaceAccountName }
+    authRefusal: { binding: workspaceRoot, accountName: workspaceAccountName },
+    privateSession
   });
-  return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName };
+  return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName, privateSession };
 }
 function applyWorkspaceOverlay(config2, overlay) {
   if (!overlay) return { workspaceBound: false, workspaceRoot: null, workspaceAccountName: null };
@@ -26426,22 +26584,22 @@ function evaluateCompanion(probe, now) {
 init_companion_client();
 
 // packages/plugin-core/src/plugin-install.ts
-import { promises as fs6 } from "node:fs";
+import { promises as fs7 } from "node:fs";
 import { existsSync as existsSync2 } from "node:fs";
-import path9 from "node:path";
-import os7 from "node:os";
+import path10 from "node:path";
+import os8 from "node:os";
 var MEMLIN_PLUGIN_KEY = "memlin@memlin-ai";
 var MEMLIN_MARKETPLACE_KEY = "memlin-ai";
 function defaultUserSettingsPaths() {
-  const claudeDir = path9.join(os7.homedir(), ".claude");
-  return { claudeDir, settingsFile: path9.join(claudeDir, "settings.json") };
+  const claudeDir = path10.join(os8.homedir(), ".claude");
+  return { claudeDir, settingsFile: path10.join(claudeDir, "settings.json") };
 }
 async function readClaudeUserSettings(paths) {
   const p = paths ?? defaultUserSettingsPaths();
   if (!existsSync2(p.settingsFile)) return null;
   let raw;
   try {
-    raw = await fs6.readFile(p.settingsFile, "utf8");
+    raw = await fs7.readFile(p.settingsFile, "utf8");
   } catch {
     return null;
   }
@@ -26461,31 +26619,31 @@ function inspectUserScopePlugin(settings) {
 
 // packages/plugin-core/src/cli/doctor.ts
 var NET_TIMEOUT_MS = 5e3;
-var CONFIG_DIR2 = path10.join(os8.homedir(), ".config", "memlin");
-var CONFIG_FILE = path10.join(CONFIG_DIR2, "config.json");
+var CONFIG_DIR2 = path11.join(os9.homedir(), ".config", "memlin");
+var CONFIG_FILE = path11.join(CONFIG_DIR2, "config.json");
 function cursorPluginRoot() {
   const explicit = process.env.CURSOR_PLUGIN_ROOT ?? process.env.MEMLIN_CURSOR_PLUGIN_ROOT;
-  if (explicit) return path10.resolve(explicit);
-  return path10.resolve(path10.dirname(fileURLToPath2(import.meta.url)), "..", "..");
+  if (explicit) return path11.resolve(explicit);
+  return path11.resolve(path11.dirname(fileURLToPath2(import.meta.url)), "..", "..");
 }
 async function readJsonFile(file2) {
-  return JSON.parse(await fs7.readFile(file2, "utf8"));
+  return JSON.parse(await fs8.readFile(file2, "utf8"));
 }
 async function checkCursorPackage(root) {
-  const manifestFile = path10.join(root, ".cursor-plugin", "plugin.json");
+  const manifestFile = path11.join(root, ".cursor-plugin", "plugin.json");
   const manifest = await readJsonFile(manifestFile);
   if (manifest.name !== "memlin" || !manifest.version) {
     return { status: "fail", detail: `invalid Cursor manifest: ${manifestFile}` };
   }
   const required2 = [
-    path10.join(root, "commands", "memlin-doctor.md"),
-    path10.join(root, "dist", "cli", "doctor.js")
+    path11.join(root, "commands", "memlin-doctor.md"),
+    path11.join(root, "dist", "cli", "doctor.js")
   ];
-  await Promise.all(required2.map((file2) => fs7.access(file2)));
+  await Promise.all(required2.map((file2) => fs8.access(file2)));
   return { status: "pass", detail: `Memlin ${manifest.version} (${root})` };
 }
 async function checkCursorHooks(root) {
-  const manifestFile = path10.join(root, "hooks", "hooks.json");
+  const manifestFile = path11.join(root, "hooks", "hooks.json");
   const manifest = await readJsonFile(manifestFile);
   if (manifest.version !== 1 || !manifest.hooks) {
     return { status: "fail", detail: `invalid Cursor hooks manifest: ${manifestFile}` };
@@ -26511,7 +26669,7 @@ async function checkCursorHooks(root) {
     }
   }
   await Promise.all(
-    [...hookFiles].map((file2) => fs7.access(path10.join(root, "dist", "hooks", file2)))
+    [...hookFiles].map((file2) => fs8.access(path11.join(root, "dist", "hooks", file2)))
   );
   return {
     status: "pass",
@@ -26520,14 +26678,14 @@ async function checkCursorHooks(root) {
 }
 async function checkCursorMcp(root) {
   const [mcp, plugin] = await Promise.all([
-    readJsonFile(path10.join(root, "mcp.json")),
-    readJsonFile(path10.join(root, ".cursor-plugin", "plugin.json"))
+    readJsonFile(path11.join(root, "mcp.json")),
+    readJsonFile(path11.join(root, ".cursor-plugin", "plugin.json"))
   ]);
   const server = mcp.mcpServers?.memlin;
   if (server?.command !== "node" || server.args?.length !== 1 || server.args[0] !== "${CURSOR_PLUGIN_ROOT}/dist/mcp-server.js" || server.env?.MEMLIN_HOST !== "cursor" || server.env?.MEMLIN_AGENT_VERSION !== plugin.version) {
     return { status: "fail", detail: "Cursor MCP manifest does not match the installed plugin" };
   }
-  await fs7.access(path10.join(root, "dist", "mcp-server.js"));
+  await fs8.access(path11.join(root, "dist", "mcp-server.js"));
   return { status: "pass", detail: `native server bundled for Memlin ${plugin.version}` };
 }
 async function probeUrl(url2) {
@@ -26571,10 +26729,10 @@ async function probeMcp(url2) {
 }
 async function probeWritable(dir) {
   try {
-    await fs7.mkdir(dir, { recursive: true });
-    const probe = path10.join(dir, `.memlin-doctor-${Date.now()}.tmp`);
-    await fs7.writeFile(probe, "ok", "utf8");
-    await fs7.unlink(probe);
+    await fs8.mkdir(dir, { recursive: true });
+    const probe = path11.join(dir, `.memlin-doctor-${Date.now()}.tmp`);
+    await fs8.writeFile(probe, "ok", "utf8");
+    await fs8.unlink(probe);
     return { ok: true };
   } catch (err) {
     return {

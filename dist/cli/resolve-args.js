@@ -8156,6 +8156,21 @@ var MODEL_PRICES = {
   // $3/$15 on the strength of the old launch announcement — that over-bills
   // every Sonnet 5 turn by 50%.
   "claude-sonnet-5": { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
+  // Opus 5.5 shipped after the 5 pair and is the current default Anthropic
+  // recommends "for most workloads" — which makes it a current Claude Code
+  // default too, and therefore a model that arrives in ingested telemetry
+  // whether or not this app ever requests it. Absent until 2026-09-22, it was
+  // the THIRD time an Opus tier priced as $0: Opus at all (fixed 2026-07-23),
+  // Opus 5 (2026-09-02), and this. The pattern is not "we forgot" — it is that
+  // a new tier is invisible here until someone checks the sheet against the
+  // pricing page, so re-verify on every model launch.
+  //
+  // It is also CHEAPER than the tier it replaces ($4/$20 against Opus 5's
+  // $5/$25) and reads cache at 0.05x rather than the standard 0.1x — the
+  // second entry in this sheet to need the override, and the reason the
+  // override is a field rather than a special case for the 5.1 pair.
+  // Verified 2026-09-22 against https://platform.claude.com/docs/en/about-claude/pricing.
+  "claude-opus-5-5": { inputUsdPerMTok: 4, outputUsdPerMTok: 20, cacheReadMultiplier: 0.05 },
   // Opus 5 was absent until 2026-09-02. The app never requests it, but
   // aggregateTurnTiming prices provider-reported models from ingested Claude
   // Code telemetry, where it is a current default — so every Opus 5 turn was
@@ -11170,6 +11185,9 @@ var ThoughtHandoffReceiptV2Schema = external_exports.object({
   stale: external_exports.boolean(),
   replayed: external_exports.boolean().optional()
 }).passthrough();
+
+// packages/shared/dist/ops-watch.js
+var OPS_DIAGNOSE_SEV2_AFTER_MS = 15 * 6e4;
 
 // packages/shared/dist/entitlements.js
 var COORDINATION_SELF = [

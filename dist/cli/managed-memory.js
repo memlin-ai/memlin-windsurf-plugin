@@ -3807,7 +3807,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs10 = __require("fs");
+    var fs11 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3891,7 +3891,7 @@ var require_gray_matter = __commonJS({
       return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs10.readFileSync(filepath, "utf8");
+      const str2 = fs11.readFileSync(filepath, "utf8");
       const file2 = matter3(str2, options2);
       file2.path = filepath;
       return file2;
@@ -3930,14 +3930,14 @@ __export(workspace_binding_exports, {
   writeWorkspaceBinding: () => writeWorkspaceBinding
 });
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { constants, promises as fs5 } from "node:fs";
-import path7 from "node:path";
+import { constants, promises as fs6 } from "node:fs";
+import path8 from "node:path";
 async function walkForWorkspaceBinding(startDir) {
-  let dir = path7.resolve(startDir);
+  let dir = path8.resolve(startDir);
   for (let i = 0; i < 64; i++) {
-    const candidate = path7.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
+    const candidate = path8.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
     try {
-      const raw = await fs5.readFile(candidate, "utf8");
+      const raw = await fs6.readFile(candidate, "utf8");
       const parsed = JSON.parse(raw);
       if (typeof parsed.account_id === "string" && parsed.account_id) {
         return {
@@ -3951,7 +3951,7 @@ async function walkForWorkspaceBinding(startDir) {
       }
     } catch {
     }
-    const parent = path7.dirname(dir);
+    const parent = path8.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }
@@ -3960,7 +3960,7 @@ async function walkForWorkspaceBinding(startDir) {
 async function readSmallRegularFile(file2) {
   let before;
   try {
-    before = await fs5.lstat(file2);
+    before = await fs6.lstat(file2);
   } catch (error40) {
     return isFileNotFound(error40) ? { kind: "missing" } : { kind: "invalid" };
   }
@@ -3969,14 +3969,14 @@ async function readSmallRegularFile(file2) {
       return { kind: "invalid" };
     }
     const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-    const handle = await fs5.open(file2, constants.O_RDONLY | noFollow);
+    const handle = await fs6.open(file2, constants.O_RDONLY | noFollow);
     try {
       const opened = await handle.stat();
       if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size || opened.size > GIT_POINTER_MAX_BYTES) {
         return { kind: "invalid" };
       }
       const bytes = await handle.readFile();
-      const [after, afterPath] = await Promise.all([handle.stat(), fs5.lstat(file2)]);
+      const [after, afterPath] = await Promise.all([handle.stat(), fs6.lstat(file2)]);
       if (afterPath.isSymbolicLink() || !afterPath.isFile() || after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size || bytes.byteLength !== opened.size || bytes.includes(0)) {
         return { kind: "invalid" };
       }
@@ -3989,16 +3989,16 @@ async function readSmallRegularFile(file2) {
   }
 }
 function containedBy(parent, child) {
-  const relative = path7.relative(parent, child);
-  return relative === "" || relative !== ".." && !relative.startsWith(`..${path7.sep}`) && !path7.isAbsolute(relative);
+  const relative = path8.relative(parent, child);
+  return relative === "" || relative !== ".." && !relative.startsWith(`..${path8.sep}`) && !path8.isAbsolute(relative);
 }
 async function canonicalSafeDirectory(candidate) {
   try {
-    const before = await fs5.lstat(candidate);
+    const before = await fs6.lstat(candidate);
     if (before.isSymbolicLink() || !before.isDirectory()) return null;
-    await fs5.access(candidate, constants.R_OK | constants.X_OK);
-    const canonical = await fs5.realpath(candidate);
-    const after = await fs5.lstat(candidate);
+    await fs6.access(candidate, constants.R_OK | constants.X_OK);
+    const canonical = await fs6.realpath(candidate);
+    const after = await fs6.lstat(candidate);
     if (after.isSymbolicLink() || !after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) {
       return null;
     }
@@ -4015,24 +4015,24 @@ function gitIdentity(checkoutRoot, state, repositoryRoot = checkoutRoot) {
   };
 }
 async function resolveGitWorkspaceIdentity(startDir) {
-  const requested = path7.resolve(startDir);
+  const requested = path8.resolve(startDir);
   let canonicalStart;
   try {
-    canonicalStart = await fs5.realpath(requested);
-    const startEntry = await fs5.stat(canonicalStart);
+    canonicalStart = await fs6.realpath(requested);
+    const startEntry = await fs6.stat(canonicalStart);
     if (!startEntry.isDirectory()) return gitIdentity(canonicalStart, "unknown");
   } catch {
     return gitIdentity(requested, "unknown");
   }
   let dir = canonicalStart;
   for (let i = 0; i < 64; i++) {
-    const gitEntry = path7.join(dir, ".git");
+    const gitEntry = path8.join(dir, ".git");
     let entry;
     try {
-      entry = await fs5.lstat(gitEntry);
+      entry = await fs6.lstat(gitEntry);
     } catch (error40) {
       if (!isFileNotFound(error40)) return gitIdentity(dir, "unknown");
-      const parent = path7.dirname(dir);
+      const parent = path8.dirname(dir);
       if (parent === dir) return gitIdentity(canonicalStart, "none");
       dir = parent;
       continue;
@@ -4053,16 +4053,16 @@ async function resolveGitWorkspaceIdentity(startDir) {
     if (!pointerValue) return gitIdentity(checkoutRoot, "unknown");
     let gitDirCandidate;
     try {
-      gitDirCandidate = path7.isAbsolute(pointerValue) ? pointerValue : path7.resolve(checkoutRoot, pointerValue);
+      gitDirCandidate = path8.isAbsolute(pointerValue) ? pointerValue : path8.resolve(checkoutRoot, pointerValue);
     } catch {
       return gitIdentity(checkoutRoot, "unknown");
     }
     const gitDir = await canonicalSafeDirectory(gitDirCandidate);
     if (!gitDir) return gitIdentity(checkoutRoot, "unknown");
-    const commonRead = await readSmallRegularFile(path7.join(gitDir, "commondir"));
+    const commonRead = await readSmallRegularFile(path8.join(gitDir, "commondir"));
     if (commonRead.kind === "missing") {
-      const gitDirParent = path7.dirname(gitDir);
-      const looksLikeWorktreeAdmin = path7.basename(gitDirParent) === "worktrees" && path7.basename(path7.dirname(gitDirParent)) === ".git";
+      const gitDirParent = path8.dirname(gitDir);
+      const looksLikeWorktreeAdmin = path8.basename(gitDirParent) === "worktrees" && path8.basename(path8.dirname(gitDirParent)) === ".git";
       if (looksLikeWorktreeAdmin) return gitIdentity(checkoutRoot, "unknown");
       return gitIdentity(checkoutRoot, "main");
     }
@@ -4074,22 +4074,22 @@ async function resolveGitWorkspaceIdentity(startDir) {
     if (!commonValue) return gitIdentity(checkoutRoot, "unknown");
     let commonCandidate;
     try {
-      commonCandidate = path7.isAbsolute(commonValue) ? commonValue : path7.resolve(gitDir, commonValue);
+      commonCandidate = path8.isAbsolute(commonValue) ? commonValue : path8.resolve(gitDir, commonValue);
     } catch {
       return gitIdentity(checkoutRoot, "unknown");
     }
     const commonDir = await canonicalSafeDirectory(commonCandidate);
     if (!commonDir) return gitIdentity(checkoutRoot, "unknown");
-    const worktreesDir = path7.join(commonDir, "worktrees");
-    if (path7.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
+    const worktreesDir = path8.join(commonDir, "worktrees");
+    if (path8.basename(commonDir) !== ".git" || gitDir === worktreesDir || !containedBy(worktreesDir, gitDir)) {
       return gitIdentity(checkoutRoot, "unknown");
     }
-    const repositoryRoot = path7.dirname(commonDir);
-    const repositoryGitDir = await canonicalSafeDirectory(path7.join(repositoryRoot, ".git"));
+    const repositoryRoot = path8.dirname(commonDir);
+    const repositoryGitDir = await canonicalSafeDirectory(path8.join(repositoryRoot, ".git"));
     if (!repositoryGitDir || repositoryGitDir !== commonDir) {
       return gitIdentity(checkoutRoot, "unknown");
     }
-    const reverseRead = await readSmallRegularFile(path7.join(gitDir, "gitdir"));
+    const reverseRead = await readSmallRegularFile(path8.join(gitDir, "gitdir"));
     if (reverseRead.kind !== "ok" || reverseRead.value.includes("\0")) {
       return gitIdentity(checkoutRoot, "unknown");
     }
@@ -4097,10 +4097,10 @@ async function resolveGitWorkspaceIdentity(startDir) {
     const reverseValue = reverseMatch?.[1];
     if (!reverseValue) return gitIdentity(checkoutRoot, "unknown");
     try {
-      const reverseCandidate = path7.isAbsolute(reverseValue) ? reverseValue : path7.resolve(gitDir, reverseValue);
+      const reverseCandidate = path8.isAbsolute(reverseValue) ? reverseValue : path8.resolve(gitDir, reverseValue);
       const [reverseTarget, checkoutGitFile] = await Promise.all([
-        fs5.realpath(reverseCandidate),
-        fs5.realpath(gitEntry)
+        fs6.realpath(reverseCandidate),
+        fs6.realpath(gitEntry)
       ]);
       if (reverseTarget !== checkoutGitFile) return gitIdentity(checkoutRoot, "unknown");
     } catch {
@@ -4115,7 +4115,7 @@ async function findWorkspaceBinding(startDir) {
   const gitIdentity2 = await resolveGitWorkspaceIdentity(startDir);
   if (gitIdentity2.state !== "worktree") return direct;
   if (direct) {
-    const bindingRoot = await fs5.realpath(direct.workspaceRoot).catch(() => path7.resolve(direct.workspaceRoot));
+    const bindingRoot = await fs6.realpath(direct.workspaceRoot).catch(() => path8.resolve(direct.workspaceRoot));
     if (containedBy(gitIdentity2.checkout_root, bindingRoot)) return direct;
   }
   return walkForWorkspaceBinding(gitIdentity2.repository_root);
@@ -4124,26 +4124,26 @@ async function writeWorkspaceBinding(workspaceRoot, binding) {
   if (typeof binding.account_id !== "string" || binding.account_id.length === 0) {
     throw new Error("Workspace binding account_id is required.");
   }
-  const root = await fs5.realpath(path7.resolve(workspaceRoot));
-  const rootEntry = await fs5.stat(root);
+  const root = await fs6.realpath(path8.resolve(workspaceRoot));
+  const rootEntry = await fs6.stat(root);
   if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
-  const dir = path7.join(root, WORKSPACE_DIR_NAME);
+  const dir = path8.join(root, WORKSPACE_DIR_NAME);
   try {
-    const entry = await fs5.lstat(dir);
+    const entry = await fs6.lstat(dir);
     if (!entry.isDirectory() || entry.isSymbolicLink()) {
       throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
     }
   } catch (error40) {
     if (!isFileNotFound(error40)) throw error40;
-    await fs5.mkdir(dir, { mode: 448, recursive: true });
-    const entry = await fs5.lstat(dir);
+    await fs6.mkdir(dir, { mode: 448, recursive: true });
+    const entry = await fs6.lstat(dir);
     if (!entry.isDirectory() || entry.isSymbolicLink()) {
       throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
     }
   }
-  const file2 = path7.join(dir, WORKSPACE_BINDING_FILE);
+  const file2 = path8.join(dir, WORKSPACE_BINDING_FILE);
   try {
-    const existing = await fs5.lstat(file2);
+    const existing = await fs6.lstat(file2);
     if (!existing.isFile() || existing.isSymbolicLink()) {
       throw new Error(`Refusing to replace an unsafe workspace binding at ${file2}`);
     }
@@ -4159,16 +4159,16 @@ async function writeWorkspaceBinding(workspaceRoot, binding) {
     null,
     2
   );
-  const temporary = path7.join(dir, `.config.${randomUUID2()}.tmp`);
+  const temporary = path8.join(dir, `.config.${randomUUID2()}.tmp`);
   let handle;
   try {
-    handle = await fs5.open(temporary, "wx", 384);
+    handle = await fs6.open(temporary, "wx", 384);
     await handle.writeFile(body + "\n", "utf8");
     await handle.sync();
     await handle.close();
     handle = void 0;
     await atomicRename(temporary, file2);
-    const installed = await fs5.lstat(file2);
+    const installed = await fs6.lstat(file2);
     if (!installed.isFile() || installed.isSymbolicLink()) {
       throw new Error(`Workspace binding verification failed at ${file2}`);
     }
@@ -4176,16 +4176,16 @@ async function writeWorkspaceBinding(workspaceRoot, binding) {
     return file2;
   } finally {
     await handle?.close().catch(() => void 0);
-    await fs5.unlink(temporary).catch(() => void 0);
+    await fs6.unlink(temporary).catch(() => void 0);
   }
 }
 async function clearWorkspaceBinding(workspaceRoot) {
-  const root = await fs5.realpath(path7.resolve(workspaceRoot));
-  const rootEntry = await fs5.stat(root);
+  const root = await fs6.realpath(path8.resolve(workspaceRoot));
+  const rootEntry = await fs6.stat(root);
   if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
-  const dir = path7.join(root, WORKSPACE_DIR_NAME);
+  const dir = path8.join(root, WORKSPACE_DIR_NAME);
   try {
-    const entry = await fs5.lstat(dir);
+    const entry = await fs6.lstat(dir);
     if (!entry.isDirectory() || entry.isSymbolicLink()) {
       throw new Error(`Refusing an unsafe Memlin workspace directory at ${dir}`);
     }
@@ -4193,13 +4193,13 @@ async function clearWorkspaceBinding(workspaceRoot) {
     if (isFileNotFound(error40)) return false;
     throw error40;
   }
-  const file2 = path7.join(dir, WORKSPACE_BINDING_FILE);
+  const file2 = path8.join(dir, WORKSPACE_BINDING_FILE);
   try {
-    const entry = await fs5.lstat(file2);
+    const entry = await fs6.lstat(file2);
     if (!entry.isFile() || entry.isSymbolicLink()) {
       throw new Error(`Refusing to remove an unsafe workspace binding at ${file2}`);
     }
-    await fs5.unlink(file2);
+    await fs6.unlink(file2);
     await clearAllAuthRefusals();
     return true;
   } catch (error40) {
@@ -4347,7 +4347,7 @@ function runCliMain(main3, onError) {
 }
 
 // packages/plugin-core/src/cli/manage-memory.ts
-import { promises as fs9 } from "node:fs";
+import { promises as fs10 } from "node:fs";
 
 // packages/plugin-core/src/plugin-install.ts
 import { promises as fs } from "node:fs";
@@ -4446,9 +4446,9 @@ function inspectManagedMemory(settings) {
 }
 
 // packages/plugin-core/src/client.ts
-import { promises as fs6 } from "node:fs";
-import path8 from "node:path";
-import os7 from "node:os";
+import { promises as fs7 } from "node:fs";
+import path9 from "node:path";
+import os8 from "node:os";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
@@ -5210,8 +5210,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path12, errorMaps, issueData } = params;
-  const fullPath = [...path12, ...issueData.path || []];
+  const { data, path: path13, errorMaps, issueData } = params;
+  const fullPath = [...path13, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5327,11 +5327,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path12, key) {
+  constructor(parent, value, path13, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path12;
+    this._path = path13;
     this._key = key;
   }
   get path() {
@@ -9367,6 +9367,21 @@ var MODEL_PRICES = {
   // $3/$15 on the strength of the old launch announcement — that over-bills
   // every Sonnet 5 turn by 50%.
   "claude-sonnet-5": { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
+  // Opus 5.5 shipped after the 5 pair and is the current default Anthropic
+  // recommends "for most workloads" — which makes it a current Claude Code
+  // default too, and therefore a model that arrives in ingested telemetry
+  // whether or not this app ever requests it. Absent until 2026-09-22, it was
+  // the THIRD time an Opus tier priced as $0: Opus at all (fixed 2026-07-23),
+  // Opus 5 (2026-09-02), and this. The pattern is not "we forgot" — it is that
+  // a new tier is invisible here until someone checks the sheet against the
+  // pricing page, so re-verify on every model launch.
+  //
+  // It is also CHEAPER than the tier it replaces ($4/$20 against Opus 5's
+  // $5/$25) and reads cache at 0.05x rather than the standard 0.1x — the
+  // second entry in this sheet to need the override, and the reason the
+  // override is a field rather than a special case for the 5.1 pair.
+  // Verified 2026-09-22 against https://platform.claude.com/docs/en/about-claude/pricing.
+  "claude-opus-5-5": { inputUsdPerMTok: 4, outputUsdPerMTok: 20, cacheReadMultiplier: 0.05 },
   // Opus 5 was absent until 2026-09-02. The app never requests it, but
   // aggregateTurnTiming prices provider-reported models from ingested Claude
   // Code telemetry, where it is a current default — so every Opus 5 turn was
@@ -9884,19 +9899,19 @@ var ContextManifestV1Schema = external_exports.object({
       location: `linked_contexts.${index}`
     }))
   ];
-  references.forEach(({ ref, path: path12, location }) => {
+  references.forEach(({ ref, path: path13, location }) => {
     const identity = contextReferenceIdentityKey(ref);
     const prior = seen.get(identity);
     if (prior && prior.revision !== ref.revision) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path12,
+        path: path13,
         message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
       });
     } else if (prior && location.startsWith("linked_contexts.")) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path12,
+        path: path13,
         message: `duplicate linked context ${identity}`
       });
     }
@@ -10210,11 +10225,11 @@ var ContextBundleV1Schema = external_exports.object({
         path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
       }))
     ];
-    for (const { ref, path: path12 } of references) {
+    for (const { ref, path: path13 } of references) {
       if (!contextKeys.has(contextReferenceKey(ref))) {
         ctx.addIssue({
           code: external_exports.ZodIssueCode.custom,
-          path: path12,
+          path: path13,
           message: "provider coverage is outside the exact manifest contexts"
         });
       }
@@ -12404,6 +12419,9 @@ var ThoughtHandoffReceiptV2Schema = external_exports.object({
   replayed: external_exports.boolean().optional()
 }).passthrough();
 
+// packages/shared/dist/ops-watch.js
+var OPS_DIAGNOSE_SEV2_AFTER_MS = 15 * 6e4;
+
 // packages/shared/dist/entitlements.js
 var COORDINATION_SELF = [
   "coordination.work_ledger",
@@ -13094,10 +13112,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path12) {
-  if (!path12)
+function getElementAtPath(obj, path13) {
+  if (!path13)
     return obj;
-  return path12.reduce((acc, key) => acc?.[key], obj);
+  return path13.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -13417,11 +13435,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path12, issues) {
+function prefixIssues(path13, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path12);
+    iss.path.unshift(path13);
     return iss;
   });
 }
@@ -13558,7 +13576,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path12 = []) => {
+  const processError = (error41, path13 = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -13568,7 +13586,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path12, ...issue2.path];
+        const fullpath = [...path13, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -13598,9 +13616,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path12) {
+function toDotPath(path13) {
   const segs = [];
-  for (const seg of path12) {
+  for (const seg of path13) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -24258,10 +24276,10 @@ function validateFlowDefinitionSemantics(flow) {
       ],
       ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
     ];
-    targets.forEach(({ target, path: path12 }) => {
+    targets.forEach(({ target, path: path13 }) => {
       if (!isReservedTarget(target) && !stageById.has(target)) {
         issues.push({
-          path: path12,
+          path: path13,
           code: "missing_transition_target",
           message: `transition target ${JSON.stringify(target)} does not exist`
         });
@@ -24291,7 +24309,7 @@ function validateFlowDefinitionSemantics(flow) {
   const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   let hasReachableEnd = false;
-  const visit = (stageId, path12, pathBounds) => {
+  const visit = (stageId, path13, pathBounds) => {
     reachable.add(stageId);
     if (visited.has(stageId)) return;
     visiting.add(stageId);
@@ -24307,7 +24325,7 @@ function validateFlowDefinitionSemantics(flow) {
         ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
         ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
       ];
-      const currentPath = [...path12, stageId];
+      const currentPath = [...path13, stageId];
       for (const edge of edges) {
         const { target } = edge;
         if (target === "$end") {
@@ -24415,18 +24433,18 @@ var FlowPackManifestBaseSchema = external_exports2.object({
   evals: external_exports2.array(ManifestEvalSchema).max(256),
   model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
 }).strict();
-function validateRelativePackPath(path12) {
-  if (path12.startsWith("/") || path12.startsWith("\\")) return "path must be relative";
-  if (/^[A-Za-z]:/.test(path12) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path12)) {
+function validateRelativePackPath(path13) {
+  if (path13.startsWith("/") || path13.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path13) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path13)) {
     return "drive-qualified paths and URI schemes are not allowed";
   }
-  if (/[\u0000-\u001f\u007f]/.test(path12)) return "control characters are not allowed";
-  if (/%(?:2e|2f|5c)/i.test(path12)) return "encoded path traversal is not allowed";
-  if (path12.includes("\\")) return "path must use forward slashes";
-  if (path12.split("/").some((segment) => segment === ".." || segment === ".")) {
+  if (/[\u0000-\u001f\u007f]/.test(path13)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path13)) return "encoded path traversal is not allowed";
+  if (path13.includes("\\")) return "path must use forward slashes";
+  if (path13.split("/").some((segment) => segment === ".." || segment === ".")) {
     return "path traversal and dot segments are not allowed";
   }
-  if (path12.split("/").some((segment) => segment.length === 0)) {
+  if (path13.split("/").some((segment) => segment.length === 0)) {
     return "path cannot contain empty segments";
   }
   return null;
@@ -24473,22 +24491,22 @@ function validateFlowPackManifestSemantics(manifest) {
       issues
     );
     role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
-      const path12 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      const path13 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
       if (comparedRole === role.id) {
         issues.push({
-          path: path12,
+          path: path13,
           code: "self_referential_model_independence",
           message: "a model role cannot require independence from itself"
         });
       } else if (!modelRolesById.has(comparedRole)) {
         issues.push({
-          path: path12,
+          path: path13,
           code: "missing_independence_model_role",
           message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
         });
       } else if (modelRolesById.get(comparedRole)?.independence !== null) {
         issues.push({
-          path: path12,
+          path: path13,
           code: "independence_reference_not_author",
           message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
         });
@@ -24754,7 +24772,7 @@ var Receipt = external_exports.object({
 init_auth_refusal();
 import { readFileSync } from "node:fs";
 import crypto3 from "node:crypto";
-import os6 from "node:os";
+import os7 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24825,15 +24843,118 @@ function resolveHost() {
   return (make ?? HOSTS2["claude-code"])();
 }
 
+// packages/plugin-core/src/private-mode.ts
+init_atomic_rename();
+import { promises as fs5 } from "node:fs";
+import path7 from "node:path";
+import os6 from "node:os";
+var PRIVATE_HEADER = "Memlin-Private";
+var PRIVATE_UNTIL_HEADER = "Memlin-Private-Until";
+var PRIVATE_TTL_MS = 24 * 60 * 60 * 1e3;
+var PRIVATE_ALLOWED_WRITES = [
+  "POST /resolve",
+  "POST /projects/resolve",
+  "POST /deploy-guard"
+];
+var DENIED_TTL_MS = 10 * 60 * 1e3;
+var FLOOR_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+function stateFile() {
+  return path7.join(os6.homedir(), ".config", "memlin", "private-sessions.json");
+}
+async function readPrivateState() {
+  try {
+    const parsed = JSON.parse(await fs5.readFile(stateFile(), "utf8"));
+    return { ...parsed, sessions: parsed.sessions ?? {} };
+  } catch {
+    return { sessions: {} };
+  }
+}
+async function writePrivateState(state, now) {
+  for (const [id, entry] of Object.entries(state.sessions)) {
+    if (entry.expires_at <= now) delete state.sessions[id];
+  }
+  for (const [id, entry] of Object.entries(state.denied ?? {})) {
+    if (now - entry.at > DENIED_TTL_MS) delete state.denied?.[id];
+  }
+  for (const [id, entry] of Object.entries(state.accounts ?? {})) {
+    if (entry.until !== null && entry.until <= now) delete state.accounts?.[id];
+  }
+  for (const [id, floor] of Object.entries(state.floors ?? {})) {
+    if (now - floor.at > FLOOR_TTL_MS) delete state.floors?.[id];
+  }
+  const file2 = stateFile();
+  await fs5.mkdir(path7.dirname(file2), { recursive: true });
+  const tmp = `${file2}.${process.pid}.${Date.now()}.tmp`;
+  await fs5.writeFile(tmp, JSON.stringify(state, null, 2), { mode: 384 });
+  await atomicRename(tmp, file2);
+}
+function envPrivate() {
+  const v = process.env.MEMLIN_PRIVATE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
+}
+function currentSessionId() {
+  return process.env.MEMLIN_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || null;
+}
+async function isPrivateSession(sessionId = currentSessionId(), now = Date.now(), accountId = null) {
+  const state = await readPrivateState();
+  if (accountId && accountDenied(state, accountId, now)) return false;
+  if (envPrivate()) return true;
+  if (accountId && accountPrivateActive(state, accountId, now)) return true;
+  if (!sessionId) return false;
+  const entry = state.sessions[sessionId];
+  return Boolean(entry && entry.expires_at > now);
+}
+function accountDenied(state, accountId, now) {
+  const entry = state.denied?.[accountId];
+  return Boolean(entry && now - entry.at <= DENIED_TTL_MS);
+}
+function accountPrivateActive(state, accountId, now) {
+  const entry = state.accounts?.[accountId];
+  return Boolean(entry && (entry.until === null || entry.until > now));
+}
+async function notePrivateUntil(accountId, header, now = Date.now()) {
+  const state = await readPrivateState();
+  if (header === "denied") {
+    const prev2 = state.denied?.[accountId];
+    if (prev2 && now - prev2.at < 6e4 && !state.accounts?.[accountId]) return;
+    state.denied = { ...state.denied, [accountId]: { at: now } };
+    delete state.accounts?.[accountId];
+    await writePrivateState(state, now);
+    return;
+  }
+  let until;
+  if (!header || header === "off") until = void 0;
+  else if (header === "infinity") until = null;
+  else {
+    const at = Date.parse(header);
+    until = Number.isFinite(at) && at > now ? at : void 0;
+  }
+  if (until !== void 0 && state.denied?.[accountId]) delete state.denied[accountId];
+  const prev = state.accounts?.[accountId];
+  if (until === void 0) {
+    if (!prev) return;
+    delete state.accounts[accountId];
+  } else {
+    if (prev && prev.until === until) return;
+    state.accounts = { ...state.accounts, [accountId]: { until, seen_at: now } };
+  }
+  await writePrivateState(state, now);
+}
+function isPrivateAllowedWrite(method, pathAndQuery) {
+  if (method === "GET") return true;
+  const pathOnly = pathAndQuery.split("?")[0];
+  return PRIVATE_ALLOWED_WRITES.includes(`${method} ${pathOnly}`);
+}
+
 // packages/plugin-core/src/memlin-api-client.ts
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os6.hostname() || "unknown";
+  return process.env.MEMLIN_AGENT_DEVICE || os7.hostname() || "unknown";
 }
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.47";
+  cachedAgentVersion = "0.1.48";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -24984,6 +25105,9 @@ var MemlinApiClient = class {
   get defaultAccountId() {
     return this.cfg.accountId;
   }
+  nativeSessionHook(input, opts) {
+    return this.request("POST", "/agent-control/hook", input, { ...opts, agentVersion: agentVersion() });
+  }
   // ---------- low-level ----------
   async authHeaders(includeAccount = true, override = {}) {
     const token = await this.cfg.getAccessToken();
@@ -24995,16 +25119,18 @@ var MemlinApiClient = class {
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: version2,
       [AGENT_CAPABILITIES_HEADER]: (override.agentKind ? AGENT_EXPECTED_CAPABILITIES[kind] : agentCapabilities()).join(","),
-      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os6.platform(),
-      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os6.arch()
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os7.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os7.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h["Memlin-Account-Id"] = this.cfg.accountId;
     }
+    if (this.cfg.privateSession) h[PRIVATE_HEADER] = "1";
     return h;
   }
   async request(method, pathAndQuery, body, opts = {}) {
     const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
+    this.throwIfPrivateWrite(method, pathAndQuery);
     const refusalAccountId = this.refusalAccountId(opts.includeAccount ?? true, opts.accountId);
     await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
     const baseHeaders = await this.authHeaders(opts.includeAccount ?? true, opts);
@@ -25054,13 +25180,21 @@ var MemlinApiClient = class {
         }
       }
       const refusalCode = await this.noteAuthOutcome(res.status, parsed, refusalAccountId);
+      const privateRefusal = parsed?.code === "private_mode";
+      if (refusalAccountId && (res.ok || privateRefusal)) {
+        await notePrivateUntil(
+          refusalAccountId,
+          res.headers.get(PRIVATE_UNTIL_HEADER) ?? (parsed?.private_until ?? null)
+        ).catch(() => {
+        });
+      }
       if (!res.ok) {
         const serverError = parsed?.error;
         const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
         throw new MemlinApiError(
           `${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`,
           res.status,
-          refusalCode
+          refusalCode ?? (privateRefusal ? "private_mode" : void 0)
         );
       }
       return parsed;
@@ -25078,6 +25212,17 @@ var MemlinApiClient = class {
     return includeAccount && this.cfg.accountId ? this.cfg.accountId : null;
   }
   /** Zero-network short circuit while a membership refusal is fresh. */
+  throwIfPrivateWrite(method, pathAndQuery) {
+    if (!this.cfg.privateSession || isPrivateAllowedWrite(method, pathAndQuery)) return;
+    if (method === "POST" && pathAndQuery.split("?")[0] === "/resolve/v2") {
+      throw new MemlinApiError("POST /resolve/v2 \u2192 404: progressive resolve unavailable", 404);
+    }
+    throw new MemlinApiError(
+      `${method} ${pathAndQuery}: skipped \u2014 Memlin private mode is on for this session (turn it off with /memlin-private off)`,
+      423,
+      "private_mode"
+    );
+  }
   async throwIfAuthRefused(method, pathAndQuery, accountId) {
     if (!this.cfg.authRefusal || !accountId) return;
     const entry = await readAuthRefusal(accountId, this.cfg.authRefusal.binding);
@@ -25118,6 +25263,7 @@ var MemlinApiClient = class {
   }
   async openResolveV2Stream(method, pathAndQuery, body, opts = {}) {
     const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
+    this.throwIfPrivateWrite(method, pathAndQuery);
     const refusalAccountId = this.refusalAccountId(true, opts.accountId);
     await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
     const headers = await this.authHeaders(true, opts);
@@ -25806,6 +25952,14 @@ var MemlinApiClient = class {
   async setEnforceDoneDeployed(enabled, opts = {}) {
     return this.request("PUT", "/account/enforce-done-deployed", { enabled }, opts);
   }
+  /** GET /account/private-mode — the caller's own private mode in this account. */
+  async getPrivateMode(opts = {}) {
+    return this.request("GET", "/account/private-mode", void 0, opts);
+  }
+  /** PUT /account/private-mode — until: ISO timestamp, 'infinity', or null (off). */
+  async setPrivateMode(until, opts = {}) {
+    return this.request("PUT", "/account/private-mode", { until }, opts);
+  }
   /**
    * POST /deploy-guard — acquire, release, status, or queue the per-project
    * deploy lease / waiter line.
@@ -26174,13 +26328,13 @@ function resolveApiUrl() {
 init_workspace_binding();
 init_auth_refusal();
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path8.join(os7.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path9.join(os8.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path8.join(os7.homedir(), ".config", "memlin");
-var TOKEN_FILE = path8.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path9.join(os8.homedir(), ".config", "memlin");
+var TOKEN_FILE = path9.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
-    const raw = await fs6.readFile(globalConfigFilePath(), "utf8");
+    const raw = await fs7.readFile(globalConfigFilePath(), "utf8");
     const parsed = JSON.parse(raw);
     if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
       return null;
@@ -26230,13 +26384,15 @@ async function getApi(opts = {}) {
     overlay
   );
   const apiUrl = process.env.MEMLIN_API_URL?.trim() || config2.api_url || resolveApiUrl();
+  const privateSession = await isPrivateSession(void 0, void 0, config2.account_id);
   const api = new MemlinApiClient({
     baseUrl: apiUrl,
     getAccessToken: () => getIdentityBoundAccessToken(config2),
     accountId: config2.account_id,
-    authRefusal: { binding: workspaceRoot, accountName: workspaceAccountName }
+    authRefusal: { binding: workspaceRoot, accountName: workspaceAccountName },
+    privateSession
   });
-  return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName };
+  return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName, privateSession };
 }
 function applyWorkspaceOverlay(config2, overlay) {
   if (!overlay) return { workspaceBound: false, workspaceRoot: null, workspaceAccountName: null };
@@ -26309,7 +26465,7 @@ async function isLightAccount(api, accountId, opts = {}) {
 
 // packages/plugin-core/src/project-resolver.ts
 import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, lstatSync } from "node:fs";
-import path9 from "node:path";
+import path10 from "node:path";
 init_workspace_binding();
 var WORKSPACE_ENV_VARS = [
   // Claude Code exposes the original project dir to hooks/plugin commands.
@@ -26324,12 +26480,12 @@ var WORKSPACE_ENV_VARS = [
 function runtimeCwd(fallback = process.cwd()) {
   for (const name of WORKSPACE_ENV_VARS) {
     const raw = process.env[name]?.trim();
-    if (raw && path9.isAbsolute(raw)) return path9.resolve(raw);
+    if (raw && path10.isAbsolute(raw)) return path10.resolve(raw);
   }
-  return path9.resolve(fallback);
+  return path10.resolve(fallback);
 }
 async function resolveProject(api, cwd, configProjectId) {
-  const absCwd = path9.resolve(cwd);
+  const absCwd = path10.resolve(cwd);
   const remotes = detectGitRemotes(cwd);
   const hasGitRemote = remotes.length > 0;
   let serverFailure;
@@ -26385,9 +26541,9 @@ function readGitRemote(cwd) {
     return readFileSync2(file2, "utf8");
   };
   try {
-    let root = path9.resolve(cwd);
+    let root = path10.resolve(cwd);
     for (; ; ) {
-      const marker = path9.join(root, ".git");
+      const marker = path10.join(root, ".git");
       if (existsSync2(marker)) {
         const info = lstatSync(marker);
         if (info.isSymbolicLink()) return null;
@@ -26395,12 +26551,12 @@ function readGitRemote(cwd) {
         if (info.isFile()) {
           const match = /^gitdir:\s*(.+)$/m.exec(read(marker));
           if (!match) return null;
-          directory = path9.resolve(root, match[1].trim());
+          directory = path10.resolve(root, match[1].trim());
         }
-        const common2 = path9.join(directory, "commondir");
-        if (existsSync2(common2)) directory = path9.resolve(directory, read(common2).trim());
+        const common2 = path10.join(directory, "commondir");
+        if (existsSync2(common2)) directory = path10.resolve(directory, read(common2).trim());
         let origin = false;
-        for (const line of read(path9.join(directory, "config")).split(/\r?\n/)) {
+        for (const line of read(path10.join(directory, "config")).split(/\r?\n/)) {
           if (/^\s*\[/.test(line)) origin = /^\s*\[remote\s+"origin"\]\s*(?:[#;].*)?$/.test(line);
           else if (origin) {
             const match = /^\s*url\s*=\s*(.*?)\s*$/.exec(line);
@@ -26409,7 +26565,7 @@ function readGitRemote(cwd) {
         }
         return null;
       }
-      const parent = path9.dirname(root);
+      const parent = path10.dirname(root);
       if (parent === root) return null;
       root = parent;
     }
@@ -26430,8 +26586,8 @@ function detectGitRemotes(cwd) {
         continue;
       }
       scanned++;
-      const child = path9.join(cwd, entry.name);
-      if (!existsSync2(path9.join(child, ".git"))) continue;
+      const child = path10.join(cwd, entry.name);
+      if (!existsSync2(path10.join(child, ".git"))) continue;
       const remote = readGitRemote(child);
       if (remote && !out.includes(remote)) out.push(remote);
     }
@@ -26441,27 +26597,27 @@ function detectGitRemotes(cwd) {
 }
 
 // packages/plugin-core/src/native-memory.ts
-import { promises as fs8 } from "node:fs";
+import { promises as fs9 } from "node:fs";
 import { existsSync as existsSync4, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import os9 from "node:os";
-import path11 from "node:path";
+import os10 from "node:os";
+import path12 from "node:path";
 
 // packages/plugin-core/src/native-memory-backup.ts
-import { promises as fs7 } from "node:fs";
+import { promises as fs8 } from "node:fs";
 import { existsSync as existsSync3 } from "node:fs";
 import { createHash } from "node:crypto";
-import os8 from "node:os";
-import path10 from "node:path";
+import os9 from "node:os";
+import path11 from "node:path";
 function nativeMemoryBackupRoot() {
   const override = process.env.MEMLIN_NATIVE_MEMORY_BACKUP_ROOT?.trim();
-  if (override) return path10.resolve(override);
-  return path10.join(os8.homedir(), ".config", "memlin", "backups", "native-memory");
+  if (override) return path11.resolve(override);
+  return path11.join(os9.homedir(), ".config", "memlin", "backups", "native-memory");
 }
 function backupSlugFor(memoryDir) {
-  const resolved = path10.resolve(memoryDir);
+  const resolved = path11.resolve(memoryDir);
   const digest = createHash("sha256").update(resolved).digest("hex").slice(0, 12);
-  const parent = path10.basename(path10.dirname(resolved));
+  const parent = path11.basename(path11.dirname(resolved));
   const label = /^[A-Za-z0-9._-]{1,96}$/.test(parent) && parent !== "." && parent !== ".." ? parent : "memory";
   return `${label}-${digest}`;
 }
@@ -26472,46 +26628,46 @@ function sha256(buf) {
   return createHash("sha256").update(buf).digest("hex");
 }
 async function latestBackupDir(memoryDir, root) {
-  const base = path10.join(root ?? nativeMemoryBackupRoot(), backupSlugFor(memoryDir));
+  const base = path11.join(root ?? nativeMemoryBackupRoot(), backupSlugFor(memoryDir));
   let entries;
   try {
-    entries = await fs7.readdir(base);
+    entries = await fs8.readdir(base);
   } catch {
     return null;
   }
-  const dirs = entries.filter((e) => existsSync3(path10.join(base, e, "manifest.json"))).sort((a, b) => {
+  const dirs = entries.filter((e) => existsSync3(path11.join(base, e, "manifest.json"))).sort((a, b) => {
     const ma = /^(.*?)(?:-(\d+))?$/.exec(a);
     const mb = /^(.*?)(?:-(\d+))?$/.exec(b);
     if (ma[1] !== mb[1]) return ma[1] < mb[1] ? -1 : 1;
     return Number(ma[2] ?? 1) - Number(mb[2] ?? 1);
   });
-  return dirs.length ? path10.join(base, dirs[dirs.length - 1]) : null;
+  return dirs.length ? path11.join(base, dirs[dirs.length - 1]) : null;
 }
 async function backupNativeMemory(memoryDir, basenames, opts = {}) {
   const root = opts.root ?? nativeMemoryBackupRoot();
   const stamp = timestampSlug(opts.now ?? /* @__PURE__ */ new Date());
-  const base = path10.join(root, backupSlugFor(memoryDir));
-  let backupDir = path10.join(base, stamp);
+  const base = path11.join(root, backupSlugFor(memoryDir));
+  let backupDir = path11.join(base, stamp);
   for (let n = 2; existsSync3(backupDir); n += 1) {
-    backupDir = path10.join(base, `${stamp}-${n}`);
+    backupDir = path11.join(base, `${stamp}-${n}`);
   }
-  await fs7.mkdir(backupDir, { recursive: true });
+  await fs8.mkdir(backupDir, { recursive: true });
   const files = [];
   for (const name of basenames) {
-    if (name !== path10.basename(name)) {
+    if (name !== path11.basename(name)) {
       throw new Error(`refusing to back up a non-basename entry: ${name}`);
     }
-    const from = path10.join(memoryDir, name);
+    const from = path11.join(memoryDir, name);
     let source;
     try {
-      source = await fs7.readFile(from);
+      source = await fs8.readFile(from);
     } catch (err) {
       if (err.code === "ENOENT") continue;
       throw err;
     }
-    const to = path10.join(backupDir, name);
-    await fs7.writeFile(to, source);
-    const written = await fs7.readFile(to);
+    const to = path11.join(backupDir, name);
+    await fs8.writeFile(to, source);
+    const written = await fs8.readFile(to);
     const digest = sha256(source);
     if (sha256(written) !== digest) {
       throw new Error(
@@ -26520,15 +26676,15 @@ async function backupNativeMemory(memoryDir, basenames, opts = {}) {
     }
     files.push({ name, bytes: source.byteLength, sha256: digest });
   }
-  const manifestPath = path10.join(backupDir, "manifest.json");
-  await fs7.writeFile(
+  const manifestPath = path11.join(backupDir, "manifest.json");
+  await fs8.writeFile(
     manifestPath,
     JSON.stringify(
       {
         schema: 1,
         tool: "memlin manage-memory",
         created_at: (opts.now ?? /* @__PURE__ */ new Date()).toISOString(),
-        source_dir: path10.resolve(memoryDir),
+        source_dir: path11.resolve(memoryDir),
         files,
         restore: "Run `memlin manage-memory --revert`, or copy the .md files in this folder back into source_dir by hand. These are plain copies \u2014 nothing here is encoded or compressed."
       },
@@ -26548,7 +26704,7 @@ function gitMainRoot(cwd) {
       ["rev-parse", "--path-format=absolute", "--git-common-dir"],
       { windowsHide: true, cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
     ).trim();
-    return common2 ? path11.dirname(common2) : null;
+    return common2 ? path12.dirname(common2) : null;
   } catch {
     return null;
   }
@@ -26561,13 +26717,13 @@ function encodings(p) {
   ];
 }
 function nativeMemoryDirCandidates(cwd) {
-  const projects = path11.join(os9.homedir(), ".claude", "projects");
+  const projects = path12.join(os10.homedir(), ".claude", "projects");
   const roots = [gitMainRoot(cwd), cwd].filter((x) => !!x);
   const seen = /* @__PURE__ */ new Set();
   const out = [];
   for (const r of roots) {
     for (const enc of encodings(r)) {
-      const dir = path11.join(projects, enc, "memory");
+      const dir = path12.join(projects, enc, "memory");
       if (!seen.has(dir)) {
         seen.add(dir);
         out.push(dir);
@@ -26577,9 +26733,9 @@ function nativeMemoryDirCandidates(cwd) {
   return out;
 }
 function isMemoryDir(dir, forRestore) {
-  if (existsSync4(path11.join(dir, "MEMORY.md"))) return true;
+  if (existsSync4(path12.join(dir, "MEMORY.md"))) return true;
   if (!forRestore) return false;
-  const archived = path11.join(dir, ".archived");
+  const archived = path12.join(dir, ".archived");
   try {
     return statSync(archived).isDirectory();
   } catch {
@@ -26587,56 +26743,56 @@ function isMemoryDir(dir, forRestore) {
   }
 }
 function findNativeMemoryDir(cwd, opts = {}) {
-  const candidates = opts.explicitDir ? [path11.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
+  const candidates = opts.explicitDir ? [path12.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
   return candidates.find((d) => isMemoryDir(d, opts.forRestore ?? false)) ?? null;
 }
 async function archiveHasFiles(memoryDir) {
-  const root = path11.join(memoryDir, ARCHIVE_ROOT);
+  const root = path12.join(memoryDir, ARCHIVE_ROOT);
   let dates;
   try {
-    dates = await fs8.readdir(root);
+    dates = await fs9.readdir(root);
   } catch {
     return false;
   }
   for (const d of dates) {
     try {
-      if ((await fs8.readdir(path11.join(root, d))).length > 0) return true;
+      if ((await fs9.readdir(path12.join(root, d))).length > 0) return true;
     } catch {
     }
   }
   return false;
 }
 async function scanNativeMemoryGlobal() {
-  const projects = path11.join(os9.homedir(), ".claude", "projects");
+  const projects = path12.join(os10.homedir(), ".claude", "projects");
   let entries;
   try {
-    entries = await fs8.readdir(projects);
+    entries = await fs9.readdir(projects);
   } catch {
     return { liveDirs: [], archivedDirs: [] };
   }
   const liveDirs = [];
   const archivedDirs = [];
   for (const entry of entries) {
-    const dir = path11.join(projects, entry, "memory");
-    if (existsSync4(path11.join(dir, "MEMORY.md"))) liveDirs.push(dir);
+    const dir = path12.join(projects, entry, "memory");
+    if (existsSync4(path12.join(dir, "MEMORY.md"))) liveDirs.push(dir);
     if (await archiveHasFiles(dir)) archivedDirs.push(dir);
   }
   return { liveDirs, archivedDirs };
 }
 async function countOtherNativeMemoryDirs(excludeDir) {
-  const excluded = excludeDir ? path11.resolve(excludeDir) : null;
+  const excluded = excludeDir ? path12.resolve(excludeDir) : null;
   const { liveDirs } = await scanNativeMemoryGlobal();
-  return liveDirs.filter((d) => !excluded || path11.resolve(d) !== excluded).length;
+  return liveDirs.filter((d) => !excluded || path12.resolve(d) !== excluded).length;
 }
 async function readNativeMemory(memoryDir) {
-  const indexRaw = await fs8.readFile(path11.join(memoryDir, "MEMORY.md"), "utf8");
-  const satelliteNames = (await fs8.readdir(memoryDir)).filter(
+  const indexRaw = await fs9.readFile(path12.join(memoryDir, "MEMORY.md"), "utf8");
+  const satelliteNames = (await fs9.readdir(memoryDir)).filter(
     (f) => f.endsWith(".md") && f !== "MEMORY.md"
   );
   const satellites = [];
   for (const name of satelliteNames.slice(0, 1e3)) {
     try {
-      const content = await fs8.readFile(path11.join(memoryDir, name), "utf8");
+      const content = await fs9.readFile(path12.join(memoryDir, name), "utf8");
       if (content.length <= 1e5) satellites.push({ name, content });
     } catch {
     }
@@ -26650,16 +26806,16 @@ function archiveSortKey(name) {
   return m ? [m[1], m[2] ? Number(m[2]) : 1] : [name, 0];
 }
 async function listArchiveDirs(memoryDir) {
-  const root = path11.join(memoryDir, ARCHIVE_ROOT);
+  const root = path12.join(memoryDir, ARCHIVE_ROOT);
   let entries;
   try {
-    entries = await fs8.readdir(root);
+    entries = await fs9.readdir(root);
   } catch {
     return [];
   }
   return entries.filter((e) => {
     try {
-      return statSync(path11.join(root, e)).isDirectory();
+      return statSync(path12.join(root, e)).isDirectory();
     } catch {
       return false;
     }
@@ -26667,7 +26823,7 @@ async function listArchiveDirs(memoryDir) {
     const [da, na] = archiveSortKey(a);
     const [db, nb] = archiveSortKey(b);
     return da === db ? na - nb : da < db ? -1 : 1;
-  }).map((e) => path11.join(root, e));
+  }).map((e) => path12.join(root, e));
 }
 async function latestArchiveDir(memoryDir) {
   const dirs = await listArchiveDirs(memoryDir);
@@ -26675,20 +26831,20 @@ async function latestArchiveDir(memoryDir) {
 }
 async function archiveNativeMemory(memoryDir, basenames) {
   const date5 = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-  const root = path11.join(memoryDir, ARCHIVE_ROOT);
-  let archiveDir = path11.join(root, date5);
+  const root = path12.join(memoryDir, ARCHIVE_ROOT);
+  let archiveDir = path12.join(root, date5);
   for (let n = 2; existsSync4(archiveDir); n += 1) {
-    archiveDir = path11.join(root, `${date5}-${n}`);
+    archiveDir = path12.join(root, `${date5}-${n}`);
   }
-  await fs8.mkdir(archiveDir, { recursive: true });
+  await fs9.mkdir(archiveDir, { recursive: true });
   const moved = [];
   for (const name of basenames) {
-    const from = path11.join(memoryDir, name);
+    const from = path12.join(memoryDir, name);
     if (!existsSync4(from)) continue;
-    await fs8.rename(from, path11.join(archiveDir, name));
+    await fs9.rename(from, path12.join(archiveDir, name));
     moved.push(name);
   }
-  const skippedLive = (await fs8.readdir(memoryDir)).filter((f) => f.endsWith(".md")).sort();
+  const skippedLive = (await fs9.readdir(memoryDir)).filter((f) => f.endsWith(".md")).sort();
   return { archiveDir, moved, skippedLive };
 }
 async function restoreNativeMemory(memoryDir) {
@@ -26697,16 +26853,16 @@ async function restoreNativeMemory(memoryDir) {
   const kept = [];
   const handled = /* @__PURE__ */ new Set();
   for (const dir of archiveDirs) {
-    const files = (await fs8.readdir(dir)).filter((f) => f.endsWith(".md"));
+    const files = (await fs9.readdir(dir)).filter((f) => f.endsWith(".md"));
     for (const name of files) {
       if (handled.has(name)) continue;
-      const live = path11.join(memoryDir, name);
+      const live = path12.join(memoryDir, name);
       if (existsSync4(live)) {
         handled.add(name);
         kept.push({ name, at: dir });
         continue;
       }
-      await fs8.rename(path11.join(dir, name), live);
+      await fs9.rename(path12.join(dir, name), live);
       handled.add(name);
       restored.push({ name, from: dir });
     }
@@ -26876,7 +27032,7 @@ async function runManageMemory(action) {
     if (memoryDir) {
       const archive = await latestArchiveDir(memoryDir);
       if (archive) {
-        const count = (await fs9.readdir(archive)).filter((f) => f.endsWith(".md")).length;
+        const count = (await fs10.readdir(archive)).filter((f) => f.endsWith(".md")).length;
         console.log(`  Archive: ${archive} (${count} file${count === 1 ? "" : "s"})`);
         console.log("  Restore them: memlin manage-memory --revert");
       }

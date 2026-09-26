@@ -3478,7 +3478,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs8 = __require("fs");
+    var fs9 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3562,7 +3562,7 @@ var require_gray_matter = __commonJS({
       return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs8.readFileSync(filepath, "utf8");
+      const str2 = fs9.readFileSync(filepath, "utf8");
       const file2 = matter3(str2, options2);
       file2.path = filepath;
       return file2;
@@ -3592,8 +3592,8 @@ var require_gray_matter = __commonJS({
 
 // packages/plugin-core/src/workspace-binding.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { constants, promises as fs4 } from "node:fs";
-import path5 from "node:path";
+import { constants, promises as fs5 } from "node:fs";
+import path6 from "node:path";
 var GIT_POINTER_MAX_BYTES;
 var init_workspace_binding = __esm({
   "packages/plugin-core/src/workspace-binding.ts"() {
@@ -3608,9 +3608,9 @@ var init_workspace_binding = __esm({
 import readline from "node:readline/promises";
 
 // packages/plugin-core/src/client.ts
-import { promises as fs5 } from "node:fs";
-import path6 from "node:path";
-import os5 from "node:os";
+import { promises as fs6 } from "node:fs";
+import path7 from "node:path";
+import os6 from "node:os";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
@@ -4214,8 +4214,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path9, errorMaps, issueData } = params;
-  const fullPath = [...path9, ...issueData.path || []];
+  const { data, path: path10, errorMaps, issueData } = params;
+  const fullPath = [...path10, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -4331,11 +4331,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path9, key) {
+  constructor(parent, value, path10, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path9;
+    this._path = path10;
     this._key = key;
   }
   get path() {
@@ -8371,6 +8371,21 @@ var MODEL_PRICES = {
   // $3/$15 on the strength of the old launch announcement — that over-bills
   // every Sonnet 5 turn by 50%.
   "claude-sonnet-5": { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
+  // Opus 5.5 shipped after the 5 pair and is the current default Anthropic
+  // recommends "for most workloads" — which makes it a current Claude Code
+  // default too, and therefore a model that arrives in ingested telemetry
+  // whether or not this app ever requests it. Absent until 2026-09-22, it was
+  // the THIRD time an Opus tier priced as $0: Opus at all (fixed 2026-07-23),
+  // Opus 5 (2026-09-02), and this. The pattern is not "we forgot" — it is that
+  // a new tier is invisible here until someone checks the sheet against the
+  // pricing page, so re-verify on every model launch.
+  //
+  // It is also CHEAPER than the tier it replaces ($4/$20 against Opus 5's
+  // $5/$25) and reads cache at 0.05x rather than the standard 0.1x — the
+  // second entry in this sheet to need the override, and the reason the
+  // override is a field rather than a special case for the 5.1 pair.
+  // Verified 2026-09-22 against https://platform.claude.com/docs/en/about-claude/pricing.
+  "claude-opus-5-5": { inputUsdPerMTok: 4, outputUsdPerMTok: 20, cacheReadMultiplier: 0.05 },
   // Opus 5 was absent until 2026-09-02. The app never requests it, but
   // aggregateTurnTiming prices provider-reported models from ingested Claude
   // Code telemetry, where it is a current default — so every Opus 5 turn was
@@ -8866,19 +8881,19 @@ var ContextManifestV1Schema = external_exports.object({
       location: `linked_contexts.${index}`
     }))
   ];
-  references.forEach(({ ref, path: path9, location }) => {
+  references.forEach(({ ref, path: path10, location }) => {
     const identity = contextReferenceIdentityKey(ref);
     const prior = seen.get(identity);
     if (prior && prior.revision !== ref.revision) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path9,
+        path: path10,
         message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
       });
     } else if (prior && location.startsWith("linked_contexts.")) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path9,
+        path: path10,
         message: `duplicate linked context ${identity}`
       });
     }
@@ -9192,11 +9207,11 @@ var ContextBundleV1Schema = external_exports.object({
         path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
       }))
     ];
-    for (const { ref, path: path9 } of references) {
+    for (const { ref, path: path10 } of references) {
       if (!contextKeys.has(contextReferenceKey(ref))) {
         ctx.addIssue({
           code: external_exports.ZodIssueCode.custom,
-          path: path9,
+          path: path10,
           message: "provider coverage is outside the exact manifest contexts"
         });
       }
@@ -11386,6 +11401,9 @@ var ThoughtHandoffReceiptV2Schema = external_exports.object({
   replayed: external_exports.boolean().optional()
 }).passthrough();
 
+// packages/shared/dist/ops-watch.js
+var OPS_DIAGNOSE_SEV2_AFTER_MS = 15 * 6e4;
+
 // packages/shared/dist/entitlements.js
 var COORDINATION_SELF = [
   "coordination.work_ledger",
@@ -12076,10 +12094,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path9) {
-  if (!path9)
+function getElementAtPath(obj, path10) {
+  if (!path10)
     return obj;
-  return path9.reduce((acc, key) => acc?.[key], obj);
+  return path10.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -12399,11 +12417,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path9, issues) {
+function prefixIssues(path10, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path9);
+    iss.path.unshift(path10);
     return iss;
   });
 }
@@ -12540,7 +12558,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path9 = []) => {
+  const processError = (error41, path10 = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -12550,7 +12568,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path9, ...issue2.path];
+        const fullpath = [...path10, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -12580,9 +12598,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path9) {
+function toDotPath(path10) {
   const segs = [];
-  for (const seg of path9) {
+  for (const seg of path10) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -23240,10 +23258,10 @@ function validateFlowDefinitionSemantics(flow) {
       ],
       ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
     ];
-    targets.forEach(({ target, path: path9 }) => {
+    targets.forEach(({ target, path: path10 }) => {
       if (!isReservedTarget(target) && !stageById.has(target)) {
         issues.push({
-          path: path9,
+          path: path10,
           code: "missing_transition_target",
           message: `transition target ${JSON.stringify(target)} does not exist`
         });
@@ -23273,7 +23291,7 @@ function validateFlowDefinitionSemantics(flow) {
   const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   let hasReachableEnd = false;
-  const visit = (stageId, path9, pathBounds) => {
+  const visit = (stageId, path10, pathBounds) => {
     reachable.add(stageId);
     if (visited.has(stageId)) return;
     visiting.add(stageId);
@@ -23289,7 +23307,7 @@ function validateFlowDefinitionSemantics(flow) {
         ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
         ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
       ];
-      const currentPath = [...path9, stageId];
+      const currentPath = [...path10, stageId];
       for (const edge of edges) {
         const { target } = edge;
         if (target === "$end") {
@@ -23397,18 +23415,18 @@ var FlowPackManifestBaseSchema = external_exports2.object({
   evals: external_exports2.array(ManifestEvalSchema).max(256),
   model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
 }).strict();
-function validateRelativePackPath(path9) {
-  if (path9.startsWith("/") || path9.startsWith("\\")) return "path must be relative";
-  if (/^[A-Za-z]:/.test(path9) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path9)) {
+function validateRelativePackPath(path10) {
+  if (path10.startsWith("/") || path10.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path10) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path10)) {
     return "drive-qualified paths and URI schemes are not allowed";
   }
-  if (/[\u0000-\u001f\u007f]/.test(path9)) return "control characters are not allowed";
-  if (/%(?:2e|2f|5c)/i.test(path9)) return "encoded path traversal is not allowed";
-  if (path9.includes("\\")) return "path must use forward slashes";
-  if (path9.split("/").some((segment) => segment === ".." || segment === ".")) {
+  if (/[\u0000-\u001f\u007f]/.test(path10)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path10)) return "encoded path traversal is not allowed";
+  if (path10.includes("\\")) return "path must use forward slashes";
+  if (path10.split("/").some((segment) => segment === ".." || segment === ".")) {
     return "path traversal and dot segments are not allowed";
   }
-  if (path9.split("/").some((segment) => segment.length === 0)) {
+  if (path10.split("/").some((segment) => segment.length === 0)) {
     return "path cannot contain empty segments";
   }
   return null;
@@ -23455,22 +23473,22 @@ function validateFlowPackManifestSemantics(manifest) {
       issues
     );
     role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
-      const path9 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      const path10 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
       if (comparedRole === role.id) {
         issues.push({
-          path: path9,
+          path: path10,
           code: "self_referential_model_independence",
           message: "a model role cannot require independence from itself"
         });
       } else if (!modelRolesById.has(comparedRole)) {
         issues.push({
-          path: path9,
+          path: path10,
           code: "missing_independence_model_role",
           message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
         });
       } else if (modelRolesById.get(comparedRole)?.independence !== null) {
         issues.push({
-          path: path9,
+          path: path10,
           code: "independence_reference_not_author",
           message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
         });
@@ -23736,13 +23754,22 @@ var Receipt = external_exports.object({
 init_auth_refusal();
 import { readFileSync } from "node:fs";
 import crypto2 from "node:crypto";
-import os4 from "node:os";
+import os5 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // packages/plugin-core/src/host.ts
 import os3 from "node:os";
 import path4 from "node:path";
+
+// packages/plugin-core/src/private-mode.ts
+init_atomic_rename();
+import { promises as fs4 } from "node:fs";
+import path5 from "node:path";
+import os4 from "node:os";
+var PRIVATE_TTL_MS = 24 * 60 * 60 * 1e3;
+var DENIED_TTL_MS = 10 * 60 * 1e3;
+var FLOOR_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 
 // packages/plugin-core/src/memlin-api-client.ts
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
@@ -23752,19 +23779,19 @@ var RESOLVE_V2_MAX_LINE_BYTES = 2 * 1024 * 1024;
 init_workspace_binding();
 init_auth_refusal();
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path6.join(os5.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path7.join(os6.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path6.join(os5.homedir(), ".config", "memlin");
-var TOKEN_FILE = path6.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path7.join(os6.homedir(), ".config", "memlin");
+var TOKEN_FILE = path7.join(CONFIG_DIR, "token.json");
 async function writeGlobalConfig(config2) {
   const file2 = globalConfigFilePath();
-  await fs5.mkdir(path6.dirname(file2), { recursive: true });
-  const tmp = path6.join(
-    path6.dirname(file2),
-    `${path6.basename(file2)}.tmp-${process.pid}-${randomUUID3()}`
+  await fs6.mkdir(path7.dirname(file2), { recursive: true });
+  const tmp = path7.join(
+    path7.dirname(file2),
+    `${path7.basename(file2)}.tmp-${process.pid}-${randomUUID3()}`
   );
-  await fs5.writeFile(tmp, JSON.stringify(config2, null, 2), { mode: 384 });
-  await fs5.chmod(tmp, 384).catch(() => {
+  await fs6.writeFile(tmp, JSON.stringify(config2, null, 2), { mode: 384 });
+  await fs6.chmod(tmp, 384).catch(() => {
   });
   await atomicRename(tmp, file2);
 }
@@ -23778,17 +23805,17 @@ function accessTokenSubject(accessToken) {
 }
 
 // packages/plugin-core/src/login-bootstrap.ts
-import { promises as fs7 } from "node:fs";
-import path8 from "node:path";
+import { promises as fs8 } from "node:fs";
+import path9 from "node:path";
 import { randomUUID as randomUUID4 } from "node:crypto";
 init_atomic_rename();
 init_auth_refusal();
 
 // packages/plugin-core/src/plugin-install.ts
-import { promises as fs6 } from "node:fs";
+import { promises as fs7 } from "node:fs";
 import { existsSync } from "node:fs";
-import path7 from "node:path";
-import os6 from "node:os";
+import path8 from "node:path";
+import os7 from "node:os";
 
 // packages/plugin-core/src/login-bootstrap.ts
 var LoginBootstrapError = class extends Error {
@@ -23805,7 +23832,7 @@ var DEFAULT_PUBLICATION_DEPENDENCIES = {
 };
 async function readSnapshot(file2) {
   try {
-    return await fs7.readFile(file2);
+    return await fs8.readFile(file2);
   } catch (error40) {
     if (error40.code === "ENOENT") return null;
     throw error40;
@@ -23813,16 +23840,16 @@ async function readSnapshot(file2) {
 }
 async function restoreSnapshot(file2, snapshot) {
   if (snapshot === null) {
-    await fs7.rm(file2, { force: true });
+    await fs8.rm(file2, { force: true });
     return;
   }
-  await fs7.mkdir(path8.dirname(file2), { recursive: true });
-  const tmp = path8.join(
-    path8.dirname(file2),
-    `${path8.basename(file2)}.rollback-${process.pid}-${randomUUID4()}`
+  await fs8.mkdir(path9.dirname(file2), { recursive: true });
+  const tmp = path9.join(
+    path9.dirname(file2),
+    `${path9.basename(file2)}.rollback-${process.pid}-${randomUUID4()}`
   );
-  await fs7.writeFile(tmp, snapshot, { mode: 384 });
-  await fs7.chmod(tmp, 384).catch(() => {
+  await fs8.writeFile(tmp, snapshot, { mode: 384 });
+  await fs8.chmod(tmp, 384).catch(() => {
   });
   await atomicRename(tmp, file2);
 }

@@ -84,9 +84,9 @@ var init_atomic_rename = __esm({
 
 // packages/plugin-core/src/auth-refusal.ts
 import crypto from "node:crypto";
-import { promises as fs2 } from "node:fs";
-import os from "node:os";
-import path2 from "node:path";
+import { promises as fs3 } from "node:fs";
+import os2 from "node:os";
+import path3 from "node:path";
 function isReason(value) {
   return value === "not_member" || value === "no_profile";
 }
@@ -107,19 +107,19 @@ function classifyAuthRefusal(status, body) {
   return null;
 }
 function authRefusalDir() {
-  return process.env.MEMLIN_AUTH_REFUSAL_DIR ?? path2.join(os.homedir(), ".config", "memlin", "auth-refusal");
+  return process.env.MEMLIN_AUTH_REFUSAL_DIR ?? path3.join(os2.homedir(), ".config", "memlin", "auth-refusal");
 }
 function sha(value) {
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 32);
 }
 function normalizeBinding(binding) {
-  return binding ? path2.resolve(binding) : null;
+  return binding ? path3.resolve(binding) : null;
 }
 function accountDir(accountId) {
-  return path2.join(authRefusalDir(), sha(accountId));
+  return path3.join(authRefusalDir(), sha(accountId));
 }
 function entryPath(accountId, binding) {
-  return path2.join(accountDir(accountId), `${sha(binding ?? "(global)")}.json`);
+  return path3.join(accountDir(accountId), `${sha(binding ?? "(global)")}.json`);
 }
 function isEntry(value) {
   if (typeof value !== "object" || value === null) return false;
@@ -128,7 +128,7 @@ function isEntry(value) {
 }
 async function readRaw(file2) {
   try {
-    const parsed = JSON.parse(await fs2.readFile(file2, "utf8"));
+    const parsed = JSON.parse(await fs3.readFile(file2, "utf8"));
     return isEntry(parsed) ? parsed : null;
   } catch {
     return null;
@@ -136,9 +136,9 @@ async function readRaw(file2) {
 }
 async function writeEntry(entry) {
   const file2 = entryPath(entry.account_id, entry.binding);
-  await fs2.mkdir(path2.dirname(file2), { recursive: true });
+  await fs3.mkdir(path3.dirname(file2), { recursive: true });
   const tmp = `${file2}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  await fs2.writeFile(tmp, JSON.stringify(entry), { mode: 384 });
+  await fs3.writeFile(tmp, JSON.stringify(entry), { mode: 384 });
   await atomicRename(tmp, file2);
 }
 async function recordAuthRefusal(input) {
@@ -162,18 +162,18 @@ async function readAuthRefusal(accountId, binding, now = Date.now()) {
   const entry = await readRaw(file2);
   if (!entry) return null;
   if (now >= entry.expires_at) {
-    await fs2.rm(file2, { force: true }).catch(() => {
+    await fs3.rm(file2, { force: true }).catch(() => {
     });
     return null;
   }
   return entry;
 }
 async function clearAuthRefusalsForAccount(accountId) {
-  await fs2.rm(accountDir(accountId), { recursive: true, force: true }).catch(() => {
+  await fs3.rm(accountDir(accountId), { recursive: true, force: true }).catch(() => {
   });
 }
 async function clearAllAuthRefusals() {
-  await fs2.rm(authRefusalDir(), { recursive: true, force: true }).catch(() => {
+  await fs3.rm(authRefusalDir(), { recursive: true, force: true }).catch(() => {
   });
 }
 function accountIdsChanged(before, after) {
@@ -232,18 +232,18 @@ __export(companion_client_exports, {
 });
 import http from "node:http";
 import crypto2 from "node:crypto";
-import os2 from "node:os";
-import path3 from "node:path";
+import os3 from "node:os";
+import path4 from "node:path";
 function companionSocketPath(env = process.env) {
   const override = env[COMPANION_SOCKET_ENV];
   if (override) return override;
   if (process.platform === "win32") {
-    return `\\\\.\\pipe\\memlin-companion-${os2.userInfo().username}`;
+    return `\\\\.\\pipe\\memlin-companion-${os3.userInfo().username}`;
   }
-  return path3.join(os2.homedir(), ".config", "memlin", "run", "companion.sock");
+  return path4.join(os3.homedir(), ".config", "memlin", "run", "companion.sock");
 }
 function companionRunDir() {
-  return path3.join(os2.homedir(), ".config", "memlin", "run");
+  return path4.join(os3.homedir(), ".config", "memlin", "run");
 }
 function deriveResolveId(input) {
   const digest = crypto2.createHash("sha256").update("memlin.resolve.v2\0").update(JSON.stringify([input.accountId, input.host, input.sessionId ?? null, input.turnId])).digest().subarray(0, 16);
@@ -3807,7 +3807,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs9 = __require("fs");
+    var fs7 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3891,7 +3891,7 @@ var require_gray_matter = __commonJS({
       return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs9.readFileSync(filepath, "utf8");
+      const str2 = fs7.readFileSync(filepath, "utf8");
       const file2 = matter3(str2, options2);
       file2.path = filepath;
       return file2;
@@ -4222,8 +4222,171 @@ var init_workspace_binding = __esm({
   }
 });
 
-// packages/plugin-core/src/cli/ingest-native-memory.ts
-import path12 from "node:path";
+// packages/plugin-core/src/private-mode.ts
+init_atomic_rename();
+import { promises as fs2 } from "node:fs";
+import path2 from "node:path";
+import os from "node:os";
+var PRIVATE_HEADER = "Memlin-Private";
+var PRIVATE_UNTIL_HEADER = "Memlin-Private-Until";
+var PRIVATE_TTL_MS = 24 * 60 * 60 * 1e3;
+var PRIVATE_ALLOWED_WRITES = [
+  "POST /resolve",
+  "POST /projects/resolve",
+  "POST /deploy-guard"
+];
+var DENIED_TTL_MS = 10 * 60 * 1e3;
+var FLOOR_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+function stateFile() {
+  return path2.join(os.homedir(), ".config", "memlin", "private-sessions.json");
+}
+async function readPrivateState() {
+  try {
+    const parsed = JSON.parse(await fs2.readFile(stateFile(), "utf8"));
+    return { ...parsed, sessions: parsed.sessions ?? {} };
+  } catch {
+    return { sessions: {} };
+  }
+}
+async function writePrivateState(state, now) {
+  for (const [id, entry] of Object.entries(state.sessions)) {
+    if (entry.expires_at <= now) delete state.sessions[id];
+  }
+  for (const [id, entry] of Object.entries(state.denied ?? {})) {
+    if (now - entry.at > DENIED_TTL_MS) delete state.denied?.[id];
+  }
+  for (const [id, entry] of Object.entries(state.accounts ?? {})) {
+    if (entry.until !== null && entry.until <= now) delete state.accounts?.[id];
+  }
+  for (const [id, floor] of Object.entries(state.floors ?? {})) {
+    if (now - floor.at > FLOOR_TTL_MS) delete state.floors?.[id];
+  }
+  const file2 = stateFile();
+  await fs2.mkdir(path2.dirname(file2), { recursive: true });
+  const tmp = `${file2}.${process.pid}.${Date.now()}.tmp`;
+  await fs2.writeFile(tmp, JSON.stringify(state, null, 2), { mode: 384 });
+  await atomicRename(tmp, file2);
+}
+function envPrivate() {
+  const v = process.env.MEMLIN_PRIVATE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
+}
+function currentSessionId() {
+  return process.env.MEMLIN_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || null;
+}
+async function isPrivateSession(sessionId = currentSessionId(), now = Date.now(), accountId = null) {
+  const state = await readPrivateState();
+  if (accountId && accountDenied(state, accountId, now)) return false;
+  if (envPrivate()) return true;
+  if (accountId && accountPrivateActive(state, accountId, now)) return true;
+  if (!sessionId) return false;
+  const entry = state.sessions[sessionId];
+  return Boolean(entry && entry.expires_at > now);
+}
+function accountDenied(state, accountId, now) {
+  const entry = state.denied?.[accountId];
+  return Boolean(entry && now - entry.at <= DENIED_TTL_MS);
+}
+function accountPrivateActive(state, accountId, now) {
+  const entry = state.accounts?.[accountId];
+  return Boolean(entry && (entry.until === null || entry.until > now));
+}
+async function notePrivateUntil(accountId, header, now = Date.now()) {
+  const state = await readPrivateState();
+  if (header === "denied") {
+    const prev2 = state.denied?.[accountId];
+    if (prev2 && now - prev2.at < 6e4 && !state.accounts?.[accountId]) return;
+    state.denied = { ...state.denied, [accountId]: { at: now } };
+    delete state.accounts?.[accountId];
+    await writePrivateState(state, now);
+    return;
+  }
+  let until;
+  if (!header || header === "off") until = void 0;
+  else if (header === "infinity") until = null;
+  else {
+    const at = Date.parse(header);
+    until = Number.isFinite(at) && at > now ? at : void 0;
+  }
+  if (until !== void 0 && state.denied?.[accountId]) delete state.denied[accountId];
+  const prev = state.accounts?.[accountId];
+  if (until === void 0) {
+    if (!prev) return;
+    delete state.accounts[accountId];
+  } else {
+    if (prev && prev.until === until) return;
+    state.accounts = { ...state.accounts, [accountId]: { until, seen_at: now } };
+  }
+  await writePrivateState(state, now);
+}
+async function setPrivateSession(sessionId, on, opts = {}) {
+  const now = opts.now ?? Date.now();
+  const state = await readPrivateState();
+  if (!on && state.sessions[sessionId]) {
+    await raiseFloor(state, sessionId, opts.transcriptPath ?? null, now);
+  }
+  if (on) {
+    state.sessions[sessionId] = {
+      started_at: state.sessions[sessionId]?.started_at ?? now,
+      expires_at: now + PRIVATE_TTL_MS,
+      cwd: opts.cwd ?? null
+    };
+  } else {
+    delete state.sessions[sessionId];
+  }
+  state.last_toggled = { session_id: sessionId, on, at: now };
+  await writePrivateState(state, now);
+}
+async function privateStatus(sessionId = currentSessionId(), now = Date.now(), accountId = null) {
+  const state = await readPrivateState();
+  if (accountId && accountDenied(state, accountId, now)) {
+    return { on: false, source: "denied", expiresAt: null };
+  }
+  if (envPrivate()) return { on: true, source: "env", expiresAt: null };
+  if (accountId && accountPrivateActive(state, accountId, now)) {
+    return { on: true, source: "account", expiresAt: state.accounts[accountId].until };
+  }
+  const id = sessionId ?? state.last_toggled?.session_id ?? null;
+  const entry = id ? state.sessions[id] : void 0;
+  if (entry && entry.expires_at > now) {
+    return { on: true, source: "session", expiresAt: entry.expires_at };
+  }
+  return { on: false, source: "off", expiresAt: null };
+}
+async function raiseFloor(state, sessionId, transcriptPath, now) {
+  let chars = null;
+  if (transcriptPath) {
+    try {
+      chars = (await fs2.readFile(transcriptPath, "utf8")).length;
+    } catch {
+    }
+  }
+  const prev = state.floors?.[sessionId];
+  if (prev && (prev.chars === null || chars === null)) chars = null;
+  else if (prev && chars !== null) chars = Math.max(prev.chars, chars);
+  state.floors = { ...state.floors, [sessionId]: { chars, at: now } };
+}
+async function checkPrivateAllowed(api, accountId, timeoutMs = 3e3) {
+  try {
+    const res = await Promise.race([
+      api.getPrivateMode({ accountId }),
+      new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs).unref())
+    ]);
+    if (!res || typeof res.allowed !== "boolean") return null;
+    if (!res.allowed) await notePrivateUntil(accountId, "denied");
+    return res.allowed;
+  } catch {
+    return null;
+  }
+}
+function isPrivateAllowedWrite(method, pathAndQuery) {
+  if (method === "GET") return true;
+  const pathOnly = pathAndQuery.split("?")[0];
+  return PRIVATE_ALLOWED_WRITES.includes(`${method} ${pathOnly}`);
+}
+var PRIVATE_ON_NOTICE = "Memlin private mode is ON for this session. Memlin context still loads, but nothing from this session is saved: no scribe capture, no plan sync, no activity, no audit. Turn it off with /memlin-private off. It ends with the session.";
+var PRIVATE_DENIED_NOTICE = "Memlin private mode is not available to you in this workspace \u2014 its owners or admins limit who can use it (Settings \u2192 Private mode). This session is captured normally.";
+var PRIVATE_OFF_NOTICE = "Memlin private mode is OFF. This session is captured normally from here on; the private stretch before it was not saved.";
 
 // packages/plugin-core/src/client.ts
 import { promises as fs6 } from "node:fs";
@@ -4233,9 +4396,9 @@ import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
 init_atomic_rename();
-import { promises as fs3 } from "node:fs";
-import path4 from "node:path";
-import os3 from "node:os";
+import { promises as fs4 } from "node:fs";
+import path5 from "node:path";
+import os4 from "node:os";
 import { randomUUID } from "node:crypto";
 
 // packages/plugin-core/src/backend-error.ts
@@ -4266,46 +4429,6 @@ function describeOpaqueBody(status, text) {
   }
   return `HTTP ${status}: ${singleLine(trimmed)}`;
 }
-function backendUnreachableLine(detail) {
-  return `memlin: backend unreachable (${detail}), no memory available`;
-}
-var ROUTING_PATTERN = /account routing (unavailable|lookup failed)/i;
-var CLOUDFLARE_STATUS = /\b(52[0-7])\b/;
-function statusOf(err) {
-  if (err instanceof MemlinApiError) return err.status;
-  const status = err?.status;
-  if (typeof status === "number" && status >= 100 && status <= 599) return status;
-  const message = err instanceof Error ? err.message : String(err);
-  const arrow = message.match(/→ (\d{3}):/);
-  if (arrow) return Number(arrow[1]);
-  return null;
-}
-function summarizeBackendFailure(err) {
-  const message = err instanceof Error ? err.message : String(err ?? "");
-  const status = statusOf(err);
-  if (ROUTING_PATTERN.test(message)) {
-    const embedded = message.match(CLOUDFLARE_STATUS)?.[1];
-    const code = embedded ?? (status !== null && status >= 500 ? String(status) : null);
-    const detail = code ? `routing ${code}` : "routing unavailable";
-    return { kind: "routing", status: code ? Number(code) : status, detail, line: backendUnreachableLine(detail) };
-  }
-  if (status !== null && status >= 500) {
-    const detail = `HTTP ${status}`;
-    return { kind: "http", status, detail, line: backendUnreachableLine(detail) };
-  }
-  if (/took longer than \d+ seconds/i.test(message)) {
-    return { kind: "network", status: null, detail: "timeout", line: backendUnreachableLine("timeout") };
-  }
-  if (/couldn'?t reach|fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|network/i.test(message)) {
-    return {
-      kind: "network",
-      status: null,
-      detail: "network unreachable",
-      line: backendUnreachableLine("network unreachable")
-    };
-  }
-  return null;
-}
 
 // packages/plugin-core/src/auth.ts
 init_auth_refusal();
@@ -4315,7 +4438,7 @@ var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
 function persistedTokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path4.join(os3.homedir(), ".config", "memlin", "token.json");
+  return process.env.MEMLIN_TOKEN_FILE || path5.join(os4.homedir(), ".config", "memlin", "token.json");
 }
 var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
 var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
@@ -4326,18 +4449,18 @@ function authFileLockPath() {
 async function acquireAuthFileLock() {
   const file2 = authFileLockPath();
   const owner = `${process.pid}:${randomUUID()}`;
-  await fs3.mkdir(path4.dirname(file2), { recursive: true });
+  await fs4.mkdir(path5.dirname(file2), { recursive: true });
   const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
   while (true) {
     try {
-      const handle = await fs3.open(file2, "wx", 384);
+      const handle = await fs4.open(file2, "wx", 384);
       try {
         await handle.writeFile(owner, "utf8");
         await handle.sync();
       } catch (error40) {
         await handle.close().catch(() => {
         });
-        await fs3.rm(file2, { force: true }).catch(() => {
+        await fs4.rm(file2, { force: true }).catch(() => {
         });
         throw error40;
       }
@@ -4347,16 +4470,16 @@ async function acquireAuthFileLock() {
         released = true;
         await handle.close().catch(() => {
         });
-        const currentOwner = await fs3.readFile(file2, "utf8").catch(() => null);
-        if (currentOwner === owner) await fs3.rm(file2, { force: true }).catch(() => {
+        const currentOwner = await fs4.readFile(file2, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs4.rm(file2, { force: true }).catch(() => {
         });
       };
     } catch (error40) {
       if (error40.code !== "EEXIST") throw error40;
       try {
-        const stat = await fs3.stat(file2);
+        const stat = await fs4.stat(file2);
         if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
-          await fs3.rm(file2, { force: true });
+          await fs4.rm(file2, { force: true });
           continue;
         }
       } catch (statError) {
@@ -4380,7 +4503,7 @@ async function withAuthFileLock(operation) {
 }
 async function readPersistedToken() {
   try {
-    const raw = await fs3.readFile(persistedTokenFilePath(), "utf8");
+    const raw = await fs4.readFile(persistedTokenFilePath(), "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -4388,14 +4511,14 @@ async function readPersistedToken() {
 }
 async function writePersistedToken(t) {
   const file2 = persistedTokenFilePath();
-  await fs3.mkdir(path4.dirname(file2), { recursive: true });
-  const tmp = path4.join(
-    path4.dirname(file2),
-    `${path4.basename(file2)}.tmp-${process.pid}-${randomUUID()}`
+  await fs4.mkdir(path5.dirname(file2), { recursive: true });
+  const tmp = path5.join(
+    path5.dirname(file2),
+    `${path5.basename(file2)}.tmp-${process.pid}-${randomUUID()}`
   );
   const previous = await readPersistedToken().catch(() => null);
-  await fs3.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
-  await fs3.chmod(tmp, 384).catch(() => {
+  await fs4.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
+  await fs4.chmod(tmp, 384).catch(() => {
   });
   await atomicRename(tmp, file2);
   await clearRefusalsIfAccountsChanged(previous?.access_token ?? null, t.access_token);
@@ -4990,8 +5113,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path13, errorMaps, issueData } = params;
-  const fullPath = [...path13, ...issueData.path || []];
+  const { data, path: path10, errorMaps, issueData } = params;
+  const fullPath = [...path10, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -5107,11 +5230,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path13, key) {
+  constructor(parent, value, path10, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path13;
+    this._path = path10;
     this._key = key;
   }
   get path() {
@@ -9679,19 +9802,19 @@ var ContextManifestV1Schema = external_exports.object({
       location: `linked_contexts.${index}`
     }))
   ];
-  references.forEach(({ ref, path: path13, location }) => {
+  references.forEach(({ ref, path: path10, location }) => {
     const identity = contextReferenceIdentityKey(ref);
     const prior = seen.get(identity);
     if (prior && prior.revision !== ref.revision) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path13,
+        path: path10,
         message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
       });
     } else if (prior && location.startsWith("linked_contexts.")) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path13,
+        path: path10,
         message: `duplicate linked context ${identity}`
       });
     }
@@ -10005,11 +10128,11 @@ var ContextBundleV1Schema = external_exports.object({
         path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
       }))
     ];
-    for (const { ref, path: path13 } of references) {
+    for (const { ref, path: path10 } of references) {
       if (!contextKeys.has(contextReferenceKey(ref))) {
         ctx.addIssue({
           code: external_exports.ZodIssueCode.custom,
-          path: path13,
+          path: path10,
           message: "provider coverage is outside the exact manifest contexts"
         });
       }
@@ -12892,10 +13015,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path13) {
-  if (!path13)
+function getElementAtPath(obj, path10) {
+  if (!path10)
     return obj;
-  return path13.reduce((acc, key) => acc?.[key], obj);
+  return path10.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -13215,11 +13338,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path13, issues) {
+function prefixIssues(path10, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path13);
+    iss.path.unshift(path10);
     return iss;
   });
 }
@@ -13356,7 +13479,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path13 = []) => {
+  const processError = (error41, path10 = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -13366,7 +13489,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path13, ...issue2.path];
+        const fullpath = [...path10, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -13396,9 +13519,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path13) {
+function toDotPath(path10) {
   const segs = [];
-  for (const seg of path13) {
+  for (const seg of path10) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -24056,10 +24179,10 @@ function validateFlowDefinitionSemantics(flow) {
       ],
       ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
     ];
-    targets.forEach(({ target, path: path13 }) => {
+    targets.forEach(({ target, path: path10 }) => {
       if (!isReservedTarget(target) && !stageById.has(target)) {
         issues.push({
-          path: path13,
+          path: path10,
           code: "missing_transition_target",
           message: `transition target ${JSON.stringify(target)} does not exist`
         });
@@ -24089,7 +24212,7 @@ function validateFlowDefinitionSemantics(flow) {
   const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   let hasReachableEnd = false;
-  const visit = (stageId, path13, pathBounds) => {
+  const visit = (stageId, path10, pathBounds) => {
     reachable.add(stageId);
     if (visited.has(stageId)) return;
     visiting.add(stageId);
@@ -24105,7 +24228,7 @@ function validateFlowDefinitionSemantics(flow) {
         ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
         ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
       ];
-      const currentPath = [...path13, stageId];
+      const currentPath = [...path10, stageId];
       for (const edge of edges) {
         const { target } = edge;
         if (target === "$end") {
@@ -24213,18 +24336,18 @@ var FlowPackManifestBaseSchema = external_exports2.object({
   evals: external_exports2.array(ManifestEvalSchema).max(256),
   model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
 }).strict();
-function validateRelativePackPath(path13) {
-  if (path13.startsWith("/") || path13.startsWith("\\")) return "path must be relative";
-  if (/^[A-Za-z]:/.test(path13) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path13)) {
+function validateRelativePackPath(path10) {
+  if (path10.startsWith("/") || path10.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path10) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path10)) {
     return "drive-qualified paths and URI schemes are not allowed";
   }
-  if (/[\u0000-\u001f\u007f]/.test(path13)) return "control characters are not allowed";
-  if (/%(?:2e|2f|5c)/i.test(path13)) return "encoded path traversal is not allowed";
-  if (path13.includes("\\")) return "path must use forward slashes";
-  if (path13.split("/").some((segment) => segment === ".." || segment === ".")) {
+  if (/[\u0000-\u001f\u007f]/.test(path10)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path10)) return "encoded path traversal is not allowed";
+  if (path10.includes("\\")) return "path must use forward slashes";
+  if (path10.split("/").some((segment) => segment === ".." || segment === ".")) {
     return "path traversal and dot segments are not allowed";
   }
-  if (path13.split("/").some((segment) => segment.length === 0)) {
+  if (path10.split("/").some((segment) => segment.length === 0)) {
     return "path cannot contain empty segments";
   }
   return null;
@@ -24271,22 +24394,22 @@ function validateFlowPackManifestSemantics(manifest) {
       issues
     );
     role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
-      const path13 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      const path10 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
       if (comparedRole === role.id) {
         issues.push({
-          path: path13,
+          path: path10,
           code: "self_referential_model_independence",
           message: "a model role cannot require independence from itself"
         });
       } else if (!modelRolesById.has(comparedRole)) {
         issues.push({
-          path: path13,
+          path: path10,
           code: "missing_independence_model_role",
           message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
         });
       } else if (modelRolesById.get(comparedRole)?.independence !== null) {
         issues.push({
-          path: path13,
+          path: path10,
           code: "independence_reference_not_author",
           message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
         });
@@ -24583,42 +24706,6 @@ var AGENT_EXPECTED_CAPABILITIES = {
   // of its own.
   companion: ["cli", "sync", "realtime", "resolve"]
 };
-var PROVIDER_HOSTS = [
-  "github.com",
-  "gitlab.com",
-  "bitbucket.org",
-  "dev.azure.com",
-  "ssh.dev.azure.com",
-  "codeberg.org",
-  "sr.ht",
-  "git.sr.ht"
-];
-function normalizeGitRemote(raw) {
-  if (!raw) return null;
-  let s = raw.trim();
-  if (!s) return null;
-  if (!s.includes("://")) {
-    s = s.replace(/^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)/, "https://$1/");
-  }
-  s = s.replace(/^(?:ssh|git|https?):\/\//, "");
-  s = s.replace(/^[^/@]+@/, "");
-  s = s.replace(/\.git$/, "");
-  s = s.replace(/\/$/, "");
-  const slash = s.indexOf("/");
-  if (slash > 0) {
-    const host = s.slice(0, slash).toLowerCase();
-    const rest = s.slice(slash);
-    s = host + rest;
-    for (const provider of PROVIDER_HOSTS) {
-      if (host === provider) break;
-      if (host.startsWith(provider + "-")) {
-        s = provider + rest;
-        break;
-      }
-    }
-  }
-  return s || null;
-}
 async function closeHttpSockets() {
   try {
     const dispatcher = globalThis[/* @__PURE__ */ Symbol.for("undici.globalDispatcher.1")];
@@ -24639,8 +24726,8 @@ async function closeHttpSockets() {
 }
 
 // packages/plugin-core/src/host.ts
-import os4 from "node:os";
-import path5 from "node:path";
+import os5 from "node:os";
+import path6 from "node:path";
 var BaseHost = class {
   constructor(kind, home) {
     this.kind = kind;
@@ -24652,42 +24739,42 @@ var BaseHost = class {
     return this.home;
   }
   plansDir() {
-    return path5.join(this.home, "plans");
+    return path6.join(this.home, "plans");
   }
 };
 var ClaudeCodeHost = class extends BaseHost {
   constructor() {
-    super("claude-code", path5.join(os4.homedir(), ".claude"));
+    super("claude-code", path6.join(os5.homedir(), ".claude"));
   }
 };
 var CursorHost = class extends BaseHost {
   constructor() {
-    super("cursor", path5.join(os4.homedir(), ".config", "memlin"));
+    super("cursor", path6.join(os5.homedir(), ".config", "memlin"));
   }
 };
 var CodexHost = class extends BaseHost {
   constructor() {
-    super("codex", path5.join(os4.homedir(), ".config", "memlin"));
+    super("codex", path6.join(os5.homedir(), ".config", "memlin"));
   }
 };
 var WindsurfHost = class extends BaseHost {
   constructor() {
-    super("windsurf", path5.join(os4.homedir(), ".config", "memlin"));
+    super("windsurf", path6.join(os5.homedir(), ".config", "memlin"));
   }
 };
 var AntigravityHost = class extends BaseHost {
   constructor() {
-    super("antigravity", path5.join(os4.homedir(), ".config", "memlin"));
+    super("antigravity", path6.join(os5.homedir(), ".config", "memlin"));
   }
 };
 var VSCodeHost = class extends BaseHost {
   constructor() {
-    super("vscode", path5.join(os4.homedir(), ".config", "memlin"));
+    super("vscode", path6.join(os5.homedir(), ".config", "memlin"));
   }
 };
 var CompanionHost = class extends BaseHost {
   constructor() {
-    super("companion", path5.join(os4.homedir(), ".config", "memlin"));
+    super("companion", path6.join(os5.homedir(), ".config", "memlin"));
   }
 };
 var HOSTS2 = {
@@ -24703,109 +24790,6 @@ function resolveHost() {
   const envHost = "windsurf";
   const make = HOSTS2[envHost];
   return (make ?? HOSTS2["claude-code"])();
-}
-
-// packages/plugin-core/src/private-mode.ts
-init_atomic_rename();
-import { promises as fs4 } from "node:fs";
-import path6 from "node:path";
-import os5 from "node:os";
-var PRIVATE_HEADER = "Memlin-Private";
-var PRIVATE_UNTIL_HEADER = "Memlin-Private-Until";
-var PRIVATE_TTL_MS = 24 * 60 * 60 * 1e3;
-var PRIVATE_ALLOWED_WRITES = [
-  "POST /resolve",
-  "POST /projects/resolve",
-  "POST /deploy-guard"
-];
-var DENIED_TTL_MS = 10 * 60 * 1e3;
-var FLOOR_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
-function stateFile() {
-  return path6.join(os5.homedir(), ".config", "memlin", "private-sessions.json");
-}
-async function readPrivateState() {
-  try {
-    const parsed = JSON.parse(await fs4.readFile(stateFile(), "utf8"));
-    return { ...parsed, sessions: parsed.sessions ?? {} };
-  } catch {
-    return { sessions: {} };
-  }
-}
-async function writePrivateState(state, now) {
-  for (const [id, entry] of Object.entries(state.sessions)) {
-    if (entry.expires_at <= now) delete state.sessions[id];
-  }
-  for (const [id, entry] of Object.entries(state.denied ?? {})) {
-    if (now - entry.at > DENIED_TTL_MS) delete state.denied?.[id];
-  }
-  for (const [id, entry] of Object.entries(state.accounts ?? {})) {
-    if (entry.until !== null && entry.until <= now) delete state.accounts?.[id];
-  }
-  for (const [id, floor] of Object.entries(state.floors ?? {})) {
-    if (now - floor.at > FLOOR_TTL_MS) delete state.floors?.[id];
-  }
-  const file2 = stateFile();
-  await fs4.mkdir(path6.dirname(file2), { recursive: true });
-  const tmp = `${file2}.${process.pid}.${Date.now()}.tmp`;
-  await fs4.writeFile(tmp, JSON.stringify(state, null, 2), { mode: 384 });
-  await atomicRename(tmp, file2);
-}
-function envPrivate() {
-  const v = process.env.MEMLIN_PRIVATE?.trim().toLowerCase();
-  return v === "1" || v === "true" || v === "on";
-}
-function currentSessionId() {
-  return process.env.MEMLIN_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || null;
-}
-async function isPrivateSession(sessionId = currentSessionId(), now = Date.now(), accountId = null) {
-  const state = await readPrivateState();
-  if (accountId && accountDenied(state, accountId, now)) return false;
-  if (envPrivate()) return true;
-  if (accountId && accountPrivateActive(state, accountId, now)) return true;
-  if (!sessionId) return false;
-  const entry = state.sessions[sessionId];
-  return Boolean(entry && entry.expires_at > now);
-}
-function accountDenied(state, accountId, now) {
-  const entry = state.denied?.[accountId];
-  return Boolean(entry && now - entry.at <= DENIED_TTL_MS);
-}
-function accountPrivateActive(state, accountId, now) {
-  const entry = state.accounts?.[accountId];
-  return Boolean(entry && (entry.until === null || entry.until > now));
-}
-async function notePrivateUntil(accountId, header, now = Date.now()) {
-  const state = await readPrivateState();
-  if (header === "denied") {
-    const prev2 = state.denied?.[accountId];
-    if (prev2 && now - prev2.at < 6e4 && !state.accounts?.[accountId]) return;
-    state.denied = { ...state.denied, [accountId]: { at: now } };
-    delete state.accounts?.[accountId];
-    await writePrivateState(state, now);
-    return;
-  }
-  let until;
-  if (!header || header === "off") until = void 0;
-  else if (header === "infinity") until = null;
-  else {
-    const at = Date.parse(header);
-    until = Number.isFinite(at) && at > now ? at : void 0;
-  }
-  if (until !== void 0 && state.denied?.[accountId]) delete state.denied[accountId];
-  const prev = state.accounts?.[accountId];
-  if (until === void 0) {
-    if (!prev) return;
-    delete state.accounts[accountId];
-  } else {
-    if (prev && prev.until === until) return;
-    state.accounts = { ...state.accounts, [accountId]: { until, seen_at: now } };
-  }
-  await writePrivateState(state, now);
-}
-function isPrivateAllowedWrite(method, pathAndQuery) {
-  if (method === "GET") return true;
-  const pathOnly = pathAndQuery.split("?")[0];
-  return PRIVATE_ALLOWED_WRITES.includes(`${method} ${pathOnly}`);
 }
 
 // packages/plugin-core/src/memlin-api-client.ts
@@ -26269,60 +26253,26 @@ function applyWorkspaceOverlay(config2, overlay) {
   };
 }
 
-// packages/plugin-core/src/light-gate.ts
-var LIGHT_GATE_TTL_MS = 5 * 6e4;
-var LIGHT_GATE_LOOKUP_TIMEOUT_MS = 3e3;
-var FEATURE_LABEL = {
-  takeover: "Moving memory into Memlin",
-  disable_native: "Turning off your agent's native memory",
-  report: "The usage report",
-  remember: "Remember",
-  plans: "Plan sync",
-  realtime: "Live sync",
-  ingest_native: "Importing native memory into Memlin"
-};
-function lightGateMessage(feature) {
-  const lead = `${FEATURE_LABEL[feature]} isn't part of Memlin Light.`;
-  const why = feature === "takeover" || feature === "disable_native" || feature === "ingest_native" ? " Light keeps your agents' own memory on and syncs it." : "";
-  return `${lead}${why} To save something yourself, use "Add a note" in Memlin Light.`;
-}
-var cache = /* @__PURE__ */ new Map();
-var inflight = /* @__PURE__ */ new Map();
-async function isLightAccount(api, accountId, opts = {}) {
-  if (!api || typeof api.lightStatus !== "function") return false;
-  const now = opts.now ?? Date.now;
-  const key = accountId || api.defaultAccountId || "";
-  const hit = cache.get(key);
-  if (hit && now() - hit.at < LIGHT_GATE_TTL_MS) return hit.light;
-  const pending = inflight.get(key);
-  if (pending) return pending;
-  const lookup = (async () => {
-    let timer;
-    try {
-      const status = await Promise.race([
-        api.lightStatus(accountId || void 0),
-        new Promise((resolve) => {
-          timer = setTimeout(
-            () => resolve("timeout"),
-            opts.timeoutMs ?? LIGHT_GATE_LOOKUP_TIMEOUT_MS
-          );
-        })
-      ]);
-      if (status === "timeout") return false;
-      const light = status?.active === true;
-      cache.set(key, { light, at: now() });
-      return light;
-    } catch {
-      return false;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  })();
-  inflight.set(key, lookup);
-  void lookup.finally(() => {
-    if (inflight.get(key) === lookup) inflight.delete(key);
-  });
-  return lookup;
+// packages/plugin-core/src/project-resolver.ts
+import { existsSync, readdirSync, readFileSync as readFileSync2, lstatSync } from "node:fs";
+import path9 from "node:path";
+init_workspace_binding();
+var WORKSPACE_ENV_VARS = [
+  // Claude Code exposes the original project dir to hooks/plugin commands.
+  "CLAUDE_PROJECT_DIR",
+  // Cursor/plugin shims and local tests can set this explicitly.
+  "CURSOR_WORKSPACE_ROOT",
+  "CURSOR_PROJECT_ROOT",
+  "MEMLIN_WORKSPACE_ROOT",
+  // npm/pnpm set INIT_CWD to the directory where the user invoked a script.
+  "INIT_CWD"
+];
+function runtimeCwd(fallback = process.cwd()) {
+  for (const name of WORKSPACE_ENV_VARS) {
+    const raw = process.env[name]?.trim();
+    if (raw && path9.isAbsolute(raw)) return path9.resolve(raw);
+  }
+  return path9.resolve(fallback);
 }
 
 // packages/plugin-core/src/cli/cli-runner.ts
@@ -26335,9 +26285,6 @@ var CliExit = class extends Error {
   }
   code;
 };
-function exitCli(code) {
-  throw new CliExit(code);
-}
 function scheduleProcessExit(code) {
   process.exitCode = code;
   void closeHttpSockets();
@@ -26367,278 +26314,54 @@ function runCliMain(main2, onError) {
   );
 }
 
-// packages/plugin-core/src/project-resolver.ts
-import { existsSync, readdirSync, readFileSync as readFileSync2, lstatSync } from "node:fs";
-import path9 from "node:path";
-init_workspace_binding();
-var WORKSPACE_ENV_VARS = [
-  // Claude Code exposes the original project dir to hooks/plugin commands.
-  "CLAUDE_PROJECT_DIR",
-  // Cursor/plugin shims and local tests can set this explicitly.
-  "CURSOR_WORKSPACE_ROOT",
-  "CURSOR_PROJECT_ROOT",
-  "MEMLIN_WORKSPACE_ROOT",
-  // npm/pnpm set INIT_CWD to the directory where the user invoked a script.
-  "INIT_CWD"
-];
-function runtimeCwd(fallback = process.cwd()) {
-  for (const name of WORKSPACE_ENV_VARS) {
-    const raw = process.env[name]?.trim();
-    if (raw && path9.isAbsolute(raw)) return path9.resolve(raw);
-  }
-  return path9.resolve(fallback);
-}
-async function resolveProject(api, cwd, configProjectId) {
-  const absCwd = path9.resolve(cwd);
-  const remotes = detectGitRemotes(cwd);
-  const hasGitRemote = remotes.length > 0;
-  let serverFailure;
-  try {
-    const result = await api.resolveProject({
-      // Primary remote (back-compat with the single-remote server path).
-      git_remote: remotes[0] ?? null,
-      // All detected remotes — for the workspace-root-of-repos case, this is
-      // every sibling repo so the server resolves to the owning project.
-      git_remotes: remotes,
-      cwd: absCwd
-    });
-    if (result.project_id) {
-      return {
-        project_id: result.project_id,
-        project_name: result.name,
-        account_id: result.account_id,
-        reason: result.reason === "none" ? "config" : result.reason,
-        hasGitRemote,
-        enforce_done_deployed: result.enforce_done_deployed
-      };
-    }
-  } catch (e) {
-    serverFailure = summarizeBackendFailure(e) ?? void 0;
-  }
-  if (configProjectId) {
-    const localBinding = await findWorkspaceBinding(absCwd).catch(() => null);
-    if (localBinding?.binding.project_id === configProjectId) {
-      return {
-        project_id: configProjectId,
-        project_name: null,
-        account_id: null,
-        reason: "config",
-        hasGitRemote,
-        server_failure: serverFailure
-      };
-    }
-  }
-  return {
-    project_id: null,
-    project_name: null,
-    account_id: null,
-    reason: "none",
-    hasGitRemote,
-    server_failure: serverFailure
-  };
-}
-function readGitRemote(cwd) {
-  const read = (file2) => {
-    const stat = lstatSync(file2);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024)
-      throw new Error("Unsupported Git metadata");
-    return readFileSync2(file2, "utf8");
-  };
-  try {
-    let root = path9.resolve(cwd);
-    for (; ; ) {
-      const marker = path9.join(root, ".git");
-      if (existsSync(marker)) {
-        const info = lstatSync(marker);
-        if (info.isSymbolicLink()) return null;
-        let directory = marker;
-        if (info.isFile()) {
-          const match = /^gitdir:\s*(.+)$/m.exec(read(marker));
-          if (!match) return null;
-          directory = path9.resolve(root, match[1].trim());
-        }
-        const common2 = path9.join(directory, "commondir");
-        if (existsSync(common2)) directory = path9.resolve(directory, read(common2).trim());
-        let origin = false;
-        for (const line of read(path9.join(directory, "config")).split(/\r?\n/)) {
-          if (/^\s*\[/.test(line)) origin = /^\s*\[remote\s+"origin"\]\s*(?:[#;].*)?$/.test(line);
-          else if (origin) {
-            const match = /^\s*url\s*=\s*(.*?)\s*$/.exec(line);
-            if (match) return normalizeGitRemote(match[1].replace(/^"(.*)"$/, "$1"));
-          }
-        }
-        return null;
-      }
-      const parent = path9.dirname(root);
-      if (parent === root) return null;
-      root = parent;
-    }
-  } catch {
-    return null;
-  }
-}
-var MAX_WORKSPACE_SCAN = 64;
-function detectGitRemotes(cwd) {
-  const enclosing = readGitRemote(cwd);
-  if (enclosing) return [enclosing];
-  const out = [];
-  try {
-    let scanned = 0;
-    for (const entry of readdirSync(cwd, { withFileTypes: true })) {
-      if (scanned >= MAX_WORKSPACE_SCAN) break;
-      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") {
-        continue;
-      }
-      scanned++;
-      const child = path9.join(cwd, entry.name);
-      if (!existsSync(path9.join(child, ".git"))) continue;
-      const remote = readGitRemote(child);
-      if (remote && !out.includes(remote)) out.push(remote);
-    }
-  } catch {
-  }
-  return out;
-}
-
-// packages/plugin-core/src/native-memory.ts
-import { promises as fs8 } from "node:fs";
-import { existsSync as existsSync3, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import os9 from "node:os";
-import path11 from "node:path";
-
-// packages/plugin-core/src/native-memory-backup.ts
-import { promises as fs7 } from "node:fs";
-import { existsSync as existsSync2 } from "node:fs";
-import { createHash } from "node:crypto";
-import os8 from "node:os";
-import path10 from "node:path";
-
-// packages/plugin-core/src/native-memory.ts
-function gitMainRoot(cwd) {
-  try {
-    const common2 = execFileSync(
-      "git",
-      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { windowsHide: true, cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
-    ).trim();
-    return common2 ? path11.dirname(common2) : null;
-  } catch {
-    return null;
-  }
-}
-function encodings(p) {
-  return [
-    p.replace(/[:\\/.]/g, "-"),
-    p.replace(/[/.]/g, "-"),
-    p.replace(/\//g, "-")
-  ];
-}
-function nativeMemoryDirCandidates(cwd) {
-  const projects = path11.join(os9.homedir(), ".claude", "projects");
-  const roots = [gitMainRoot(cwd), cwd].filter((x) => !!x);
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  for (const r of roots) {
-    for (const enc of encodings(r)) {
-      const dir = path11.join(projects, enc, "memory");
-      if (!seen.has(dir)) {
-        seen.add(dir);
-        out.push(dir);
-      }
-    }
-  }
-  return out;
-}
-function isMemoryDir(dir, forRestore) {
-  if (existsSync3(path11.join(dir, "MEMORY.md"))) return true;
-  if (!forRestore) return false;
-  const archived = path11.join(dir, ".archived");
-  try {
-    return statSync(archived).isDirectory();
-  } catch {
-    return false;
-  }
-}
-function findNativeMemoryDir(cwd, opts = {}) {
-  const candidates = opts.explicitDir ? [path11.resolve(cwd, opts.explicitDir)] : nativeMemoryDirCandidates(cwd);
-  return candidates.find((d) => isMemoryDir(d, opts.forRestore ?? false)) ?? null;
-}
-async function readNativeMemory(memoryDir) {
-  const indexRaw = await fs8.readFile(path11.join(memoryDir, "MEMORY.md"), "utf8");
-  const satelliteNames = (await fs8.readdir(memoryDir)).filter(
-    (f) => f.endsWith(".md") && f !== "MEMORY.md"
-  );
-  const satellites = [];
-  for (const name of satelliteNames.slice(0, 1e3)) {
-    try {
-      const content = await fs8.readFile(path11.join(memoryDir, name), "utf8");
-      if (content.length <= 1e5) satellites.push({ name, content });
-    } catch {
-    }
-  }
-  return { memoryDir, indexRaw, satellites };
-}
-
-// packages/plugin-core/src/cli/ingest-native-memory.ts
+// packages/plugin-core/src/cli/private.ts
 async function main() {
-  const ctx = await getApi();
-  if (!ctx) {
-    console.error("memlin: not configured. Run `memlin login` first.");
-    exitCli(1);
+  const arg = (process.argv[2] ?? "on").toLowerCase();
+  const command = arg === "on" || arg === "start" || arg === "enable" ? "on" : arg === "off" || arg === "stop" || arg === "end" || arg === "disable" ? "off" : arg === "status" ? "status" : null;
+  if (!command) {
+    process.stderr.write("usage: memlin private [on|off|status]\n");
+    return 2;
   }
-  const { api, config: config2 } = ctx;
-  if (await isLightAccount(api, config2.account_id)) {
-    console.error(`memlin ingest-native-memory: ${lightGateMessage("ingest_native")}`);
-    exitCli(1);
+  const ctx = await getApi().catch(() => null);
+  const accountId = ctx?.config.account_id ?? null;
+  if (command === "on" && ctx && await checkPrivateAllowed(ctx.api, ctx.config.account_id) === false) {
+    console.log(PRIVATE_DENIED_NOTICE);
+    return 0;
   }
-  const dirFlag = process.argv.indexOf("--dir");
-  const explicitDir = dirFlag >= 0 ? process.argv[dirFlag + 1] : null;
-  if (dirFlag >= 0 && !explicitDir) {
-    console.error("usage: memlin ingest-native-memory [--dir <path>]");
-    exitCli(2);
+  const sessionId = currentSessionId();
+  if (sessionId && command !== "status") {
+    await setPrivateSession(sessionId, command === "on", { cwd: runtimeCwd() });
   }
-  const cwd = runtimeCwd();
-  const memoryDir = findNativeMemoryDir(cwd, { explicitDir });
-  if (!memoryDir) {
-    const candidates = explicitDir ? [path12.resolve(cwd, explicitDir)] : nativeMemoryDirCandidates(cwd);
-    console.log("No native auto-memory found. Looked for MEMORY.md in:");
-    for (const d of candidates) console.log(`  ${d}`);
-    console.log("Nothing to ingest \u2014 native auto-memory may be off or empty.");
-    return;
-  }
-  const { indexRaw, satellites } = await readNativeMemory(memoryDir);
-  const resolved = await resolveProject(api, cwd, config2.project_id);
-  console.log(
-    `memlin ingest-native-memory \u2014 ${memoryDir}
-  ${satellites.length} memories + index \xB7 account ${config2.account_id.slice(0, 8)}\u2026 project ${resolved.project_id?.slice(0, 8) ?? "(none)"} (${resolved.reason})`
-  );
-  const result = await api.ingestNativeMemory(
-    {
-      memory_index_md: indexRaw,
-      satellites,
-      project_id: resolved.project_id,
-      cwd
-    },
-    { accountId: config2.account_id }
-  );
-  if (result.skipped) {
+  const status = await privateStatus(sessionId, Date.now(), accountId);
+  if (status.source === "account") {
     console.log(
-      `Parsed ${result.entries_parsed} entries; nothing ingested (${result.reason ?? "skipped"}).`
+      "Memlin private mode is ON for your whole account (set in Memlin Settings or Companion)" + (status.expiresAt ? ` until ${new Date(status.expiresAt).toLocaleString()}` : "") + ". Nothing from your sessions is saved. Turn it off in Settings \u2192 Private mode or Companion."
     );
-    if (result.reason === "ai_access_blocked") {
-      console.log("AI access is blocked for this workspace \u2014 ingestion needs embeddings.");
-    }
-    return;
+    return 0;
   }
-  console.log(
-    `Ingested: ${result.proposals_persisted} new, ${result.proposals_corroborated ?? 0} corroborated existing, ${result.proposals_auto_activated ?? 0} auto-activated (from ${result.entries_parsed} index entries, ${result.proposals_built} candidates).`
-  );
-  console.log("Native auto-memory is now in Memlin \u2014 safe to let Memlin manage it:");
-  console.log("  memlin manage-memory");
+  if (status.source === "denied") {
+    console.log(PRIVATE_DENIED_NOTICE);
+    return 0;
+  }
+  if (status.source === "env") {
+    console.log(
+      "Memlin private mode is ON for this whole process (MEMLIN_PRIVATE is set). Unset it and restart the agent to turn it off."
+    );
+    return 0;
+  }
+  console.log(status.on ? PRIVATE_ON_NOTICE : PRIVATE_OFF_NOTICE);
+  if (status.on && status.expiresAt) {
+    console.log(`Expires ${new Date(status.expiresAt).toLocaleString()} at the latest.`);
+  }
+  if (!sessionId && command === "on" && !status.on) {
+    console.log(
+      "This host did not identify the session, so nothing was changed. Start the agent with MEMLIN_PRIVATE=1 for a private session."
+    );
+  }
+  return 0;
 }
 runCliMain(main, (err) => {
-  console.error("memlin ingest-native-memory failed:", err instanceof Error ? err.message : err);
+  console.error("memlin private failed:", err instanceof Error ? err.message : err);
   return 1;
 });
 /*! Bundled license information:

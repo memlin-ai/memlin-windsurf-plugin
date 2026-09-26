@@ -12,6 +12,7 @@ const RUN = {
   "pull-plans": () => import("./pull-plans.js"),
   "push-plan": () => import("./push-plan.js"),
   remember: () => import("./remember.js"),
+  private: () => import("./private.js"),
   "bind-plans": () => import("./bind-plans.js"),
   "archive-plans": () => import("./archive-plans.js"),
   resolve: () => import("./resolve.js"),

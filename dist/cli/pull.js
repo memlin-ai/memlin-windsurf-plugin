@@ -3412,7 +3412,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs10 = __require("fs");
+    var fs11 = __require("fs");
     var sections = require_section_matter();
     var defaults = require_defaults();
     var stringify = require_stringify();
@@ -3496,7 +3496,7 @@ var require_gray_matter = __commonJS({
       return stringify(file2, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str2 = fs10.readFileSync(filepath, "utf8");
+      const str2 = fs11.readFileSync(filepath, "utf8");
       const file2 = matter3(str2, options2);
       file2.path = filepath;
       return file2;
@@ -4223,7 +4223,7 @@ var init_companion_client = __esm({
 });
 
 // packages/plugin-core/src/cli/pull.ts
-import path15 from "node:path";
+import path16 from "node:path";
 
 // packages/plugin-core/src/light-sync.ts
 import { promises as fs4, constants as constants2 } from "node:fs";
@@ -4708,8 +4708,8 @@ function getErrorMap() {
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path16, errorMaps, issueData } = params;
-  const fullPath = [...path16, ...issueData.path || []];
+  const { data, path: path17, errorMaps, issueData } = params;
+  const fullPath = [...path17, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -4825,11 +4825,11 @@ var errorUtil;
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path16, key) {
+  constructor(parent, value, path17, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path16;
+    this._path = path17;
     this._key = key;
   }
   get path() {
@@ -8970,6 +8970,21 @@ var MODEL_PRICES = {
   // $3/$15 on the strength of the old launch announcement — that over-bills
   // every Sonnet 5 turn by 50%.
   "claude-sonnet-5": { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
+  // Opus 5.5 shipped after the 5 pair and is the current default Anthropic
+  // recommends "for most workloads" — which makes it a current Claude Code
+  // default too, and therefore a model that arrives in ingested telemetry
+  // whether or not this app ever requests it. Absent until 2026-09-22, it was
+  // the THIRD time an Opus tier priced as $0: Opus at all (fixed 2026-07-23),
+  // Opus 5 (2026-09-02), and this. The pattern is not "we forgot" — it is that
+  // a new tier is invisible here until someone checks the sheet against the
+  // pricing page, so re-verify on every model launch.
+  //
+  // It is also CHEAPER than the tier it replaces ($4/$20 against Opus 5's
+  // $5/$25) and reads cache at 0.05x rather than the standard 0.1x — the
+  // second entry in this sheet to need the override, and the reason the
+  // override is a field rather than a special case for the 5.1 pair.
+  // Verified 2026-09-22 against https://platform.claude.com/docs/en/about-claude/pricing.
+  "claude-opus-5-5": { inputUsdPerMTok: 4, outputUsdPerMTok: 20, cacheReadMultiplier: 0.05 },
   // Opus 5 was absent until 2026-09-02. The app never requests it, but
   // aggregateTurnTiming prices provider-reported models from ingested Claude
   // Code telemetry, where it is a current default — so every Opus 5 turn was
@@ -9490,19 +9505,19 @@ var ContextManifestV1Schema = external_exports.object({
       location: `linked_contexts.${index}`
     }))
   ];
-  references.forEach(({ ref, path: path16, location }) => {
+  references.forEach(({ ref, path: path17, location }) => {
     const identity = contextReferenceIdentityKey(ref);
     const prior = seen.get(identity);
     if (prior && prior.revision !== ref.revision) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path16,
+        path: path17,
         message: `context ${identity} has conflicting revisions in ${prior.location} and ${location}`
       });
     } else if (prior && location.startsWith("linked_contexts.")) {
       ctx.addIssue({
         code: external_exports.ZodIssueCode.custom,
-        path: path16,
+        path: path17,
         message: `duplicate linked context ${identity}`
       });
     }
@@ -9816,11 +9831,11 @@ var ContextBundleV1Schema = external_exports.object({
         path: ["coverage", coverageIndex, "omitted_contexts", index, "context_ref"]
       }))
     ];
-    for (const { ref, path: path16 } of references) {
+    for (const { ref, path: path17 } of references) {
       if (!contextKeys.has(contextReferenceKey(ref))) {
         ctx.addIssue({
           code: external_exports.ZodIssueCode.custom,
-          path: path16,
+          path: path17,
           message: "provider coverage is outside the exact manifest contexts"
         });
       }
@@ -12010,6 +12025,9 @@ var ThoughtHandoffReceiptV2Schema = external_exports.object({
   replayed: external_exports.boolean().optional()
 }).passthrough();
 
+// packages/shared/dist/ops-watch.js
+var OPS_DIAGNOSE_SEV2_AFTER_MS = 15 * 6e4;
+
 // packages/shared/dist/entitlements.js
 var COORDINATION_SELF = [
   "coordination.work_ledger",
@@ -12700,10 +12718,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path16) {
-  if (!path16)
+function getElementAtPath(obj, path17) {
+  if (!path17)
     return obj;
-  return path16.reduce((acc, key) => acc?.[key], obj);
+  return path17.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -13023,11 +13041,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path16, issues) {
+function prefixIssues(path17, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path16);
+    iss.path.unshift(path17);
     return iss;
   });
 }
@@ -13164,7 +13182,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path16 = []) => {
+  const processError = (error41, path17 = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -13174,7 +13192,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path16, ...issue2.path];
+        const fullpath = [...path17, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -13204,9 +13222,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path16) {
+function toDotPath(path17) {
   const segs = [];
-  for (const seg of path16) {
+  for (const seg of path17) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -23864,10 +23882,10 @@ function validateFlowDefinitionSemantics(flow) {
       ],
       ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, path: `stages.${stageIndex}.bypass_target` }]
     ];
-    targets.forEach(({ target, path: path16 }) => {
+    targets.forEach(({ target, path: path17 }) => {
       if (!isReservedTarget(target) && !stageById.has(target)) {
         issues.push({
-          path: path16,
+          path: path17,
           code: "missing_transition_target",
           message: `transition target ${JSON.stringify(target)} does not exist`
         });
@@ -23897,7 +23915,7 @@ function validateFlowDefinitionSemantics(flow) {
   const visiting = /* @__PURE__ */ new Set();
   const visited = /* @__PURE__ */ new Set();
   let hasReachableEnd = false;
-  const visit = (stageId, path16, pathBounds) => {
+  const visit = (stageId, path17, pathBounds) => {
     reachable.add(stageId);
     if (visited.has(stageId)) return;
     visiting.add(stageId);
@@ -23913,7 +23931,7 @@ function validateFlowDefinitionSemantics(flow) {
         ...stage.default_transition === null ? [] : [{ target: stage.default_transition, bounded: false }],
         ...stage.bypass_target === null ? [] : [{ target: stage.bypass_target, bounded: false }]
       ];
-      const currentPath = [...path16, stageId];
+      const currentPath = [...path17, stageId];
       for (const edge of edges) {
         const { target } = edge;
         if (target === "$end") {
@@ -24021,18 +24039,18 @@ var FlowPackManifestBaseSchema = external_exports2.object({
   evals: external_exports2.array(ManifestEvalSchema).max(256),
   model_roles: external_exports2.array(ManifestModelRoleSchema).max(64)
 }).strict();
-function validateRelativePackPath(path16) {
-  if (path16.startsWith("/") || path16.startsWith("\\")) return "path must be relative";
-  if (/^[A-Za-z]:/.test(path16) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path16)) {
+function validateRelativePackPath(path17) {
+  if (path17.startsWith("/") || path17.startsWith("\\")) return "path must be relative";
+  if (/^[A-Za-z]:/.test(path17) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(path17)) {
     return "drive-qualified paths and URI schemes are not allowed";
   }
-  if (/[\u0000-\u001f\u007f]/.test(path16)) return "control characters are not allowed";
-  if (/%(?:2e|2f|5c)/i.test(path16)) return "encoded path traversal is not allowed";
-  if (path16.includes("\\")) return "path must use forward slashes";
-  if (path16.split("/").some((segment) => segment === ".." || segment === ".")) {
+  if (/[\u0000-\u001f\u007f]/.test(path17)) return "control characters are not allowed";
+  if (/%(?:2e|2f|5c)/i.test(path17)) return "encoded path traversal is not allowed";
+  if (path17.includes("\\")) return "path must use forward slashes";
+  if (path17.split("/").some((segment) => segment === ".." || segment === ".")) {
     return "path traversal and dot segments are not allowed";
   }
-  if (path16.split("/").some((segment) => segment.length === 0)) {
+  if (path17.split("/").some((segment) => segment.length === 0)) {
     return "path cannot contain empty segments";
   }
   return null;
@@ -24079,22 +24097,22 @@ function validateFlowPackManifestSemantics(manifest) {
       issues
     );
     role.independence.compare_against_roles.forEach((comparedRole, comparedIndex) => {
-      const path16 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
+      const path17 = `model_roles.${roleIndex}.independence.compare_against_roles.${comparedIndex}`;
       if (comparedRole === role.id) {
         issues.push({
-          path: path16,
+          path: path17,
           code: "self_referential_model_independence",
           message: "a model role cannot require independence from itself"
         });
       } else if (!modelRolesById.has(comparedRole)) {
         issues.push({
-          path: path16,
+          path: path17,
           code: "missing_independence_model_role",
           message: `independence policy references undeclared model role ${JSON.stringify(comparedRole)}`
         });
       } else if (modelRolesById.get(comparedRole)?.independence !== null) {
         issues.push({
-          path: path16,
+          path: path17,
           code: "independence_reference_not_author",
           message: `independence policy must compare against an author role; ${JSON.stringify(comparedRole)} declares its own independence policy`
         });
@@ -24929,9 +24947,9 @@ function hash2(content) {
 }
 
 // packages/plugin-core/src/client.ts
-import { promises as fs7 } from "node:fs";
-import path10 from "node:path";
-import os7 from "node:os";
+import { promises as fs8 } from "node:fs";
+import path11 from "node:path";
+import os8 from "node:os";
 import { randomUUID as randomUUID4 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
@@ -25148,7 +25166,7 @@ init_atomic_rename();
 init_auth_refusal();
 import { readFileSync as readFileSync2 } from "node:fs";
 import crypto4 from "node:crypto";
-import os6 from "node:os";
+import os7 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25219,15 +25237,118 @@ function resolveHost() {
   return (make ?? HOSTS2["claude-code"])();
 }
 
+// packages/plugin-core/src/private-mode.ts
+init_atomic_rename();
+import { promises as fs7 } from "node:fs";
+import path10 from "node:path";
+import os6 from "node:os";
+var PRIVATE_HEADER = "Memlin-Private";
+var PRIVATE_UNTIL_HEADER = "Memlin-Private-Until";
+var PRIVATE_TTL_MS = 24 * 60 * 60 * 1e3;
+var PRIVATE_ALLOWED_WRITES = [
+  "POST /resolve",
+  "POST /projects/resolve",
+  "POST /deploy-guard"
+];
+var DENIED_TTL_MS = 10 * 60 * 1e3;
+var FLOOR_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+function stateFile() {
+  return path10.join(os6.homedir(), ".config", "memlin", "private-sessions.json");
+}
+async function readPrivateState() {
+  try {
+    const parsed = JSON.parse(await fs7.readFile(stateFile(), "utf8"));
+    return { ...parsed, sessions: parsed.sessions ?? {} };
+  } catch {
+    return { sessions: {} };
+  }
+}
+async function writePrivateState(state, now) {
+  for (const [id, entry] of Object.entries(state.sessions)) {
+    if (entry.expires_at <= now) delete state.sessions[id];
+  }
+  for (const [id, entry] of Object.entries(state.denied ?? {})) {
+    if (now - entry.at > DENIED_TTL_MS) delete state.denied?.[id];
+  }
+  for (const [id, entry] of Object.entries(state.accounts ?? {})) {
+    if (entry.until !== null && entry.until <= now) delete state.accounts?.[id];
+  }
+  for (const [id, floor] of Object.entries(state.floors ?? {})) {
+    if (now - floor.at > FLOOR_TTL_MS) delete state.floors?.[id];
+  }
+  const file2 = stateFile();
+  await fs7.mkdir(path10.dirname(file2), { recursive: true });
+  const tmp = `${file2}.${process.pid}.${Date.now()}.tmp`;
+  await fs7.writeFile(tmp, JSON.stringify(state, null, 2), { mode: 384 });
+  await atomicRename(tmp, file2);
+}
+function envPrivate() {
+  const v = process.env.MEMLIN_PRIVATE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
+}
+function currentSessionId() {
+  return process.env.MEMLIN_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || null;
+}
+async function isPrivateSession(sessionId = currentSessionId(), now = Date.now(), accountId = null) {
+  const state = await readPrivateState();
+  if (accountId && accountDenied(state, accountId, now)) return false;
+  if (envPrivate()) return true;
+  if (accountId && accountPrivateActive(state, accountId, now)) return true;
+  if (!sessionId) return false;
+  const entry = state.sessions[sessionId];
+  return Boolean(entry && entry.expires_at > now);
+}
+function accountDenied(state, accountId, now) {
+  const entry = state.denied?.[accountId];
+  return Boolean(entry && now - entry.at <= DENIED_TTL_MS);
+}
+function accountPrivateActive(state, accountId, now) {
+  const entry = state.accounts?.[accountId];
+  return Boolean(entry && (entry.until === null || entry.until > now));
+}
+async function notePrivateUntil(accountId, header, now = Date.now()) {
+  const state = await readPrivateState();
+  if (header === "denied") {
+    const prev2 = state.denied?.[accountId];
+    if (prev2 && now - prev2.at < 6e4 && !state.accounts?.[accountId]) return;
+    state.denied = { ...state.denied, [accountId]: { at: now } };
+    delete state.accounts?.[accountId];
+    await writePrivateState(state, now);
+    return;
+  }
+  let until;
+  if (!header || header === "off") until = void 0;
+  else if (header === "infinity") until = null;
+  else {
+    const at = Date.parse(header);
+    until = Number.isFinite(at) && at > now ? at : void 0;
+  }
+  if (until !== void 0 && state.denied?.[accountId]) delete state.denied[accountId];
+  const prev = state.accounts?.[accountId];
+  if (until === void 0) {
+    if (!prev) return;
+    delete state.accounts[accountId];
+  } else {
+    if (prev && prev.until === until) return;
+    state.accounts = { ...state.accounts, [accountId]: { until, seen_at: now } };
+  }
+  await writePrivateState(state, now);
+}
+function isPrivateAllowedWrite(method, pathAndQuery) {
+  if (method === "GET") return true;
+  const pathOnly = pathAndQuery.split("?")[0];
+  return PRIVATE_ALLOWED_WRITES.includes(`${method} ${pathOnly}`);
+}
+
 // packages/plugin-core/src/memlin-api-client.ts
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os6.hostname() || "unknown";
+  return process.env.MEMLIN_AGENT_DEVICE || os7.hostname() || "unknown";
 }
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.47";
+  cachedAgentVersion = "0.1.48";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -25369,6 +25490,7 @@ async function* parseNdjsonEvents(body) {
     reader.releaseLock();
   }
 }
+var LIST_MAX_ROWS = 1e3;
 var MemlinApiClient = class {
   constructor(cfg) {
     this.cfg = cfg;
@@ -25377,6 +25499,9 @@ var MemlinApiClient = class {
   /** The configured account (the light-gate cache key when a call names none). */
   get defaultAccountId() {
     return this.cfg.accountId;
+  }
+  nativeSessionHook(input, opts) {
+    return this.request("POST", "/agent-control/hook", input, { ...opts, agentVersion: agentVersion() });
   }
   // ---------- low-level ----------
   async authHeaders(includeAccount = true, override = {}) {
@@ -25389,16 +25514,18 @@ var MemlinApiClient = class {
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: version2,
       [AGENT_CAPABILITIES_HEADER]: (override.agentKind ? AGENT_EXPECTED_CAPABILITIES[kind] : agentCapabilities()).join(","),
-      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os6.platform(),
-      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os6.arch()
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os7.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os7.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h["Memlin-Account-Id"] = this.cfg.accountId;
     }
+    if (this.cfg.privateSession) h[PRIVATE_HEADER] = "1";
     return h;
   }
   async request(method, pathAndQuery, body, opts = {}) {
     const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
+    this.throwIfPrivateWrite(method, pathAndQuery);
     const refusalAccountId = this.refusalAccountId(opts.includeAccount ?? true, opts.accountId);
     await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
     const baseHeaders = await this.authHeaders(opts.includeAccount ?? true, opts);
@@ -25448,13 +25575,21 @@ var MemlinApiClient = class {
         }
       }
       const refusalCode = await this.noteAuthOutcome(res.status, parsed, refusalAccountId);
+      const privateRefusal = parsed?.code === "private_mode";
+      if (refusalAccountId && (res.ok || privateRefusal)) {
+        await notePrivateUntil(
+          refusalAccountId,
+          res.headers.get(PRIVATE_UNTIL_HEADER) ?? (parsed?.private_until ?? null)
+        ).catch(() => {
+        });
+      }
       if (!res.ok) {
         const serverError = parsed?.error;
         const errMsg = typeof serverError === "string" && serverError ? singleLine(serverError, 300) : describeOpaqueBody(res.status, text);
         throw new MemlinApiError(
           `${method} ${pathAndQuery} \u2192 ${res.status}: ${errMsg}`,
           res.status,
-          refusalCode
+          refusalCode ?? (privateRefusal ? "private_mode" : void 0)
         );
       }
       return parsed;
@@ -25472,6 +25607,17 @@ var MemlinApiClient = class {
     return includeAccount && this.cfg.accountId ? this.cfg.accountId : null;
   }
   /** Zero-network short circuit while a membership refusal is fresh. */
+  throwIfPrivateWrite(method, pathAndQuery) {
+    if (!this.cfg.privateSession || isPrivateAllowedWrite(method, pathAndQuery)) return;
+    if (method === "POST" && pathAndQuery.split("?")[0] === "/resolve/v2") {
+      throw new MemlinApiError("POST /resolve/v2 \u2192 404: progressive resolve unavailable", 404);
+    }
+    throw new MemlinApiError(
+      `${method} ${pathAndQuery}: skipped \u2014 Memlin private mode is on for this session (turn it off with /memlin-private off)`,
+      423,
+      "private_mode"
+    );
+  }
   async throwIfAuthRefused(method, pathAndQuery, accountId) {
     if (!this.cfg.authRefusal || !accountId) return;
     const entry = await readAuthRefusal(accountId, this.cfg.authRefusal.binding);
@@ -25512,6 +25658,7 @@ var MemlinApiClient = class {
   }
   async openResolveV2Stream(method, pathAndQuery, body, opts = {}) {
     const url2 = `${this.cfg.baseUrl.replace(/\/+$/, "")}${pathAndQuery}`;
+    this.throwIfPrivateWrite(method, pathAndQuery);
     const refusalAccountId = this.refusalAccountId(true, opts.accountId);
     await this.throwIfAuthRefused(method, pathAndQuery, refusalAccountId);
     const headers = await this.authHeaders(true, opts);
@@ -26200,6 +26347,14 @@ var MemlinApiClient = class {
   async setEnforceDoneDeployed(enabled, opts = {}) {
     return this.request("PUT", "/account/enforce-done-deployed", { enabled }, opts);
   }
+  /** GET /account/private-mode — the caller's own private mode in this account. */
+  async getPrivateMode(opts = {}) {
+    return this.request("GET", "/account/private-mode", void 0, opts);
+  }
+  /** PUT /account/private-mode — until: ISO timestamp, 'infinity', or null (off). */
+  async setPrivateMode(until, opts = {}) {
+    return this.request("PUT", "/account/private-mode", { until }, opts);
+  }
   /**
    * POST /deploy-guard — acquire, release, status, or queue the per-project
    * deploy lease / waiter line.
@@ -26568,13 +26723,13 @@ function resolveApiUrl() {
 init_workspace_binding();
 init_auth_refusal();
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path10.join(os7.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path11.join(os8.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path10.join(os7.homedir(), ".config", "memlin");
-var TOKEN_FILE = path10.join(CONFIG_DIR, "token.json");
+var CONFIG_DIR = path11.join(os8.homedir(), ".config", "memlin");
+var TOKEN_FILE = path11.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
-    const raw = await fs7.readFile(globalConfigFilePath(), "utf8");
+    const raw = await fs8.readFile(globalConfigFilePath(), "utf8");
     const parsed = JSON.parse(raw);
     if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
       return null;
@@ -26624,13 +26779,15 @@ async function getApi(opts = {}) {
     overlay
   );
   const apiUrl = process.env.MEMLIN_API_URL?.trim() || config2.api_url || resolveApiUrl();
+  const privateSession = await isPrivateSession(void 0, void 0, config2.account_id);
   const api = new MemlinApiClient({
     baseUrl: apiUrl,
     getAccessToken: () => getIdentityBoundAccessToken(config2),
     accountId: config2.account_id,
-    authRefusal: { binding: workspaceRoot, accountName: workspaceAccountName }
+    authRefusal: { binding: workspaceRoot, accountName: workspaceAccountName },
+    privateSession
   });
-  return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName };
+  return { api, config: config2, workspaceBound, workspaceRoot, workspaceAccountName, privateSession };
 }
 function applyWorkspaceOverlay(config2, overlay) {
   if (!overlay) return { workspaceBound: false, workspaceRoot: null, workspaceAccountName: null };
@@ -26646,10 +26803,10 @@ function applyWorkspaceOverlay(config2, overlay) {
 }
 
 // packages/plugin-core/src/apply.ts
-import { promises as fs8 } from "node:fs";
+import { promises as fs9 } from "node:fs";
 import { existsSync as existsSync2 } from "node:fs";
-import os8 from "node:os";
-import path11 from "node:path";
+import os9 from "node:os";
+import path12 from "node:path";
 
 // packages/plugin-core/src/paths.ts
 var SLUG = /[^a-z0-9]+/g;
@@ -26681,12 +26838,12 @@ function inferLocalPath(kind, title, existing) {
 
 // packages/plugin-core/src/apply.ts
 function archiveRoot() {
-  return path11.join(os8.homedir(), ".config", "memlin", "archive");
+  return path12.join(os9.homedir(), ".config", "memlin", "archive");
 }
 async function archiveDestination(trackedRelPath) {
-  const base = path11.join(archiveRoot(), trackedRelPath);
+  const base = path12.join(archiveRoot(), trackedRelPath);
   if (!existsSync2(base)) return base;
-  const ext = path11.extname(base);
+  const ext = path12.extname(base);
   const stem = base.slice(0, base.length - ext.length);
   for (let i = 1; i < 1e3; i++) {
     const candidate = `${stem}.${i}${ext}`;
@@ -26694,14 +26851,17 @@ async function archiveDestination(trackedRelPath) {
   }
   return `${stem}.${Date.now()}${ext}`;
 }
-async function applyPullToLocal(docs, state, now, rootOverride) {
+async function applyPullToLocal(docs, state, now, rootOverride, opts = {}) {
+  const reconcileMissing = opts.reconcileMissing ?? true;
   const out = {
     written: [],
     unchanged: [],
     removed: [],
     archived: [],
     keptEdited: [],
-    citations: {}
+    citations: {},
+    reconciliationSkipped: !reconcileMissing,
+    collisions: {}
   };
   const currentPaths = /* @__PURE__ */ new Set();
   const root = rootOverride ?? resolveHost().homeDir();
@@ -26709,18 +26869,21 @@ async function applyPullToLocal(docs, state, now, rootOverride) {
     if (d.kind === "brand_guidelines") continue;
     if (d.kind === "feedback") continue;
     const localPath = inferLocalPath(d.kind, d.title, d.path);
+    if (currentPaths.has(localPath)) {
+      out.collisions[localPath] = (out.collisions[localPath] ?? 1) + 1;
+    }
     currentPaths.add(localPath);
-    const full = path11.join(root, localPath);
+    const full = path12.join(root, localPath);
     const contentHash = hash2(d.content);
     let needsWrite = true;
     try {
-      const local = await fs8.readFile(full, "utf8");
+      const local = await fs9.readFile(full, "utf8");
       if (hash2(local) === contentHash) needsWrite = false;
     } catch {
     }
     if (needsWrite) {
-      await fs8.mkdir(path11.dirname(full), { recursive: true });
-      await fs8.writeFile(full, d.content, "utf8");
+      await fs9.mkdir(path12.dirname(full), { recursive: true });
+      await fs9.writeFile(full, d.content, "utf8");
       out.written.push(localPath);
     } else {
       out.unchanged.push(localPath);
@@ -26734,12 +26897,13 @@ async function applyPullToLocal(docs, state, now, rootOverride) {
     };
   }
   for (const tracked of Object.keys(state.documents)) {
+    if (!reconcileMissing) break;
     if (currentPaths.has(tracked)) continue;
-    const full = path11.join(root, tracked);
+    const full = path12.join(root, tracked);
     if (existsSync2(full)) {
       let userEdited = false;
       try {
-        const local = await fs8.readFile(full, "utf8");
+        const local = await fs9.readFile(full, "utf8");
         const prior = state.documents[tracked]?.content_hash;
         userEdited = !prior || hash2(local) !== prior;
       } catch {
@@ -26751,8 +26915,8 @@ async function applyPullToLocal(docs, state, now, rootOverride) {
       } else {
         const dest = await archiveDestination(tracked);
         try {
-          await fs8.mkdir(path11.dirname(dest), { recursive: true });
-          await fs8.rename(full, dest);
+          await fs9.mkdir(path12.dirname(dest), { recursive: true });
+          await fs9.rename(full, dest);
           out.archived.push(tracked);
           out.removed.push(`${tracked} (archived)`);
         } catch {
@@ -26778,16 +26942,16 @@ function stateRow(d, h, at) {
 }
 
 // packages/plugin-core/src/trigger-memories.ts
-import { promises as fs9 } from "node:fs";
-import os11 from "node:os";
-import path14 from "node:path";
+import { promises as fs10 } from "node:fs";
+import os12 from "node:os";
+import path15 from "node:path";
 init_atomic_rename();
 
 // packages/plugin-core/src/edit-activity.ts
 import { execSync } from "node:child_process";
 import { realpathSync as realpathSync2 } from "node:fs";
-import path13 from "node:path";
-import os10 from "node:os";
+import path14 from "node:path";
+import os11 from "node:os";
 
 // packages/plugin-core/src/edit-broker-local.ts
 import crypto5 from "node:crypto";
@@ -26802,14 +26966,14 @@ import {
   rmSync,
   writeFileSync
 } from "node:fs";
-import os9 from "node:os";
-import path12 from "node:path";
+import os10 from "node:os";
+import path13 from "node:path";
 import { execFileSync } from "node:child_process";
 
 // packages/plugin-core/src/trigger-memories.ts
 init_workspace_binding();
 function compiledTriggersPath() {
-  return path14.join(os11.homedir(), ".config", "memlin", "triggers.json");
+  return path15.join(os12.homedir(), ".config", "memlin", "triggers.json");
 }
 function decodeStoredEntry(raw, fallbackId) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -26837,7 +27001,7 @@ async function readCompiledTriggers(file2 = compiledTriggersPath()) {
   const empty = { version: 1, workspaces: {} };
   let raw;
   try {
-    raw = await fs9.readFile(file2, "utf8");
+    raw = await fs10.readFile(file2, "utf8");
   } catch {
     return empty;
   }
@@ -26865,6 +27029,13 @@ async function readCompiledTriggers(file2 = compiledTriggersPath()) {
   }
 }
 var COMPILED_MESSAGE_MAX = 700;
+async function refreshWorkspaceTriggers(args) {
+  const docs = await args.api.listDocuments(
+    { kinds: ["memory"], has_trigger: true, project_id: args.projectId },
+    args.callOpts ?? {}
+  );
+  return compileWorkspaceTriggers({ ...args, docs });
+}
 async function compileWorkspaceTriggers(args) {
   const file2 = args.file ?? compiledTriggersPath();
   const root = await canonicalRoot(args.workspaceRoot);
@@ -26898,9 +27069,9 @@ async function compileWorkspaceTriggers(args) {
       triggers
     };
   }
-  await fs9.mkdir(path14.dirname(file2), { recursive: true });
+  await fs10.mkdir(path15.dirname(file2), { recursive: true });
   const tmp = `${file2}.${process.pid}.tmp`;
-  await fs9.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
+  await fs10.writeFile(tmp, JSON.stringify(state, null, 2), "utf8");
   await atomicRename(tmp, file2);
   return { compiled: triggers.length, skipped };
 }
@@ -26924,9 +27095,9 @@ async function workspaceRootFor(cwd) {
   }
 }
 async function canonicalRoot(dir) {
-  const resolved = path14.resolve(dir);
+  const resolved = path15.resolve(dir);
   try {
-    return await fs9.realpath(resolved);
+    return await fs10.realpath(resolved);
   } catch {
     return resolved;
   }
@@ -26961,23 +27132,37 @@ async function main() {
     console.error("usage: memlin pull [--target <dir>]");
     process.exit(2);
   }
+  const listTruncated = memoryAndSkills.length >= LIST_MAX_ROWS || goals.length >= LIST_MAX_ROWS;
   const state = targetDir ? { documents: {} } : await readState();
   const result = await applyPullToLocal(
     docs,
     state,
     (/* @__PURE__ */ new Date()).toISOString(),
-    targetDir ? path15.resolve(runtimeCwd(), targetDir) : void 0
+    targetDir ? path16.resolve(runtimeCwd(), targetDir) : void 0,
+    { reconcileMissing: !listTruncated }
   );
+  if (result.reconciliationSkipped) {
+    console.log(
+      `  \u26A0 server returned its maximum of ${LIST_MAX_ROWS} documents \u2014 the list is truncated, so nothing was archived this run (an absent doc cannot be told apart from one past the cap).`
+    );
+  }
+  const collided = Object.entries(result.collisions);
+  if (collided.length > 0) {
+    const overwritten = collided.reduce((n, [, c]) => n + c - 1, 0);
+    console.log(
+      `  \u26A0 ${overwritten} document(s) were overwritten on disk by another document with the same local file name (${collided.length} file name(s) affected) \u2014 typically several memories about one source file. The resolver still sees all of them.`
+    );
+  }
   if (targetDir) {
     console.log(`  (export mode \u2014 wrote under ${targetDir}; sync state untouched)`);
   } else {
     await writeState(state);
     try {
-      const compiled = await compileWorkspaceTriggers({
+      const compiled = await refreshWorkspaceTriggers({
+        api,
         workspaceRoot: await workspaceRootFor(runtimeCwd()),
         accountId: resolved.account_id ?? config2.account_id,
-        projectId: resolved.project_id,
-        docs: memoryAndSkills
+        projectId: resolved.project_id
       });
       if (compiled.compiled > 0 || compiled.skipped > 0) {
         console.log(

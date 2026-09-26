@@ -8122,6 +8122,129 @@ var ActionMetadataSchema = external_exports.object({
   implementation: ActionImplementationSchema
 });
 
+// packages/shared/dist/task-classifier.js
+function deployCommands(command) {
+  const commands = [];
+  let words = [];
+  let word = "";
+  let started = false;
+  let quote = "";
+  let heredocs = [];
+  const flushWord = () => {
+    if (started) words.push(word);
+    word = "";
+    started = false;
+  };
+  const flushCommand = () => {
+    flushWord();
+    if (words.length) commands.push(words);
+    words = [];
+  };
+  for (let i = 0; i < command.length; i++) {
+    const c = command.charAt(i);
+    if (quote) {
+      if (c === quote) quote = "";
+      else if (c === "\\" && quote === '"' && /["\\$`\n]/.test(command[i + 1] ?? "")) {
+        const next = command[++i];
+        if (next !== "\n") word += next;
+      } else word += c;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      started = true;
+    } else if (c === "\\") {
+      const next = command[++i];
+      if (next && next !== "\n") {
+        word += next;
+        started = true;
+      }
+    } else if (c === "#" && !started) {
+      const end = command.indexOf("\n", i);
+      i = end < 0 ? command.length : end - 1;
+    } else if (c === "<" && command[i + 1] === "<") {
+      const match = /^<<(-?)\s*(?:'([^']+)'|"([^"]+)"|([\w-]+))/.exec(command.slice(i));
+      if (!match) return commands;
+      flushWord();
+      heredocs.push({ delimiter: match[2] ?? match[3] ?? match[4] ?? "", tabs: !!match[1] });
+      i += match[0].length - 1;
+    } else if (";|&\n".includes(c)) {
+      flushCommand();
+      if (c === "\n" && heredocs.length) {
+        for (const doc of heredocs) {
+          let found = false;
+          while (++i < command.length) {
+            const end = command.indexOf("\n", i);
+            const lineEnd = end < 0 ? command.length : end;
+            let line = command.slice(i, lineEnd).replace(/\r$/, "");
+            if (doc.tabs) line = line.replace(/^\t+/, "");
+            i = lineEnd;
+            if (line === doc.delimiter) {
+              found = true;
+              break;
+            }
+          }
+          if (!found) return commands;
+        }
+        heredocs = [];
+      }
+    } else if (/\s/.test(c)) flushWord();
+    else {
+      word += c;
+      started = true;
+    }
+  }
+  if (!quote) flushCommand();
+  return commands.map((argv) => {
+    let i = 0;
+    while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[i] ?? "")) i++;
+    if (argv[i] === "env") {
+      i++;
+      while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[i] ?? "")) i++;
+    }
+    return argv.slice(i);
+  });
+}
+function foregroundCommand(argv) {
+  if (!argv.length || /\s/.test(argv[0] ?? "")) return false;
+  const script = /^(?:bash|sh)$/.test(argv[0] ?? "") ? argv[1] : argv[0];
+  if (/^(?:[\w./-]*\/)?deploy(?:-(?:web|admin|prod|mcp|scanners)(?:-local)?)?(?:\.[a-z]+)?$/i.test(
+    script ?? ""
+  ))
+    return true;
+  if (argv[0] === "az") return argv[1] === "webapp" && argv[2] === "deploy";
+  if (argv[0] === "azd") return argv[1] === "deploy";
+  switch (argv[0]) {
+    case "vercel":
+      return argv[1] === "deploy" || argv[1] === "--prod";
+    case "fly":
+    case "flyctl":
+    case "sst":
+    case "serverless":
+    case "sls":
+      return argv[1] === "deploy";
+    case "wrangler":
+      return argv[1] === "deploy" || argv[1] === "publish";
+    case "npm":
+    case "pnpm":
+    case "yarn":
+      return /^deploy(?::[\w-]+)?$/.test(argv[argv[1] === "run" ? 2 : 1] ?? "");
+    case "make":
+      return argv[1] === "deploy";
+    case "git":
+      return argv[1] === "push" && /^\S*(?:deploy|prod|production|heroku)$/.test(argv[2] ?? "");
+    default:
+      return false;
+  }
+}
+function triggerCommand(argv) {
+  return argv[0] === "gh" && argv[1] === "workflow" && argv[2] === "run" && /\b(?:deploy|prod|production|release)\b/i.test(argv[3] ?? "");
+}
+function isDeployCommand(command) {
+  if (!command) return false;
+  return deployCommands(command).some((argv) => foregroundCommand(argv) || triggerCommand(argv));
+}
+
 // packages/shared/dist/current-work.js
 var MAX_FILES = 8;
 var MAX_CHANGES = 5;
@@ -8297,6 +8420,21 @@ var MODEL_PRICES = {
   // $3/$15 on the strength of the old launch announcement — that over-bills
   // every Sonnet 5 turn by 50%.
   "claude-sonnet-5": { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
+  // Opus 5.5 shipped after the 5 pair and is the current default Anthropic
+  // recommends "for most workloads" — which makes it a current Claude Code
+  // default too, and therefore a model that arrives in ingested telemetry
+  // whether or not this app ever requests it. Absent until 2026-09-22, it was
+  // the THIRD time an Opus tier priced as $0: Opus at all (fixed 2026-07-23),
+  // Opus 5 (2026-09-02), and this. The pattern is not "we forgot" — it is that
+  // a new tier is invisible here until someone checks the sheet against the
+  // pricing page, so re-verify on every model launch.
+  //
+  // It is also CHEAPER than the tier it replaces ($4/$20 against Opus 5's
+  // $5/$25) and reads cache at 0.05x rather than the standard 0.1x — the
+  // second entry in this sheet to need the override, and the reason the
+  // override is a field rather than a special case for the 5.1 pair.
+  // Verified 2026-09-22 against https://platform.claude.com/docs/en/about-claude/pricing.
+  "claude-opus-5-5": { inputUsdPerMTok: 4, outputUsdPerMTok: 20, cacheReadMultiplier: 0.05 },
   // Opus 5 was absent until 2026-09-02. The app never requests it, but
   // aggregateTurnTiming prices provider-reported models from ingested Claude
   // Code telemetry, where it is a current default — so every Opus 5 turn was
@@ -11311,6 +11449,9 @@ var ThoughtHandoffReceiptV2Schema = external_exports.object({
   stale: external_exports.boolean(),
   replayed: external_exports.boolean().optional()
 }).passthrough();
+
+// packages/shared/dist/ops-watch.js
+var OPS_DIAGNOSE_SEV2_AFTER_MS = 15 * 6e4;
 
 // packages/shared/dist/entitlements.js
 var COORDINATION_SELF = [
@@ -24313,13 +24454,15 @@ function compileBundle(result, parsedTask, agent, options2 = {}) {
       }
       out.push("");
     }
-    const waiters = b.deploy_waiters ?? [];
+    const waiters = (b.deploy_waiters ?? []).filter((waiter) => isDeployCommand(waiter.task));
     if (waiters.length > 0) {
-      out.push("## WAITING ON YOU");
+      out.push("## DEPLOY QUEUE (not yours)");
       out.push("");
       out.push(
-        `# ${waiters.length} agent(s) are queued to deploy after you. Finish or release so they can proceed.`
+        `# ${waiters.length} other agent(s) already have a ship parked. Do not run their command.`
       );
+      out.push("# Do not start a second deploy of the same service and commit.");
+      out.push("# Merging or pushing does not deploy, and it does not belong in this queue.");
       for (const w of waiters) {
         const release = w.release_id ? ` \xB7 release ${w.release_id}${w.service ? ` (${w.service})` : ""}` : w.service ? ` \xB7 ${w.service}` : "";
         out.push(
@@ -24329,13 +24472,14 @@ function compileBundle(result, parsedTask, agent, options2 = {}) {
       out.push("");
     }
     const queued = b.queued_deploy ?? null;
-    if (queued) {
+    if (queued && isDeployCommand(queued.task)) {
       if (queued.status === "ready") {
-        out.push("## RESUME QUEUED DEPLOY");
+        out.push("## YOUR PARKED DEPLOY");
         out.push("");
         out.push(
-          "# The project deploy lease is free. Run this exact command now \u2014 do not ask the user."
+          "# The lease is free for a deploy you already parked. Run it only if the user asked you to ship this service and HEAD still matches the SHA."
         );
+        out.push("# If the same service and commit is already running, stop.");
         if (queued.release_id) {
           out.push(
             `# Release: ${queued.release_id}${queued.service ? ` (${queued.service})` : ""}`
@@ -24352,7 +24496,7 @@ function compileBundle(result, parsedTask, agent, options2 = {}) {
         out.push("## QUEUED DEPLOY");
         out.push("");
         out.push(
-          `# You are in line (${queued.minutes_queued}m). Do not retry the zip; Memlin will inject RESUME QUEUED DEPLOY when the lease drops.`
+          `# You are in line (${queued.minutes_queued}m). Do not retry the zip. The next turn names YOUR PARKED DEPLOY when the lease drops, and only if the user asked for this ship.`
         );
         if (queued.release_id) {
           out.push(
