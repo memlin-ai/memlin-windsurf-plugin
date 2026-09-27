@@ -10484,6 +10484,21 @@ var ThoughtPreferencesReceiptV2Schema = external_exports.object({
   scope: external_exports.enum(["personal", "project", "team"]),
   replayed: external_exports.boolean()
 }).strict();
+var ThoughtLibraryArchiveV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  thought_id: Id,
+  archived: external_exports.boolean(),
+  idempotency_key: Key
+}).strict();
+var ThoughtLibraryArchiveReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  receipt_id: Id,
+  thought_id: Id,
+  cursor: Revision,
+  archived: external_exports.boolean(),
+  archived_at: Time.nullable(),
+  replayed: external_exports.boolean()
+}).strict();
 var ThoughtTopicDesignateV2Schema = external_exports.object({
   version: external_exports.literal(2),
   root_thought_id: Id,
@@ -10689,7 +10704,7 @@ var ThoughtTopicOperationReceiptV2Schema = external_exports.object({
 var ThoughtListCursorV2Schema = external_exports.object({ updated_at: Time, id: Id }).strict();
 var ThoughtWorkspaceListQueryV2Schema = external_exports.object({
   query: external_exports.string().trim().max(160).default(""),
-  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms"]).default("recent"),
+  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms", "archived"]).default("recent"),
   limit: external_exports.number().int().min(1).max(100).default(30),
   cursor: ThoughtListCursorV2Schema.nullable().default(null)
 }).strict();

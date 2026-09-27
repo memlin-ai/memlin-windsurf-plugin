@@ -199,16 +199,55 @@ __export(workspace_binding_exports, {
   WORKSPACE_BINDING_FILE: () => WORKSPACE_BINDING_FILE,
   WORKSPACE_DIR_NAME: () => WORKSPACE_DIR_NAME,
   clearWorkspaceBinding: () => clearWorkspaceBinding,
+  findIgnoredBroadWorkspaceBinding: () => findIgnoredBroadWorkspaceBinding,
   findWorkspaceBinding: () => findWorkspaceBinding,
+  isTooBroadForWorkspaceBinding: () => isTooBroadForWorkspaceBinding,
   resolveGitWorkspaceIdentity: () => resolveGitWorkspaceIdentity,
   writeWorkspaceBinding: () => writeWorkspaceBinding
 });
 import { randomUUID } from "node:crypto";
 import { constants, promises as fs3 } from "node:fs";
+import os2 from "node:os";
 import path3 from "node:path";
+async function homeDirectories() {
+  const home = os2.homedir();
+  if (!home) return [];
+  const resolved = path3.resolve(home);
+  const real = await fs3.realpath(resolved).catch(() => resolved);
+  return real === resolved ? [resolved] : [resolved, real];
+}
+function coversHome(dir, homes) {
+  return homes.some((home) => containedBy(dir, home));
+}
+async function isTooBroadForWorkspaceBinding(dir) {
+  const homes = await homeDirectories();
+  const resolved = path3.resolve(dir);
+  const real = await fs3.realpath(resolved).catch(() => resolved);
+  return coversHome(resolved, homes) || coversHome(real, homes);
+}
+async function findIgnoredBroadWorkspaceBinding() {
+  const homes = await homeDirectories();
+  for (const home of homes) {
+    let dir = home;
+    for (let i = 0; i < 64; i++) {
+      const candidate = path3.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
+      try {
+        const parsed = JSON.parse(await fs3.readFile(candidate, "utf8"));
+        if (typeof parsed.account_id === "string" && parsed.account_id) return candidate;
+      } catch {
+      }
+      const parent = path3.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return null;
+}
 async function walkForWorkspaceBinding(startDir) {
   let dir = path3.resolve(startDir);
+  const homes = await homeDirectories();
   for (let i = 0; i < 64; i++) {
+    if (coversHome(dir, homes)) return null;
     const candidate = path3.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
     try {
       const raw = await fs3.readFile(candidate, "utf8");
@@ -401,6 +440,11 @@ async function writeWorkspaceBinding(workspaceRoot, binding) {
   const root = await fs3.realpath(path3.resolve(workspaceRoot));
   const rootEntry = await fs3.stat(root);
   if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
+  if (await isTooBroadForWorkspaceBinding(root)) {
+    throw new Error(
+      `Refusing to link ${root}: it is your home folder or above it, so the link would cover every project inside it. Run this from inside the project folder instead.`
+    );
+  }
   const dir = path3.join(root, WORKSPACE_DIR_NAME);
   try {
     const entry = await fs3.lstat(dir);
@@ -535,18 +579,18 @@ __export(companion_client_exports, {
 });
 import http from "node:http";
 import crypto3 from "node:crypto";
-import os4 from "node:os";
+import os5 from "node:os";
 import path8 from "node:path";
 function companionSocketPath(env = process.env) {
   const override = env[COMPANION_SOCKET_ENV];
   if (override) return override;
   if (process.platform === "win32") {
-    return `\\\\.\\pipe\\memlin-companion-${os4.userInfo().username}`;
+    return `\\\\.\\pipe\\memlin-companion-${os5.userInfo().username}`;
   }
-  return path8.join(os4.homedir(), ".config", "memlin", "run", "companion.sock");
+  return path8.join(os5.homedir(), ".config", "memlin", "run", "companion.sock");
 }
 function companionRunDir() {
-  return path8.join(os4.homedir(), ".config", "memlin", "run");
+  return path8.join(os5.homedir(), ".config", "memlin", "run");
 }
 function deriveResolveId(input) {
   const digest = crypto3.createHash("sha256").update("memlin.resolve.v2\0").update(JSON.stringify([input.accountId, input.host, input.sessionId ?? null, input.turnId])).digest().subarray(0, 16);
@@ -4550,9 +4594,9 @@ import path7 from "node:path";
 init_atomic_rename();
 import { promises as fs4 } from "node:fs";
 import path5 from "node:path";
-import os2 from "node:os";
+import os3 from "node:os";
 import crypto2 from "node:crypto";
-var STATE_FILE = path5.join(os2.homedir(), ".config", "memlin", "state.json");
+var STATE_FILE = path5.join(os3.homedir(), ".config", "memlin", "state.json");
 var EMPTY = { documents: {} };
 async function readState() {
   try {
@@ -4584,7 +4628,7 @@ function diffStates(prev, current) {
 }
 
 // packages/plugin-core/src/host.ts
-import os3 from "node:os";
+import os4 from "node:os";
 import path6 from "node:path";
 var BaseHost = class {
   constructor(kind, home) {
@@ -4602,37 +4646,37 @@ var BaseHost = class {
 };
 var ClaudeCodeHost = class extends BaseHost {
   constructor() {
-    super("claude-code", path6.join(os3.homedir(), ".claude"));
+    super("claude-code", path6.join(os4.homedir(), ".claude"));
   }
 };
 var CursorHost = class extends BaseHost {
   constructor() {
-    super("cursor", path6.join(os3.homedir(), ".config", "memlin"));
+    super("cursor", path6.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var CodexHost = class extends BaseHost {
   constructor() {
-    super("codex", path6.join(os3.homedir(), ".config", "memlin"));
+    super("codex", path6.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var WindsurfHost = class extends BaseHost {
   constructor() {
-    super("windsurf", path6.join(os3.homedir(), ".config", "memlin"));
+    super("windsurf", path6.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var AntigravityHost = class extends BaseHost {
   constructor() {
-    super("antigravity", path6.join(os3.homedir(), ".config", "memlin"));
+    super("antigravity", path6.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var VSCodeHost = class extends BaseHost {
   constructor() {
-    super("vscode", path6.join(os3.homedir(), ".config", "memlin"));
+    super("vscode", path6.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var CompanionHost = class extends BaseHost {
   constructor() {
-    super("companion", path6.join(os3.homedir(), ".config", "memlin"));
+    super("companion", path6.join(os4.homedir(), ".config", "memlin"));
   }
 };
 var HOSTS = {
@@ -4760,14 +4804,14 @@ function filterAbsentOnDisk(paths, rootOverride) {
 // packages/plugin-core/src/client.ts
 import { promises as fs8 } from "node:fs";
 import path11 from "node:path";
-import os8 from "node:os";
+import os9 from "node:os";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
 init_atomic_rename();
 import { promises as fs6 } from "node:fs";
 import path9 from "node:path";
-import os5 from "node:os";
+import os6 from "node:os";
 import { randomUUID as randomUUID2 } from "node:crypto";
 init_auth_refusal();
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
@@ -4776,7 +4820,7 @@ var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
 function persistedTokenFilePath() {
-  return process.env.MEMLIN_TOKEN_FILE || path9.join(os5.homedir(), ".config", "memlin", "token.json");
+  return process.env.MEMLIN_TOKEN_FILE || path9.join(os6.homedir(), ".config", "memlin", "token.json");
 }
 var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
 var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
@@ -11694,6 +11738,21 @@ var ThoughtPreferencesReceiptV2Schema = external_exports.object({
   scope: external_exports.enum(["personal", "project", "team"]),
   replayed: external_exports.boolean()
 }).strict();
+var ThoughtLibraryArchiveV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  thought_id: Id,
+  archived: external_exports.boolean(),
+  idempotency_key: Key
+}).strict();
+var ThoughtLibraryArchiveReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  receipt_id: Id,
+  thought_id: Id,
+  cursor: Revision,
+  archived: external_exports.boolean(),
+  archived_at: Time.nullable(),
+  replayed: external_exports.boolean()
+}).strict();
 var ThoughtTopicDesignateV2Schema = external_exports.object({
   version: external_exports.literal(2),
   root_thought_id: Id,
@@ -11899,7 +11958,7 @@ var ThoughtTopicOperationReceiptV2Schema = external_exports.object({
 var ThoughtListCursorV2Schema = external_exports.object({ updated_at: Time, id: Id }).strict();
 var ThoughtWorkspaceListQueryV2Schema = external_exports.object({
   query: external_exports.string().trim().max(160).default(""),
-  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms"]).default("recent"),
+  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms", "archived"]).default("recent"),
   limit: external_exports.number().int().min(1).max(100).default(30),
   cursor: ThoughtListCursorV2Schema.nullable().default(null)
 }).strict();
@@ -25031,7 +25090,7 @@ var Receipt = external_exports.object({
 init_auth_refusal();
 import { readFileSync as readFileSync2 } from "node:fs";
 import crypto4 from "node:crypto";
-import os7 from "node:os";
+import os8 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25039,7 +25098,7 @@ import { fileURLToPath } from "node:url";
 init_atomic_rename();
 import { promises as fs7 } from "node:fs";
 import path10 from "node:path";
-import os6 from "node:os";
+import os7 from "node:os";
 var PRIVATE_HEADER = "Memlin-Private";
 var PRIVATE_UNTIL_HEADER = "Memlin-Private-Until";
 var PRIVATE_TTL_MS = 24 * 60 * 60 * 1e3;
@@ -25051,7 +25110,7 @@ var PRIVATE_ALLOWED_WRITES = [
 var DENIED_TTL_MS = 10 * 60 * 1e3;
 var FLOOR_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
 function stateFile() {
-  return path10.join(os6.homedir(), ".config", "memlin", "private-sessions.json");
+  return path10.join(os7.homedir(), ".config", "memlin", "private-sessions.json");
 }
 async function readPrivateState() {
   try {
@@ -25141,12 +25200,12 @@ function isPrivateAllowedWrite(method, pathAndQuery) {
 // packages/plugin-core/src/memlin-api-client.ts
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os7.hostname() || "unknown";
+  return process.env.MEMLIN_AGENT_DEVICE || os8.hostname() || "unknown";
 }
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.48";
+  cachedAgentVersion = "0.1.49";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -25311,8 +25370,8 @@ var MemlinApiClient = class {
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: version2,
       [AGENT_CAPABILITIES_HEADER]: (override.agentKind ? AGENT_EXPECTED_CAPABILITIES[kind] : agentCapabilities()).join(","),
-      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os7.platform(),
-      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os7.arch()
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os8.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os8.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h["Memlin-Account-Id"] = this.cfg.accountId;
@@ -26520,9 +26579,9 @@ function resolveApiUrl() {
 init_workspace_binding();
 init_auth_refusal();
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path11.join(os8.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path11.join(os9.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path11.join(os8.homedir(), ".config", "memlin");
+var CONFIG_DIR = path11.join(os9.homedir(), ".config", "memlin");
 var TOKEN_FILE = path11.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {

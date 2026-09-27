@@ -31661,16 +31661,55 @@ __export(workspace_binding_exports, {
   WORKSPACE_BINDING_FILE: () => WORKSPACE_BINDING_FILE,
   WORKSPACE_DIR_NAME: () => WORKSPACE_DIR_NAME,
   clearWorkspaceBinding: () => clearWorkspaceBinding,
+  findIgnoredBroadWorkspaceBinding: () => findIgnoredBroadWorkspaceBinding,
   findWorkspaceBinding: () => findWorkspaceBinding,
+  isTooBroadForWorkspaceBinding: () => isTooBroadForWorkspaceBinding,
   resolveGitWorkspaceIdentity: () => resolveGitWorkspaceIdentity,
   writeWorkspaceBinding: () => writeWorkspaceBinding
 });
 import { randomUUID as randomUUID3 } from "node:crypto";
 import { constants, promises as fs6 } from "node:fs";
+import os6 from "node:os";
 import path7 from "node:path";
+async function homeDirectories() {
+  const home = os6.homedir();
+  if (!home) return [];
+  const resolved = path7.resolve(home);
+  const real = await fs6.realpath(resolved).catch(() => resolved);
+  return real === resolved ? [resolved] : [resolved, real];
+}
+function coversHome(dir, homes) {
+  return homes.some((home) => containedBy(dir, home));
+}
+async function isTooBroadForWorkspaceBinding(dir) {
+  const homes = await homeDirectories();
+  const resolved = path7.resolve(dir);
+  const real = await fs6.realpath(resolved).catch(() => resolved);
+  return coversHome(resolved, homes) || coversHome(real, homes);
+}
+async function findIgnoredBroadWorkspaceBinding() {
+  const homes = await homeDirectories();
+  for (const home of homes) {
+    let dir = home;
+    for (let i2 = 0; i2 < 64; i2++) {
+      const candidate = path7.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
+      try {
+        const parsed = JSON.parse(await fs6.readFile(candidate, "utf8"));
+        if (typeof parsed.account_id === "string" && parsed.account_id) return candidate;
+      } catch {
+      }
+      const parent = path7.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return null;
+}
 async function walkForWorkspaceBinding(startDir) {
   let dir = path7.resolve(startDir);
+  const homes = await homeDirectories();
   for (let i2 = 0; i2 < 64; i2++) {
+    if (coversHome(dir, homes)) return null;
     const candidate = path7.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
     try {
       const raw = await fs6.readFile(candidate, "utf8");
@@ -31863,6 +31902,11 @@ async function writeWorkspaceBinding(workspaceRoot, binding) {
   const root = await fs6.realpath(path7.resolve(workspaceRoot));
   const rootEntry = await fs6.stat(root);
   if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
+  if (await isTooBroadForWorkspaceBinding(root)) {
+    throw new Error(
+      `Refusing to link ${root}: it is your home folder or above it, so the link would cover every project inside it. Run this from inside the project folder instead.`
+    );
+  }
   const dir = path7.join(root, WORKSPACE_DIR_NAME);
   try {
     const entry2 = await fs6.lstat(dir);
@@ -31964,7 +32008,7 @@ import { randomUUID as randomUUID6 } from "node:crypto";
 import { existsSync as existsSync5, readFileSync as readFileSync7 } from "node:fs";
 import path21, { dirname as dirname2, join as join2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import os14 from "node:os";
+import os15 from "node:os";
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
@@ -63365,6 +63409,21 @@ var ThoughtPreferencesReceiptV2Schema = external_exports.object({
   scope: external_exports.enum(["personal", "project", "team"]),
   replayed: external_exports.boolean()
 }).strict();
+var ThoughtLibraryArchiveV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  thought_id: Id,
+  archived: external_exports.boolean(),
+  idempotency_key: Key
+}).strict();
+var ThoughtLibraryArchiveReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  receipt_id: Id,
+  thought_id: Id,
+  cursor: Revision,
+  archived: external_exports.boolean(),
+  archived_at: Time.nullable(),
+  replayed: external_exports.boolean()
+}).strict();
 var ThoughtTopicDesignateV2Schema = external_exports.object({
   version: external_exports.literal(2),
   root_thought_id: Id,
@@ -63570,7 +63629,7 @@ var ThoughtTopicOperationReceiptV2Schema = external_exports.object({
 var ThoughtListCursorV2Schema = external_exports.object({ updated_at: Time, id: Id }).strict();
 var ThoughtWorkspaceListQueryV2Schema = external_exports.object({
   query: external_exports.string().trim().max(160).default(""),
-  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms"]).default("recent"),
+  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms", "archived"]).default("recent"),
   limit: external_exports.number().int().min(1).max(100).default(30),
   cursor: ThoughtListCursorV2Schema.nullable().default(null)
 }).strict();
@@ -89714,7 +89773,7 @@ import path17 from "node:path";
 // packages/plugin-core/dist/client.js
 import { promises as fs7 } from "node:fs";
 import path8 from "node:path";
-import os7 from "node:os";
+import os8 from "node:os";
 import { randomUUID as randomUUID4 } from "node:crypto";
 
 // packages/plugin-core/dist/auth.js
@@ -90002,7 +90061,7 @@ init_atomic_rename();
 init_auth_refusal();
 import { readFileSync } from "node:fs";
 import crypto4 from "node:crypto";
-import os6 from "node:os";
+import os7 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -90257,12 +90316,12 @@ function isPrivateAllowedWrite(method, pathAndQuery) {
 // packages/plugin-core/dist/memlin-api-client.js
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os6.hostname() || "unknown";
+  return process.env.MEMLIN_AGENT_DEVICE || os7.hostname() || "unknown";
 }
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.48";
+  cachedAgentVersion = "0.1.49";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -90427,8 +90486,8 @@ var MemlinApiClient = class {
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: version5,
       [AGENT_CAPABILITIES_HEADER]: (override.agentKind ? AGENT_EXPECTED_CAPABILITIES[kind2] : agentCapabilities()).join(","),
-      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os6.platform(),
-      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os6.arch()
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os7.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os7.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h2["Memlin-Account-Id"] = this.cfg.accountId;
@@ -91636,9 +91695,9 @@ function resolveApiUrl() {
 init_workspace_binding();
 init_auth_refusal();
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path8.join(os7.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path8.join(os8.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path8.join(os7.homedir(), ".config", "memlin");
+var CONFIG_DIR = path8.join(os8.homedir(), ".config", "memlin");
 var TOKEN_FILE = path8.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
@@ -91862,7 +91921,7 @@ function isWorkspaceActive(input) {
 import { execSync } from "node:child_process";
 import { realpathSync as realpathSync2 } from "node:fs";
 import path11 from "node:path";
-import os9 from "node:os";
+import os10 from "node:os";
 
 // packages/plugin-core/dist/edit-broker-local.js
 import crypto5 from "node:crypto";
@@ -91877,7 +91936,7 @@ import {
   rmSync,
   writeFileSync
 } from "node:fs";
-import os8 from "node:os";
+import os9 from "node:os";
 import path10 from "node:path";
 import { execFileSync } from "node:child_process";
 var LOCAL_LEASE_MS = 2e4;
@@ -91914,7 +91973,7 @@ function localBrokerIdentity(cwd) {
   const commonDir = canonical(
     path10.isAbsolute(commonRaw) ? commonRaw : path10.resolve(cwd, commonRaw)
   );
-  const deviceId = digest(`${os8.hostname()}\0${os8.platform()}\0${os8.arch()}`);
+  const deviceId = digest(`${os9.hostname()}\0${os9.platform()}\0${os9.arch()}`);
   return {
     root,
     commonDir,
@@ -92209,7 +92268,7 @@ import {
   rmSync as rmSync2,
   writeFileSync as writeFileSync2
 } from "node:fs";
-import os10 from "node:os";
+import os11 from "node:os";
 import path13 from "node:path";
 import { execFileSync as execFileSync2, spawnSync } from "node:child_process";
 
@@ -92574,7 +92633,7 @@ function dryMergeWorktreeIntent(intent, identity, holder, holderRoot) {
   if (!mergeBase) return "unknown";
   const baseContent = gitOutput(identity.root, ["show", `${mergeBase}:${intent.path}`]);
   if (baseContent === null) return "unknown";
-  const dir = mkdtempSync(path13.join(os10.tmpdir(), "memlin-edit-broker-"));
+  const dir = mkdtempSync(path13.join(os11.tmpdir(), "memlin-edit-broker-"));
   const ours = path13.join(dir, "ours");
   const base = path13.join(dir, "base");
   const theirs = path13.join(dir, "theirs");
@@ -92870,7 +92929,7 @@ function shouldInterrupt(kind2) {
 
 // packages/plugin-core/dist/trigger-memories.js
 import { promises as fs8 } from "node:fs";
-import os11 from "node:os";
+import os12 from "node:os";
 import path15 from "node:path";
 init_atomic_rename();
 init_workspace_binding();
@@ -93012,7 +93071,7 @@ function evaluateTriggerEntries(entries, input, source) {
   return hits;
 }
 function compiledTriggersPath() {
-  return path15.join(os11.homedir(), ".config", "memlin", "triggers.json");
+  return path15.join(os12.homedir(), ".config", "memlin", "triggers.json");
 }
 function decodeStoredEntry(raw, fallbackId) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -93181,12 +93240,12 @@ async function evaluateTriggerMemories(payload2, opts = {}) {
 
 // packages/plugin-core/dist/deploy-broker.js
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync6, unlinkSync, writeFileSync as writeFileSync3 } from "node:fs";
-import os12 from "node:os";
+import os13 from "node:os";
 import path16 from "node:path";
 function deployWaiterDir() {
   const override = process.env.MEMLIN_DEPLOY_WAITER_DIR?.trim();
   if (override) return override;
-  return path16.join(os12.homedir(), ".config", "memlin", "deploy-waiters");
+  return path16.join(os13.homedir(), ".config", "memlin", "deploy-waiters");
 }
 function waiterPath(sessionId) {
   const safe = sessionId.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 180);
@@ -93693,7 +93752,7 @@ var PLUGIN_RUNTIME_TIMEOUT_MS = 150;
 var VERSION2 = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?$/;
 var HOSTS3 = /* @__PURE__ */ new Set(["cursor", "antigravity", "codex", "claude-code"]);
 function ownVersion() {
-  const version5 = "0.1.48";
+  const version5 = "0.1.49";
   return typeof version5 === "string" && VERSION2.test(version5) ? version5 : null;
 }
 async function reportPluginRuntime(report) {
@@ -93746,9 +93805,9 @@ function startPluginRuntimeHeartbeat(host2) {
 init_atomic_rename();
 import { promises as fs9 } from "node:fs";
 import path18 from "node:path";
-import os13 from "node:os";
+import os14 from "node:os";
 import crypto7 from "node:crypto";
-var STATE_FILE = path18.join(os13.homedir(), ".config", "memlin", "state.json");
+var STATE_FILE = path18.join(os14.homedir(), ".config", "memlin", "state.json");
 var MAX_LAST_RESOLVE_SESSIONS = 32;
 var EMPTY = { documents: {} };
 async function readState2() {
@@ -94127,7 +94186,7 @@ function runtimeCwd() {
     return curr;
   }
   try {
-    const raw = readFileSync7(path21.join(os14.homedir(), ".config", "memlin", "state.json"), "utf8");
+    const raw = readFileSync7(path21.join(os15.homedir(), ".config", "memlin", "state.json"), "utf8");
     const s2 = JSON.parse(raw);
     const candidate = s2?.last_resolve?.cwd;
     if (candidate && typeof candidate === "string" && path21.isAbsolute(candidate) && existsSync5(candidate)) {
@@ -94238,7 +94297,7 @@ function agentCapabilities2() {
   return process.env.MEMLIN_AGENT_CAPABILITIES || "mcp,cli,hooks,rules,scribe,resolve";
 }
 function agentDevice2() {
-  return process.env.MEMLIN_AGENT_DEVICE || os14.hostname() || "unknown device";
+  return process.env.MEMLIN_AGENT_DEVICE || os15.hostname() || "unknown device";
 }
 function readNearestPackageVersion() {
   try {
@@ -94260,7 +94319,7 @@ function readNearestPackageVersion() {
 var cachedAgentVersion2;
 function agentVersion2() {
   if (cachedAgentVersion2 !== void 0) return cachedAgentVersion2;
-  const env = "0.1.48"?.trim();
+  const env = "0.1.49"?.trim();
   cachedAgentVersion2 = env || readNearestPackageVersion();
   return cachedAgentVersion2;
 }
@@ -94556,8 +94615,8 @@ async function createToolContext(accessToken, requestCfg, requireInstallation = 
       // change" (never blanks a known version) and
       // its semver-gated propagation only moves a
       // sibling row UP, so a floor can't smear.
-      p_platform: os14.platform(),
-      p_arch: os14.arch(),
+      p_platform: os15.platform(),
+      p_arch: os15.arch(),
       p_capabilities: {
         items: agentCapabilities2().split(",").map((s2) => s2.trim()).filter(Boolean)
       }

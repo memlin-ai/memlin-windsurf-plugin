@@ -3593,6 +3593,7 @@ var require_gray_matter = __commonJS({
 // packages/plugin-core/src/workspace-binding.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { constants, promises as fs5 } from "node:fs";
+import os6 from "node:os";
 import path6 from "node:path";
 var GIT_POINTER_MAX_BYTES;
 var init_workspace_binding = __esm({
@@ -3610,7 +3611,7 @@ import readline from "node:readline/promises";
 // packages/plugin-core/src/client.ts
 import { promises as fs6 } from "node:fs";
 import path7 from "node:path";
-import os6 from "node:os";
+import os7 from "node:os";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
@@ -10435,6 +10436,21 @@ var ThoughtPreferencesReceiptV2Schema = external_exports.object({
   scope: external_exports.enum(["personal", "project", "team"]),
   replayed: external_exports.boolean()
 }).strict();
+var ThoughtLibraryArchiveV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  thought_id: Id,
+  archived: external_exports.boolean(),
+  idempotency_key: Key
+}).strict();
+var ThoughtLibraryArchiveReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  receipt_id: Id,
+  thought_id: Id,
+  cursor: Revision,
+  archived: external_exports.boolean(),
+  archived_at: Time.nullable(),
+  replayed: external_exports.boolean()
+}).strict();
 var ThoughtTopicDesignateV2Schema = external_exports.object({
   version: external_exports.literal(2),
   root_thought_id: Id,
@@ -10640,7 +10656,7 @@ var ThoughtTopicOperationReceiptV2Schema = external_exports.object({
 var ThoughtListCursorV2Schema = external_exports.object({ updated_at: Time, id: Id }).strict();
 var ThoughtWorkspaceListQueryV2Schema = external_exports.object({
   query: external_exports.string().trim().max(160).default(""),
-  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms"]).default("recent"),
+  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms", "archived"]).default("recent"),
   limit: external_exports.number().int().min(1).max(100).default(30),
   cursor: ThoughtListCursorV2Schema.nullable().default(null)
 }).strict();
@@ -23779,9 +23795,9 @@ var RESOLVE_V2_MAX_LINE_BYTES = 2 * 1024 * 1024;
 init_workspace_binding();
 init_auth_refusal();
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path7.join(os6.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path7.join(os7.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path7.join(os6.homedir(), ".config", "memlin");
+var CONFIG_DIR = path7.join(os7.homedir(), ".config", "memlin");
 var TOKEN_FILE = path7.join(CONFIG_DIR, "token.json");
 async function writeGlobalConfig(config2) {
   const file2 = globalConfigFilePath();
@@ -23815,7 +23831,7 @@ init_auth_refusal();
 import { promises as fs7 } from "node:fs";
 import { existsSync } from "node:fs";
 import path8 from "node:path";
-import os7 from "node:os";
+import os8 from "node:os";
 
 // packages/plugin-core/src/login-bootstrap.ts
 var LoginBootstrapError = class extends Error {

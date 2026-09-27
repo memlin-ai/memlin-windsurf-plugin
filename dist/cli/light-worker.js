@@ -3924,16 +3924,55 @@ __export(workspace_binding_exports, {
   WORKSPACE_BINDING_FILE: () => WORKSPACE_BINDING_FILE,
   WORKSPACE_DIR_NAME: () => WORKSPACE_DIR_NAME,
   clearWorkspaceBinding: () => clearWorkspaceBinding,
+  findIgnoredBroadWorkspaceBinding: () => findIgnoredBroadWorkspaceBinding,
   findWorkspaceBinding: () => findWorkspaceBinding,
+  isTooBroadForWorkspaceBinding: () => isTooBroadForWorkspaceBinding,
   resolveGitWorkspaceIdentity: () => resolveGitWorkspaceIdentity,
   writeWorkspaceBinding: () => writeWorkspaceBinding
 });
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { constants, promises as fs5 } from "node:fs";
+import os6 from "node:os";
 import path7 from "node:path";
+async function homeDirectories() {
+  const home = os6.homedir();
+  if (!home) return [];
+  const resolved = path7.resolve(home);
+  const real = await fs5.realpath(resolved).catch(() => resolved);
+  return real === resolved ? [resolved] : [resolved, real];
+}
+function coversHome(dir, homes) {
+  return homes.some((home) => containedBy(dir, home));
+}
+async function isTooBroadForWorkspaceBinding(dir) {
+  const homes = await homeDirectories();
+  const resolved = path7.resolve(dir);
+  const real = await fs5.realpath(resolved).catch(() => resolved);
+  return coversHome(resolved, homes) || coversHome(real, homes);
+}
+async function findIgnoredBroadWorkspaceBinding() {
+  const homes = await homeDirectories();
+  for (const home of homes) {
+    let dir = home;
+    for (let i = 0; i < 64; i++) {
+      const candidate = path7.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
+      try {
+        const parsed = JSON.parse(await fs5.readFile(candidate, "utf8"));
+        if (typeof parsed.account_id === "string" && parsed.account_id) return candidate;
+      } catch {
+      }
+      const parent = path7.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return null;
+}
 async function walkForWorkspaceBinding(startDir) {
   let dir = path7.resolve(startDir);
+  const homes = await homeDirectories();
   for (let i = 0; i < 64; i++) {
+    if (coversHome(dir, homes)) return null;
     const candidate = path7.join(dir, WORKSPACE_DIR_NAME, WORKSPACE_BINDING_FILE);
     try {
       const raw = await fs5.readFile(candidate, "utf8");
@@ -4126,6 +4165,11 @@ async function writeWorkspaceBinding(workspaceRoot, binding) {
   const root = await fs5.realpath(path7.resolve(workspaceRoot));
   const rootEntry = await fs5.stat(root);
   if (!rootEntry.isDirectory()) throw new Error("Workspace root must be a directory.");
+  if (await isTooBroadForWorkspaceBinding(root)) {
+    throw new Error(
+      `Refusing to link ${root}: it is your home folder or above it, so the link would cover every project inside it. Run this from inside the project folder instead.`
+    );
+  }
   const dir = path7.join(root, WORKSPACE_DIR_NAME);
   try {
     const entry = await fs5.lstat(dir);
@@ -4222,18 +4266,18 @@ var init_workspace_binding = __esm({
 });
 
 // packages/plugin-core/src/cli/light-worker.ts
-import os11 from "node:os";
+import os12 from "node:os";
 
 // packages/plugin-core/src/heartbeat.ts
 import crypto4 from "node:crypto";
 import { promises as fs7 } from "node:fs";
-import os8 from "node:os";
+import os9 from "node:os";
 import path10 from "node:path";
 
 // packages/plugin-core/src/client.ts
 import { promises as fs6 } from "node:fs";
 import path8 from "node:path";
-import os7 from "node:os";
+import os8 from "node:os";
 import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/src/auth.ts
@@ -12481,6 +12525,21 @@ var ThoughtPreferencesReceiptV2Schema = external_exports.object({
   scope: external_exports.enum(["personal", "project", "team"]),
   replayed: external_exports.boolean()
 }).strict();
+var ThoughtLibraryArchiveV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  thought_id: Id,
+  archived: external_exports.boolean(),
+  idempotency_key: Key
+}).strict();
+var ThoughtLibraryArchiveReceiptV2Schema = external_exports.object({
+  version: external_exports.literal(2),
+  receipt_id: Id,
+  thought_id: Id,
+  cursor: Revision,
+  archived: external_exports.boolean(),
+  archived_at: Time.nullable(),
+  replayed: external_exports.boolean()
+}).strict();
 var ThoughtTopicDesignateV2Schema = external_exports.object({
   version: external_exports.literal(2),
   root_thought_id: Id,
@@ -12686,7 +12745,7 @@ var ThoughtTopicOperationReceiptV2Schema = external_exports.object({
 var ThoughtListCursorV2Schema = external_exports.object({ updated_at: Time, id: Id }).strict();
 var ThoughtWorkspaceListQueryV2Schema = external_exports.object({
   query: external_exports.string().trim().max(160).default(""),
-  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms"]).default("recent"),
+  filter: external_exports.enum(["recent", "personal", "team", "project", "starred", "rooms", "archived"]).default("recent"),
   limit: external_exports.number().int().min(1).max(100).default(30),
   cursor: ThoughtListCursorV2Schema.nullable().default(null)
 }).strict();
@@ -26086,7 +26145,7 @@ var Receipt = external_exports.object({
 init_auth_refusal();
 import { readFileSync } from "node:fs";
 import crypto3 from "node:crypto";
-import os6 from "node:os";
+import os7 from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26367,12 +26426,12 @@ function isPrivateAllowedWrite(method, pathAndQuery) {
 // packages/plugin-core/src/memlin-api-client.ts
 var DEFAULT_API_URL = "https://memlin.ai/api/v1";
 function agentDevice() {
-  return process.env.MEMLIN_AGENT_DEVICE || os6.hostname() || "unknown";
+  return process.env.MEMLIN_AGENT_DEVICE || os7.hostname() || "unknown";
 }
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.48";
+  cachedAgentVersion = "0.1.49";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -26537,8 +26596,8 @@ var MemlinApiClient = class {
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: version2,
       [AGENT_CAPABILITIES_HEADER]: (override.agentKind ? AGENT_EXPECTED_CAPABILITIES[kind] : agentCapabilities()).join(","),
-      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os6.platform(),
-      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os6.arch()
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os7.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os7.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h["Memlin-Account-Id"] = this.cfg.accountId;
@@ -27746,9 +27805,9 @@ function resolveApiUrl() {
 init_workspace_binding();
 init_auth_refusal();
 function globalConfigFilePath() {
-  return process.env.MEMLIN_CONFIG_FILE || path8.join(os7.homedir(), ".config", "memlin", "config.json");
+  return process.env.MEMLIN_CONFIG_FILE || path8.join(os8.homedir(), ".config", "memlin", "config.json");
 }
-var CONFIG_DIR = path8.join(os7.homedir(), ".config", "memlin");
+var CONFIG_DIR = path8.join(os8.homedir(), ".config", "memlin");
 var TOKEN_FILE = path8.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
@@ -27986,7 +28045,7 @@ var DEFAULT_THROTTLE_MS = 6e4;
 var HEARTBEAT_REQUEST_TIMEOUT_MS = 750;
 function statePath(cwd, host) {
   const key = crypto4.createHash("sha256").update(cwd).digest("hex").slice(0, 16);
-  return path10.join(os8.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
+  return path10.join(os9.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
 }
 async function recentlySent(file2, throttleMs) {
   try {
@@ -32058,7 +32117,7 @@ async function runLightSync(opts) {
 
 // packages/plugin-core/src/remote-session-hook.ts
 import { promises as fs11 } from "node:fs";
-import os9 from "node:os";
+import os10 from "node:os";
 import path22 from "node:path";
 import { createHash as createHash3, randomUUID as randomUUID6 } from "node:crypto";
 init_companion_client();
@@ -32068,7 +32127,7 @@ function remoteHookEventId(input, phase) {
   const digest = createHash3("sha256").update(JSON.stringify([input.session_id, phase, invocation])).digest("hex");
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
-async function remoteHookRootAllowed(cwd, settingsPath = path22.join(os9.homedir(), ".config/memlin/remote-control.json")) {
+async function remoteHookRootAllowed(cwd, settingsPath = path22.join(os10.homedir(), ".config/memlin/remote-control.json")) {
   try {
     const config2 = JSON.parse(await fs11.readFile(settingsPath, "utf8"));
     if (config2.enabled !== true || !Array.isArray(config2.workspace_roots)) return false;
@@ -32606,9 +32665,9 @@ function attributeAppliedItems(agentMessage, replay) {
 init_atomic_rename();
 import { promises as fs13 } from "node:fs";
 import path25 from "node:path";
-import os10 from "node:os";
+import os11 from "node:os";
 import crypto5 from "node:crypto";
-var STATE_FILE = path25.join(os10.homedir(), ".config", "memlin", "state.json");
+var STATE_FILE = path25.join(os11.homedir(), ".config", "memlin", "state.json");
 var EMPTY = { documents: {} };
 async function readState() {
   try {
@@ -33246,7 +33305,13 @@ async function maybeRecordOutcome(ctx, payload, routing) {
     log(
       `recorded resolve.outcome: ${outcome} for audit ${lastResolve.audit_id} (${attribution.attribution_mode}, ${attribution.applied_item_ids.length} applied)`
     );
-    if (outcome === "negative") {
+    if (outcome === "negative" && !routing.active) {
+      log("correction capture: skipped \u2014 not a known Memlin workspace");
+    } else if (outcome === "negative" && routing.hazard === "block") {
+      log(
+        "correction capture: BLOCKED \u2014 account-binding mismatch (git remote not owned by the resolved project). Re-link with `memlin add-project`, or set MEMLIN_ALLOW_ACCOUNT_MISMATCH=1 to record here anyway."
+      );
+    } else if (outcome === "negative") {
       const gitRemote = readGitRemote2(cwd);
       log(
         `resolver outcome is negative; capturing correction rule for audit ${lastResolve.audit_id}...`
@@ -33670,7 +33735,7 @@ try {
         await runLightSync({
           api: ctx.api,
           lightRoot: root,
-          home: os11.homedir(),
+          home: os12.homedir(),
           trigger: "auto",
           client: "plugin"
         }).catch(() => {
