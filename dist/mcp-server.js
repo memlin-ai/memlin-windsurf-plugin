@@ -31636,6 +31636,16 @@ var init_companion_client = __esm({
     DEFAULT_CALL_TIMEOUT_MS = 1e3;
     CALL_TIMEOUTS = {
       "workspace.resolve": 2e3,
+      "nativeDevices.status": 3e4,
+      "nativeDevices.list": 3e4,
+      "nativeDevices.pairStart": 3e4,
+      "nativeDevices.pairConfirm": 3e4,
+      "nativeDevices.trust": 3e4,
+      "nativeDevices.revoke": 3e4,
+      "nativeDevices.renew": 6e4,
+      "nativeDevices.keyOffer": 6e4,
+      "nativeDevices.keyOffers": 6e4,
+      "nativeDevices.keyAccept": 6e4,
       "resolve.start": 750,
       "resolve.reuse": 4500,
       "resolve.reserve": 750,
@@ -61192,6 +61202,142 @@ function estCostUsd(inputTokens, usdPerMTok) {
 var SONNET_BLENDED_USD_PER_MTOK = SONNET_INPUT_USD_PER_MTOK + OUTPUT_MULTIPLIER * SONNET_OUTPUT_USD_PER_MTOK;
 var SAVINGS_USD_PER_TOKEN = estCostUsd(1);
 
+// packages/shared/dist/update-feed.js
+var FEED_FORMAT = "memlin.feed.v1";
+var FeedSeveritySchema = external_exports.enum(["info", "notable", "action"]);
+var FeedKeySchema = external_exports.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/);
+var FeedCitationSchema = external_exports.object({
+  url: external_exports.string().url().max(2048).refine((value) => value.startsWith("https://"), "Citations must be https"),
+  title: external_exports.string().trim().min(1).max(300)
+}).strict();
+var modelId = external_exports.string().trim().min(1).max(240);
+var perMTok = external_exports.number().nonnegative().max(1e5);
+var PricesSchema = external_exports.object({
+  input: perMTok.nullable(),
+  output: perMTok.nullable(),
+  cache_read: perMTok.nullable().optional(),
+  cache_write: perMTok.nullable().optional()
+}).strict();
+var AiChangeAuthoritySchema = external_exports.enum(["authoritative", "reported", "community"]);
+var AiChangeDetailsSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({
+    kind: external_exports.literal("price_change"),
+    authority: AiChangeAuthoritySchema,
+    vendor: external_exports.string().max(40),
+    model: modelId,
+    before: PricesSchema.nullable(),
+    after: PricesSchema,
+    effective_at: external_exports.string().datetime().nullable()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("new_model"),
+    authority: AiChangeAuthoritySchema,
+    vendor: external_exports.string().max(40),
+    model: modelId,
+    family: external_exports.string().max(80).nullable(),
+    predecessor: modelId.nullable(),
+    prices: PricesSchema.nullable()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.enum(["deprecation", "retirement"]),
+    authority: AiChangeAuthoritySchema,
+    vendor: external_exports.string().max(40),
+    model: modelId,
+    retire_at: external_exports.string().datetime().nullable(),
+    replacement: modelId.nullable()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.enum(["tool_release", "breaking_change"]),
+    authority: AiChangeAuthoritySchema,
+    vendor: external_exports.string().max(40),
+    tool: external_exports.string().regex(/^[a-z0-9][a-z0-9:@/._-]{1,80}$/),
+    version: external_exports.string().max(80),
+    breaking: external_exports.array(external_exports.string().max(300)).max(10)
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("news"),
+    authority: AiChangeAuthoritySchema,
+    vendor: external_exports.string().max(40).nullable()
+  }).strict()
+]);
+var ModelWatchAlertDetailsSchema = external_exports.object({
+  kind: external_exports.enum([
+    "price_change",
+    "new_model",
+    "deprecation",
+    "retirement",
+    "tool_release",
+    "breaking_change",
+    "news"
+  ]),
+  change_entry_id: external_exports.string().uuid(),
+  evidence: external_exports.object({
+    models_used: external_exports.array(external_exports.object({ model: modelId, tokens_30d: external_exports.number().int().nonnegative() }).strict()).max(20),
+    monthly_cost_delta_usd: external_exports.number().nullable(),
+    files: external_exports.array(external_exports.object({ repo: external_exports.string().max(200), path: external_exports.string().max(500) }).strict()).max(50),
+    workflows: external_exports.array(external_exports.object({ id: external_exports.string().uuid(), title: external_exports.string().max(240) }).strict()).max(20),
+    host_versions: external_exports.array(external_exports.object({ tool: external_exports.string().max(80), version: external_exports.string().max(80) }).strict()).max(10)
+  }).strict()
+}).strict();
+var FeedEntryInputSchema = external_exports.object({
+  dedupe_key: external_exports.string().trim().min(1).max(300),
+  kind: external_exports.string().regex(/^[a-z][a-z_]{1,39}$/),
+  severity: FeedSeveritySchema,
+  title: external_exports.string().trim().min(1).max(200),
+  summary: external_exports.string().max(600).default(""),
+  body_md: external_exports.string().max(2e3).default(""),
+  citations: external_exports.array(FeedCitationSchema).min(1).max(20),
+  details: external_exports.record(external_exports.string(), external_exports.unknown()).default({}),
+  subjects: external_exports.record(external_exports.string(), external_exports.unknown()).default({}),
+  project_id: external_exports.string().uuid().nullable().default(null),
+  receipt: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
+}).strict();
+var FeedEntrySchema = external_exports.object({
+  id: external_exports.string().uuid(),
+  kind: external_exports.string(),
+  severity: FeedSeveritySchema,
+  title: external_exports.string(),
+  summary: external_exports.string(),
+  body_md: external_exports.string(),
+  citations: external_exports.array(FeedCitationSchema),
+  details: external_exports.record(external_exports.string(), external_exports.unknown()),
+  subjects: external_exports.record(external_exports.string(), external_exports.unknown()),
+  project_id: external_exports.string().uuid().nullable(),
+  producer: external_exports.enum(["workflow", "lane"]),
+  content_sha256: external_exports.string(),
+  supersedes_id: external_exports.string().uuid().nullable(),
+  published_at: external_exports.string(),
+  unread: external_exports.boolean()
+}).strict();
+var FeedSummarySchema = external_exports.object({
+  key: FeedKeySchema,
+  title: external_exports.string(),
+  audience: external_exports.enum(["global", "account"]),
+  entry_schema: external_exports.string(),
+  manifest_version: external_exports.number().int().positive(),
+  unread: external_exports.number().int().nonnegative()
+}).strict();
+var FeedResponseSchema = external_exports.object({
+  format: external_exports.literal(FEED_FORMAT),
+  feed: FeedSummarySchema,
+  entries: external_exports.array(FeedEntrySchema),
+  next_since: external_exports.string().nullable(),
+  generated_at: external_exports.string()
+}).strict();
+
+// packages/shared/dist/job-dispatch.js
+var JOB_KINDS = ["workflow_run", "model_watch_match", "model_watch_digest"];
+var JobMessageSchema = external_exports.object({
+  version: external_exports.literal(1),
+  kind: external_exports.enum(JOB_KINDS),
+  job_key: external_exports.string().min(1).max(200),
+  account_id: external_exports.string().uuid(),
+  delivery: external_exports.number().int().positive()
+}).strict();
+
+// packages/shared/dist/proposal-lifecycle.js
+var GOAL_CLOSE_AFTER_DAYS = 30;
+
 // packages/shared/dist/memlin-contract.js
 function hasMemlinContract(body) {
   return /```memlin-contract\s*\n[\s\S]*?\n```/.test(body);
@@ -64719,9 +64865,13 @@ function retirementNeedsHuman(doc) {
   if (doc.memoryType === "correction" || doc.memoryType === "preference") return true;
   return false;
 }
-function actorMayRetire(actor, doc) {
+var SUPERSEDE_REVIEWER_ACTOR_ID = "memory-reviewer.supersede";
+function actorMayRetire(actor, doc, to) {
   if (!retirementNeedsHuman(doc)) return true;
-  return actor.type === "human";
+  if (actor.type === "human") return true;
+  if (doc.requiredGovernance === true || doc.sqlStatus === "approved") return false;
+  if (doc.isDraft === true) return true;
+  return actor.id === SUPERSEDE_REVIEWER_ACTOR_ID && to === "superseded" && doc.kind === "decision" && doc.provenance !== "human_typed" && doc.memoryType !== "correction" && doc.memoryType !== "preference";
 }
 
 // packages/shared/dist/decision-prompt.js
@@ -64978,7 +65128,8 @@ function retirementSubjectOf(row) {
     sqlStatus: row.status ?? null,
     provenance: provenance2,
     memoryType: row.memory_type ?? metaType,
-    requiredGovernance: requiredGovernanceOf(meta)
+    requiredGovernance: requiredGovernanceOf(meta),
+    isDraft: typeof meta.proposal_action === "string" && meta.proposal_action.length > 0
   };
 }
 function checkTransition(input) {
@@ -64994,7 +65145,7 @@ function checkTransition(input) {
   if (!isLifecycleStatus(current) || !isLegalTransition(current, to)) {
     return { refused: "illegal", from: current, to, message: `${current} -> ${to} is not legal` };
   }
-  if (isRetirementMove(current, to) && !actorMayRetire(actor, retirementSubjectOf(input.subject))) {
+  if (isRetirementMove(current, to) && !actorMayRetire(actor, retirementSubjectOf(input.subject), to)) {
     return {
       refused: "needs_human",
       from: current,
@@ -65181,6 +65332,7 @@ var OPS_WATCH_ACCOUNT_ID = "0b5e0a11-0000-4000-8000-00000000a001";
 var OPS_DIAGNOSE_SEV2_AFTER_MS = 15 * 6e4;
 
 // packages/shared/dist/entitlements.js
+var FREE_KIT = ["thoughts.personal"];
 var COORDINATION_SELF = [
   "coordination.work_ledger",
   "coordination.handoffs",
@@ -65189,6 +65341,8 @@ var COORDINATION_SELF = [
   "coordination.fleet_dashboard"
 ];
 var INDIVIDUAL_KIT = [
+  ...FREE_KIT,
+  "thoughts.maps",
   ...COORDINATION_SELF,
   "roles",
   "connectors",
@@ -65208,10 +65362,11 @@ var ENTERPRISE_KIT = [
   "governance.byoc"
 ];
 var ENTITLEMENTS_BY_TIER = {
-  // Free: memory only, BYO key (AI gated separately by AI_QUOTA_BY_TIER.free = 0).
-  free: /* @__PURE__ */ new Set(),
-  // Starter: low-cost "memory + a little funded AI", still no feature gates.
-  starter: /* @__PURE__ */ new Set(),
+  // Free: Thoughts (capped by THOUGHTS_LIMITS_BY_TIER) + memory. AI is funded
+  // separately — see the signup credit grant, not AI_QUOTA_BY_TIER.
+  free: new Set(FREE_KIT),
+  // Starter: low-cost "memory + a little funded AI"; same feature set as Free.
+  starter: new Set(FREE_KIT),
   // Pro = Personal Pro.
   pro: new Set(INDIVIDUAL_KIT),
   team: new Set(TEAM_KIT),
@@ -66346,7 +66501,12 @@ var ResearchCollectionSourceSchema = external_exports.object({
     }
   }, "Use a public HTTPS feed URL"),
   label: external_exports.string().trim().min(1).max(120),
-  category: external_exports.enum(["official", "community"])
+  category: external_exports.enum(["official", "community"]),
+  /** Omitted: inferred (a GitHub releases.atom URL reads the latest stable
+   * release; anything else is RSS/Atom). `github_releases` reads the ten
+   * most recent stable releases; `page` tracks a published page's sections
+   * and reports new or changed ones (needs a feed Save to record them). */
+  format: external_exports.enum(["feed", "github_releases", "page"]).optional()
 }).strict();
 var ResearchCollectionSchema = external_exports.object({
   topics: external_exports.array(external_exports.string().trim().min(2).max(100)).min(1).max(10),
@@ -74463,6 +74623,32 @@ var TOOLS = [
     }
   },
   {
+    name: "memlin_updates",
+    description: "What changed in the AI models and tools this workspace builds with. Returns { project_alerts, ai_changes }: project_alerts are Model Watch alerts for the bound project (price changes priced at its own usage, deprecations/retirements of models it runs or pins in workflows, newer agent-tool versions than it runs); ai_changes is the global ledger of model launches, price changes, deprecations and agent-tool releases. Each item carries its authority (authoritative = confirmed; reported = unconfirmed reading of an official page; community = news) and a source URL. Use it when the user asks what changed, whether a model is still current, or what a price change costs them. Read-only; makes no model call.",
+    annotations: { readOnlyHint: true, destructiveHint: false },
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: {
+          type: "string",
+          description: "Project for Model Watch alerts. Defaults to the bound project."
+        },
+        days: {
+          type: "number",
+          minimum: 1,
+          maximum: 90,
+          description: "Look-back window. Default 30."
+        },
+        limit: {
+          type: "number",
+          minimum: 1,
+          maximum: 50,
+          description: "Max items per list. Default 20."
+        }
+      }
+    }
+  },
+  {
     name: "memlin_explain_decision",
     description: "Explain one memory decision before asking the user: where it came from, why a person is needed, what automation already did, a short diff against the doc it affects, what happens if nobody answers and when, and whether each option can be undone. Includes the cached AI recommendation with pros/cons when the kind allows one (sensitive items never do). Makes no model call.",
     annotations: { readOnlyHint: true, destructiveHint: false },
@@ -75672,7 +75858,17 @@ var DECISION_OUTCOME_VERSION = "decision_outcomes.v1";
 var RECORD_OUTCOME_RPC = "memory_decision_record_outcome";
 var MAKE_PRIVATE_RPC = "memory_decision_make_private";
 var MARK_COMPATIBLE_RPC = "memory_decision_mark_compatible";
-function planDecisionOutcome(decision, option) {
+var GOAL_NOT_ADOPTED_REASON = "goal_not_adopted";
+function goalNotAdoptedPatch(nowIso, actorId) {
+  return {
+    rejected_at: nowIso,
+    rejected_by: actorId,
+    rejected_reason: GOAL_NOT_ADOPTED_REASON,
+    rejected_by_system: true
+  };
+}
+var GOAL_NOT_ADOPTED_MESSAGE = `Nobody approved this goal within ${GOAL_CLOSE_AFTER_DAYS} days, so it closed as not adopted`;
+function planDecisionOutcome(decision, option, opts = {}) {
   const subject = decision.subjectDocumentId;
   const targets = decision.targetDocumentIds;
   const tag = `decision:${decision.kind}:${option}`;
@@ -75812,13 +76008,32 @@ function planDecisionOutcome(decision, option) {
           })
         };
       }
+      if (option === "not_now" && opts.byDefault) {
+        return {
+          ops: [],
+          moves: subjectTo("rejected", GOAL_NOT_ADOPTED_MESSAGE, {
+            sqlStatus: "draft",
+            metadataPatch: goalNotAdoptedPatch(
+              opts.nowIso ?? (/* @__PURE__ */ new Date()).toISOString(),
+              "system:decision_default"
+            ),
+            notBeforeAgeDays: GOAL_CLOSE_AFTER_DAYS
+          })
+        };
+      }
       return none;
   }
+}
+function proposedAgeDays(row, nowMs = Date.now()) {
+  const meta = row.metadata ?? {};
+  const stamp = typeof meta.proposed_at === "string" ? meta.proposed_at : row.created_at;
+  const t2 = typeof stamp === "string" ? Date.parse(stamp) : Number.NaN;
+  return Number.isFinite(t2) ? (nowMs - t2) / 864e5 : 0;
 }
 async function loadRows(ctx, ids) {
   const out = /* @__PURE__ */ new Map();
   if (ids.length === 0) return out;
-  const read = (client2) => client2.from("documents").select("id, kind, status, memory_type, metadata").eq("account_id", ctx.accountId).in("id", ids);
+  const read = (client2) => client2.from("documents").select("id, kind, status, memory_type, metadata, created_at").eq("account_id", ctx.accountId).in("id", ids);
   let { data, error: error40 } = await read(ctx.supabase);
   if (error40 && ctx.privilegedSupabase && ctx.privilegedSupabase !== ctx.supabase) {
     ({ data, error: error40 } = await read(ctx.privilegedSupabase));
@@ -75835,7 +76050,9 @@ async function rpcWithFallback(ctx, name, args) {
   return res;
 }
 async function applyDecisionOutcome(ctx, decision, option, actor) {
-  const plan = planDecisionOutcome(decision, option);
+  const plan = planDecisionOutcome(decision, option, {
+    byDefault: actor.type === "decision_default"
+  });
   const result = {
     applied: true,
     transitions: [],
@@ -75890,6 +76107,10 @@ async function applyDecisionOutcome(ctx, decision, option, actor) {
     const current = lifecycleStatusOf(row.metadata);
     if (current === move.to) {
       result.unchanged.push(move.documentId);
+      continue;
+    }
+    if (move.notBeforeAgeDays !== void 0 && proposedAgeDays(row) < move.notBeforeAgeDays) {
+      (result.deferred ??= []).push(move.documentId);
       continue;
     }
     if (isDefault && isRetirementMove(current, move.to)) {
@@ -75956,6 +76177,7 @@ async function applyDecisionOutcome(ctx, decision, option, actor) {
       applied: result.applied,
       transitions: result.transitions,
       unchanged: result.unchanged,
+      ...result.deferred ? { deferred: result.deferred } : {},
       refusals: result.refusals,
       version: DECISION_OUTCOME_VERSION
     }
@@ -76485,6 +76707,7 @@ async function decideTool(ctx, rawArgs, deps = {}) {
 }
 
 // packages/mcp-tools/src/curation.ts
+var ARCHIVED_BY_USER_REASON = "archived_by_user";
 var CurationError = class extends Error {
   code;
   constructor(code, message) {
@@ -76554,6 +76777,9 @@ async function setDocumentStatus(ctx, rawArgs) {
   const actor = ctx.userId ?? "api";
   const meta = { ...row.metadata ?? {} };
   let metadataStatusActivated = false;
+  if (args.action === "archive" && meta.status === "proposed") {
+    return archivePendingProposal(ctx, row, meta, to, actor, nowIso);
+  }
   if (args.action === "approve") {
     meta.approved_at = nowIso;
     meta.approved_by = actor;
@@ -76587,6 +76813,62 @@ async function setDocumentStatus(ctx, rawArgs) {
     from: row.status,
     to,
     metadata_status_activated: metadataStatusActivated
+  };
+}
+async function archivePendingProposal(ctx, row, meta, to, actor, nowIso) {
+  if (typeof meta.proposal_action === "string" && meta.proposal_action.startsWith("connector_")) {
+    throw new CurationError(
+      "invalid_transition",
+      "this is a pending connector proposal; accept or reject it from the inbox"
+    );
+  }
+  const outcome = await transitionDocument(
+    {
+      // The person archiving is the actor on the ledger row, through their
+      // own client (as inbox reject does); never retried as service role.
+      supabase: ctx.actorSupabase ?? ctx.supabase,
+      accountId: ctx.accountId,
+      serviceTokenId: ctx.serviceTokenId,
+      userId: ctx.userId
+    },
+    {
+      documentId: row.id,
+      from: "proposed",
+      to: "rejected",
+      actor: { type: "human", id: actor, version: null },
+      reason: "Archived while still proposed",
+      evidence: { reason: ARCHIVED_BY_USER_REASON },
+      sqlStatus: to,
+      metadataPatch: {
+        rejected_at: nowIso,
+        rejected_by_user_sub: actor,
+        rejection_reason: ARCHIVED_BY_USER_REASON,
+        lifecycle_action: "archived",
+        lifecycle_archived_at: nowIso,
+        lifecycle_archived_by_user_sub: actor
+      },
+      subject: { kind: row.kind, metadata: meta }
+    }
+  ).catch((e2) => {
+    throw new CurationError(
+      "forbidden",
+      `status update failed: ${e2 instanceof Error ? e2.message : String(e2)}`
+    );
+  });
+  if (isTransitionRefusal(outcome)) {
+    throw new CurationError(
+      outcome.refused === "stale" || outcome.refused === "illegal" ? "invalid_transition" : "forbidden",
+      `status update failed: ${outcome.refused} (${outcome.message})`
+    );
+  }
+  return {
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    from: row.status,
+    to,
+    metadata_status_activated: false,
+    proposal_rejected_transition_id: outcome.transitionId
   };
 }
 async function applyCanonicalMerge(ctx, args) {
@@ -85665,18 +85947,75 @@ var ListArgs = external_exports.object({
   /** Optional filter — only return memory proposals of this content sub-type. */
   memory_type: external_exports.enum(MEMORY_TYPES).optional()
 });
+function queueInfo(row) {
+  if (!row) return null;
+  return {
+    owner: row.owner,
+    state: row.state === "needs_human" ? "needs_human" : "due",
+    reason: row.reason ?? null
+  };
+}
+async function needsHumanQueue(ctx, limit2) {
+  const db = ctx.privilegedSupabase;
+  if (!db) return [];
+  try {
+    const { data, error: error40 } = await db.from("proposal_queue_v1").select("document_id, owner, state, reason, entered_at").eq("account_id", ctx.accountId).eq("state", "needs_human").order("entered_at", { ascending: true }).limit(limit2);
+    if (error40) return [];
+    return data ?? [];
+  } catch {
+    return [];
+  }
+}
+async function queueRowsFor(ctx, ids) {
+  const out = /* @__PURE__ */ new Map();
+  const db = ctx.privilegedSupabase;
+  if (!db || ids.length === 0) return out;
+  try {
+    const { data, error: error40 } = await db.from("proposal_queue_v1").select("document_id, owner, state, reason").eq("account_id", ctx.accountId).in("document_id", ids);
+    if (error40) return out;
+    for (const r2 of data ?? []) out.set(r2.document_id, r2);
+  } catch {
+  }
+  return out;
+}
 async function listProposals(ctx, rawArgs) {
   const args = ListArgs.parse(rawArgs ?? {});
-  let query = ctx.supabase.from("documents").select(
-    `id, kind, title, metadata, created_at,
-       document_versions!documents_current_version_fk ( content )`
-  ).eq("account_id", ctx.accountId).filter("metadata->>status", "eq", "proposed");
-  if (args.memory_type) {
-    query = query.filter("metadata->>memory_type", "eq", args.memory_type);
+  const limit2 = args.limit ?? 200;
+  const base = () => {
+    let q2 = ctx.supabase.from("documents").select(
+      `id, kind, title, metadata, created_at,
+         document_versions!documents_current_version_fk ( content )`
+    ).eq("account_id", ctx.accountId).filter("metadata->>status", "eq", "proposed");
+    if (args.memory_type) q2 = q2.filter("metadata->>memory_type", "eq", args.memory_type);
+    return q2;
+  };
+  const waiting = await needsHumanQueue(ctx, limit2);
+  const queueById = new Map(waiting.map((r2) => [r2.document_id, r2]));
+  let first = [];
+  if (waiting.length > 0) {
+    const { data, error: error40 } = await base().in(
+      "id",
+      waiting.map((r2) => r2.document_id)
+    );
+    if (error40) throw new Error(`list_proposals: ${error40.message}`);
+    const byId = new Map((data ?? []).map((r2) => [r2.id, r2]));
+    first = waiting.map((q2) => byId.get(q2.document_id)).filter((r2) => r2 !== void 0);
   }
-  const { data, error: error40 } = await query.order("created_at", { ascending: false }).limit(args.limit ?? 200);
-  if (error40) throw new Error(`list_proposals: ${error40.message}`);
-  const proposals = (data ?? []).map((r2) => {
+  const room = limit2 - first.length;
+  let rest = [];
+  if (room > 0) {
+    const seen = new Set(first.map((r2) => r2.id));
+    const { data, error: error40 } = await base().order("created_at", { ascending: false }).limit(room + seen.size);
+    if (error40) throw new Error(`list_proposals: ${error40.message}`);
+    rest = (data ?? []).filter((r2) => !seen.has(r2.id)).slice(0, room);
+    const more = await queueRowsFor(
+      ctx,
+      rest.map((r2) => r2.id)
+    );
+    for (const [id4, q2] of more) queueById.set(id4, q2);
+  }
+  const queueKnown = ctx.privilegedSupabase !== void 0 && ctx.privilegedSupabase !== null;
+  const proposals = [...first, ...rest].map((r2) => {
     const row = r2;
     const meta = row.metadata ?? {};
     const v2 = Array.isArray(row.document_versions) ? row.document_versions[0] : row.document_versions;
@@ -85728,7 +86067,8 @@ async function listProposals(ctx, rawArgs) {
       update_target: updateTarget,
       fast_track: meta.fast_track === true,
       docs_change: docsChange,
-      feature_suggestion: featureSuggestionForReview(meta)
+      feature_suggestion: featureSuggestionForReview(meta),
+      queue: queueKnown ? queueInfo(queueById.get(row.id)) : null
     };
   });
   return { proposals, count: proposals.length, account_id: ctx.accountId };
@@ -85906,7 +86246,10 @@ async function resolveProposalCore(ctx, args) {
     return applyUpdateProposal(ctx, args.proposal_id, doc, existing, actor, nowIso);
   }
   if (existing.proposal_action === "supersede") {
-    return applySupersedeProposal(ctx, args.proposal_id, doc, existing, actor, nowIso);
+    return applySupersedeProposal(ctx, args.proposal_id, doc, existing, actor, nowIso, {
+      transitionCtx,
+      humanActor
+    });
   }
   const retiredBrandLayers = doc.kind === "brand_guidelines" ? await retireCurrentBrandLayer(ctx, {
     proposalId: args.proposal_id,
@@ -86107,14 +86450,15 @@ async function applyMergeProposal(ctx, proposalId, doc, existing, actor, nowIso)
     title: doc.title
   };
 }
-async function applySupersedeProposal(ctx, proposalId, doc, existing, actor, nowIso) {
+async function applySupersedeProposal(ctx, proposalId, doc, existing, actor, nowIso, ledger) {
+  const memberKind = doc.kind === "memory" ? "memory" : "decision";
   const supersede = existing.supersede ?? {};
   const draftKeepId = typeof supersede.keep_id === "string" ? supersede.keep_id : null;
   const draftRetireId = typeof supersede.retire_id === "string" ? supersede.retire_id : null;
   if (!draftKeepId || !draftRetireId) {
     throw new Error("resolve_proposal: supersede proposal is malformed (missing keep/retire ids)");
   }
-  const { data: memberRows, error: memberReadErr } = await ctx.supabase.from("documents").select("id, account_id, project_id, kind, status, created_at, metadata").eq("account_id", ctx.accountId).in("id", [draftKeepId, draftRetireId]);
+  const { data: memberRows, error: memberReadErr } = await ctx.supabase.from("documents").select("id, account_id, project_id, kind, status, memory_type, created_at, metadata").eq("account_id", ctx.accountId).in("id", [draftKeepId, draftRetireId]);
   if (memberReadErr) {
     throw new Error(`resolve_proposal: supersede member read failed: ${memberReadErr.message}`);
   }
@@ -86136,9 +86480,9 @@ async function applySupersedeProposal(ctx, proposalId, doc, existing, actor, now
   if (!retire || !keeper) {
     for (const m2 of members) {
       const metaStatus = typeof metaOf(m2).status === "string" && metaOf(m2).status ? metaOf(m2).status : "active";
-      if (m2.kind !== "decision" || m2.status === "archived" || metaStatus !== "active") {
+      if (m2.kind !== memberKind || m2.status === "archived" || metaStatus !== "active") {
         throw new Error(
-          "resolve_proposal: supersede pair went stale (member no longer an eligible decision) \u2014 reject this proposal"
+          `resolve_proposal: supersede pair went stale (member no longer an eligible ${memberKind}) \u2014 reject this proposal`
         );
       }
     }
@@ -86153,18 +86497,52 @@ async function applySupersedeProposal(ctx, proposalId, doc, existing, actor, now
     const keepId = cls.basis === "authority" ? cls.currentId : reviewerCurrentId ?? draftKeepId;
     keeper = members.find((m2) => m2.id === keepId);
     retire = otherOf(keeper);
-    const { error: stampErr } = await ctx.supabase.from("documents").update({
-      status: "archived",
-      metadata: {
-        ...metaOf(retire),
-        status: "superseded",
-        superseded_by: keeper.id,
-        superseded_at: nowIso,
-        superseded_reason: "contradiction"
+    if (memberKind === "memory") {
+      const keeperId = keeper.id;
+      const outcome = await transitionDocument(ledger.transitionCtx, {
+        documentId: retire.id,
+        from: "active",
+        to: "superseded",
+        sqlStatus: "archived",
+        actor: ledger.humanActor,
+        reason: "Superseded from the inbox (the two memories disagree)",
+        evidence: { keeper_id: keeperId, draft_id: proposalId },
+        metadataPatch: {
+          superseded_by: keeperId,
+          superseded_at: nowIso,
+          superseded_reason: "contradiction",
+          superseded_via: "inbox"
+        },
+        subject: {
+          kind: retire.kind,
+          status: retire.status,
+          memory_type: retire.memory_type ?? null,
+          metadata: metaOf(retire)
+        }
+      }).catch((e2) => {
+        throw new Error(
+          `resolve_proposal: supersede stamp failed: ${e2 instanceof Error ? e2.message : String(e2)}`
+        );
+      });
+      if (isTransitionRefusal(outcome)) {
+        throw new Error(
+          `resolve_proposal: supersede stamp refused: ${outcome.refused} (${outcome.message})`
+        );
       }
-    }).eq("id", retire.id).eq("account_id", ctx.accountId);
-    if (stampErr) {
-      throw new Error(`resolve_proposal: supersede stamp failed: ${stampErr.message}`);
+    } else {
+      const { error: stampErr } = await ctx.supabase.from("documents").update({
+        status: "archived",
+        metadata: {
+          ...metaOf(retire),
+          status: "superseded",
+          superseded_by: keeper.id,
+          superseded_at: nowIso,
+          superseded_reason: "contradiction"
+        }
+      }).eq("id", retire.id).eq("account_id", ctx.accountId);
+      if (stampErr) {
+        throw new Error(`resolve_proposal: supersede stamp failed: ${stampErr.message}`);
+      }
     }
   }
   const { error: flipErr } = await ctx.supabase.from("documents").update({
@@ -89029,6 +89407,50 @@ function recordLightRecallAfterTool(ctx, name, result, light) {
   }
 }
 
+// packages/mcp-tools/src/updates.ts
+var Args2 = external_exports.object({
+  project_id: external_exports.string().uuid().optional(),
+  days: external_exports.number().int().min(1).max(90).optional(),
+  limit: external_exports.number().int().min(1).max(50).optional()
+}).strict();
+async function listUpdatesTool(ctx, rawArgs) {
+  const args = Args2.parse(rawArgs ?? {});
+  const projectId = args.project_id ?? ctx.projectId ?? null;
+  const since = new Date(Date.now() - (args.days ?? 30) * 864e5).toISOString();
+  const limit2 = args.limit ?? 20;
+  const { data: feeds, error: feedError } = await ctx.supabase.from("update_feeds").select("id,key,account_id,enabled,manifest_version,approved_revision").in("key", ["ai-changes", "model-watch"]).or(`account_id.is.null,account_id.eq.${ctx.accountId}`);
+  if (feedError) throw new Error(`updates unavailable: ${feedError.message}`);
+  const live = (feeds ?? []).filter(
+    (f2) => f2.enabled && f2.approved_revision === f2.manifest_version
+  );
+  const ledger = live.find((f2) => f2.key === "ai-changes" && f2.account_id === null);
+  const watch = live.find((f2) => f2.key === "model-watch" && f2.account_id === ctx.accountId);
+  const read = async (feedId, accountId, project) => {
+    let query = ctx.supabase.from("update_feed_entries").select("id,feed_id,kind,severity,title,summary,details,citations,project_id,published_at").eq("feed_id", feedId).eq("status", "published").gte("published_at", since).order("published_at", { ascending: false }).limit(limit2);
+    query = accountId ? query.eq("account_id", accountId) : query.is("account_id", null);
+    if (project) query = query.eq("project_id", project);
+    const { data, error: error40 } = await query;
+    if (error40) throw new Error(`updates unavailable: ${error40.message}`);
+    return (data ?? []).map((r2) => ({
+      kind: r2.kind,
+      severity: r2.severity,
+      title: r2.title,
+      summary: r2.summary,
+      authority: r2.details?.authority ?? null,
+      monthly_cost_delta_usd: r2.details?.evidence?.monthly_cost_delta_usd ?? null,
+      source: r2.citations?.[0]?.url ?? null,
+      published_at: r2.published_at
+    }));
+  };
+  return {
+    project_id: projectId,
+    // Alerts only exist for projects with Model Watch turned on.
+    project_alerts: watch && projectId ? await read(watch.id, ctx.accountId, projectId) : [],
+    ai_changes: ledger ? await read(ledger.id, null, null) : [],
+    note: 'authority "authoritative" = confirmed from the provider page Memlin acted on; "reported" = read from an official page, not yet confirmed; "community" = news. Never present reported entries as settled.'
+  };
+}
+
 // packages/mcp-tools/src/correct-memory.ts
 function str4(v2) {
   return typeof v2 === "string" && v2.length > 0 ? v2 : null;
@@ -89517,6 +89939,8 @@ async function dispatchTool(ctx, name, args) {
       return resolveProposal(ctx, args);
     case "memlin_list_decisions":
       return listDecisionsTool(ctx, args);
+    case "memlin_updates":
+      return listUpdatesTool(ctx, args);
     case "memlin_explain_decision":
       return explainDecisionTool(ctx, args);
     case "memlin_decide":
@@ -90355,7 +90779,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.1.51";
+  cachedAgentVersion = "0.1.52";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -91695,6 +92119,28 @@ var MemlinApiClient = class {
   async listDecisions(opts = {}) {
     const qs = opts.limit ? `?limit=${encodeURIComponent(String(opts.limit))}` : "";
     return this.request("GET", `/decisions${qs}`, void 0, {
+      accountId: opts.accountId,
+      maxRetries: opts.maxRetries,
+      requestTimeoutMs: opts.requestTimeoutMs
+    });
+  }
+  /** GET /feeds — live update feeds the caller can see, with notable/action unread counts. */
+  async listFeeds(opts = {}) {
+    return this.request("GET", "/feeds", void 0, {
+      accountId: opts.accountId,
+      maxRetries: opts.maxRetries,
+      requestTimeoutMs: opts.requestTimeoutMs
+    });
+  }
+  /** GET /feeds/{key} — one update feed (memlin.feed.v1), snapshot-only. */
+  async getFeed(key2, opts = {}) {
+    const qs = new URLSearchParams();
+    if (opts.project) qs.set("project", opts.project);
+    if (opts.severity) qs.set("severity", opts.severity);
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    const query = qs.toString();
+    const path22 = `/feeds/${encodeURIComponent(key2)}${query ? `?${query}` : ""}`;
+    return this.request("GET", path22, void 0, {
       accountId: opts.accountId,
       maxRetries: opts.maxRetries,
       requestTimeoutMs: opts.requestTimeoutMs
@@ -93820,7 +94266,7 @@ var PLUGIN_RUNTIME_TIMEOUT_MS = 150;
 var VERSION2 = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?$/;
 var HOSTS3 = /* @__PURE__ */ new Set(["cursor", "antigravity", "codex", "claude-code"]);
 function ownVersion() {
-  const version5 = "0.1.51";
+  const version5 = "0.1.52";
   return typeof version5 === "string" && VERSION2.test(version5) ? version5 : null;
 }
 async function reportPluginRuntime(report) {
@@ -94387,7 +94833,7 @@ function readNearestPackageVersion() {
 var cachedAgentVersion2;
 function agentVersion2() {
   if (cachedAgentVersion2 !== void 0) return cachedAgentVersion2;
-  const env = "0.1.51"?.trim();
+  const env = "0.1.52"?.trim();
   cachedAgentVersion2 = env || readNearestPackageVersion();
   return cachedAgentVersion2;
 }

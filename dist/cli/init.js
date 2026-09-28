@@ -8433,6 +8433,139 @@ function estCostUsd(inputTokens, usdPerMTok) {
 var SONNET_BLENDED_USD_PER_MTOK = SONNET_INPUT_USD_PER_MTOK + OUTPUT_MULTIPLIER * SONNET_OUTPUT_USD_PER_MTOK;
 var SAVINGS_USD_PER_TOKEN = estCostUsd(1);
 
+// packages/shared/dist/update-feed.js
+var FEED_FORMAT = "memlin.feed.v1";
+var FeedSeveritySchema = external_exports.enum(["info", "notable", "action"]);
+var FeedKeySchema = external_exports.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/);
+var FeedCitationSchema = external_exports.object({
+  url: external_exports.string().url().max(2048).refine((value) => value.startsWith("https://"), "Citations must be https"),
+  title: external_exports.string().trim().min(1).max(300)
+}).strict();
+var modelId = external_exports.string().trim().min(1).max(240);
+var perMTok = external_exports.number().nonnegative().max(1e5);
+var PricesSchema = external_exports.object({
+  input: perMTok.nullable(),
+  output: perMTok.nullable(),
+  cache_read: perMTok.nullable().optional(),
+  cache_write: perMTok.nullable().optional()
+}).strict();
+var AiChangeAuthoritySchema = external_exports.enum(["authoritative", "reported", "community"]);
+var AiChangeDetailsSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({
+    kind: external_exports.literal("price_change"),
+    authority: AiChangeAuthoritySchema,
+    vendor: external_exports.string().max(40),
+    model: modelId,
+    before: PricesSchema.nullable(),
+    after: PricesSchema,
+    effective_at: external_exports.string().datetime().nullable()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("new_model"),
+    authority: AiChangeAuthoritySchema,
+    vendor: external_exports.string().max(40),
+    model: modelId,
+    family: external_exports.string().max(80).nullable(),
+    predecessor: modelId.nullable(),
+    prices: PricesSchema.nullable()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.enum(["deprecation", "retirement"]),
+    authority: AiChangeAuthoritySchema,
+    vendor: external_exports.string().max(40),
+    model: modelId,
+    retire_at: external_exports.string().datetime().nullable(),
+    replacement: modelId.nullable()
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.enum(["tool_release", "breaking_change"]),
+    authority: AiChangeAuthoritySchema,
+    vendor: external_exports.string().max(40),
+    tool: external_exports.string().regex(/^[a-z0-9][a-z0-9:@/._-]{1,80}$/),
+    version: external_exports.string().max(80),
+    breaking: external_exports.array(external_exports.string().max(300)).max(10)
+  }).strict(),
+  external_exports.object({
+    kind: external_exports.literal("news"),
+    authority: AiChangeAuthoritySchema,
+    vendor: external_exports.string().max(40).nullable()
+  }).strict()
+]);
+var ModelWatchAlertDetailsSchema = external_exports.object({
+  kind: external_exports.enum([
+    "price_change",
+    "new_model",
+    "deprecation",
+    "retirement",
+    "tool_release",
+    "breaking_change",
+    "news"
+  ]),
+  change_entry_id: external_exports.string().uuid(),
+  evidence: external_exports.object({
+    models_used: external_exports.array(external_exports.object({ model: modelId, tokens_30d: external_exports.number().int().nonnegative() }).strict()).max(20),
+    monthly_cost_delta_usd: external_exports.number().nullable(),
+    files: external_exports.array(external_exports.object({ repo: external_exports.string().max(200), path: external_exports.string().max(500) }).strict()).max(50),
+    workflows: external_exports.array(external_exports.object({ id: external_exports.string().uuid(), title: external_exports.string().max(240) }).strict()).max(20),
+    host_versions: external_exports.array(external_exports.object({ tool: external_exports.string().max(80), version: external_exports.string().max(80) }).strict()).max(10)
+  }).strict()
+}).strict();
+var FeedEntryInputSchema = external_exports.object({
+  dedupe_key: external_exports.string().trim().min(1).max(300),
+  kind: external_exports.string().regex(/^[a-z][a-z_]{1,39}$/),
+  severity: FeedSeveritySchema,
+  title: external_exports.string().trim().min(1).max(200),
+  summary: external_exports.string().max(600).default(""),
+  body_md: external_exports.string().max(2e3).default(""),
+  citations: external_exports.array(FeedCitationSchema).min(1).max(20),
+  details: external_exports.record(external_exports.string(), external_exports.unknown()).default({}),
+  subjects: external_exports.record(external_exports.string(), external_exports.unknown()).default({}),
+  project_id: external_exports.string().uuid().nullable().default(null),
+  receipt: external_exports.record(external_exports.string(), external_exports.unknown()).optional()
+}).strict();
+var FeedEntrySchema = external_exports.object({
+  id: external_exports.string().uuid(),
+  kind: external_exports.string(),
+  severity: FeedSeveritySchema,
+  title: external_exports.string(),
+  summary: external_exports.string(),
+  body_md: external_exports.string(),
+  citations: external_exports.array(FeedCitationSchema),
+  details: external_exports.record(external_exports.string(), external_exports.unknown()),
+  subjects: external_exports.record(external_exports.string(), external_exports.unknown()),
+  project_id: external_exports.string().uuid().nullable(),
+  producer: external_exports.enum(["workflow", "lane"]),
+  content_sha256: external_exports.string(),
+  supersedes_id: external_exports.string().uuid().nullable(),
+  published_at: external_exports.string(),
+  unread: external_exports.boolean()
+}).strict();
+var FeedSummarySchema = external_exports.object({
+  key: FeedKeySchema,
+  title: external_exports.string(),
+  audience: external_exports.enum(["global", "account"]),
+  entry_schema: external_exports.string(),
+  manifest_version: external_exports.number().int().positive(),
+  unread: external_exports.number().int().nonnegative()
+}).strict();
+var FeedResponseSchema = external_exports.object({
+  format: external_exports.literal(FEED_FORMAT),
+  feed: FeedSummarySchema,
+  entries: external_exports.array(FeedEntrySchema),
+  next_since: external_exports.string().nullable(),
+  generated_at: external_exports.string()
+}).strict();
+
+// packages/shared/dist/job-dispatch.js
+var JOB_KINDS = ["workflow_run", "model_watch_match", "model_watch_digest"];
+var JobMessageSchema = external_exports.object({
+  version: external_exports.literal(1),
+  kind: external_exports.enum(JOB_KINDS),
+  job_key: external_exports.string().min(1).max(200),
+  account_id: external_exports.string().uuid(),
+  delivery: external_exports.number().int().positive()
+}).strict();
+
 // packages/shared/dist/feature-discovery.js
 function featureDiscoverySystem({
   projectKind = "code",
@@ -11421,6 +11554,7 @@ var ThoughtHandoffReceiptV2Schema = external_exports.object({
 var OPS_DIAGNOSE_SEV2_AFTER_MS = 15 * 6e4;
 
 // packages/shared/dist/entitlements.js
+var FREE_KIT = ["thoughts.personal"];
 var COORDINATION_SELF = [
   "coordination.work_ledger",
   "coordination.handoffs",
@@ -11429,6 +11563,8 @@ var COORDINATION_SELF = [
   "coordination.fleet_dashboard"
 ];
 var INDIVIDUAL_KIT = [
+  ...FREE_KIT,
+  "thoughts.maps",
   ...COORDINATION_SELF,
   "roles",
   "connectors",
@@ -11448,10 +11584,11 @@ var ENTERPRISE_KIT = [
   "governance.byoc"
 ];
 var ENTITLEMENTS_BY_TIER = {
-  // Free: memory only, BYO key (AI gated separately by AI_QUOTA_BY_TIER.free = 0).
-  free: /* @__PURE__ */ new Set(),
-  // Starter: low-cost "memory + a little funded AI", still no feature gates.
-  starter: /* @__PURE__ */ new Set(),
+  // Free: Thoughts (capped by THOUGHTS_LIMITS_BY_TIER) + memory. AI is funded
+  // separately — see the signup credit grant, not AI_QUOTA_BY_TIER.
+  free: new Set(FREE_KIT),
+  // Starter: low-cost "memory + a little funded AI"; same feature set as Free.
+  starter: new Set(FREE_KIT),
   // Pro = Personal Pro.
   pro: new Set(INDIVIDUAL_KIT),
   team: new Set(TEAM_KIT),
@@ -23599,7 +23736,12 @@ var ResearchCollectionSourceSchema = external_exports.object({
     }
   }, "Use a public HTTPS feed URL"),
   label: external_exports.string().trim().min(1).max(120),
-  category: external_exports.enum(["official", "community"])
+  category: external_exports.enum(["official", "community"]),
+  /** Omitted: inferred (a GitHub releases.atom URL reads the latest stable
+   * release; anything else is RSS/Atom). `github_releases` reads the ten
+   * most recent stable releases; `page` tracks a published page's sections
+   * and reports new or changed ones (needs a feed Save to record them). */
+  format: external_exports.enum(["feed", "github_releases", "page"]).optional()
 }).strict();
 var ResearchCollectionSchema = external_exports.object({
   topics: external_exports.array(external_exports.string().trim().min(2).max(100)).min(1).max(10),
